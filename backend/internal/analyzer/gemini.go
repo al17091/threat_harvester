@@ -225,3 +225,130 @@ URL: %s
 		AnalyzedAt:           time.Now().UTC(),
 	}, nil
 }
+
+// GenerateSearchQueries dynamically expands a natural language threat monitoring directive into focused search queries.
+func (a *GeminiThreatAnalyzer) GenerateSearchQueries(ctx context.Context, directive string, targetType string, count int) ([]string, error) {
+	directive = strings.TrimSpace(directive)
+	if directive == "" {
+		return nil, fmt.Errorf("directive cannot be empty")
+	}
+
+	cfg := config.GetSettings().GetConfig()
+	apiKey := cfg.AI.GeminiAPIKey
+	model := cfg.AI.GeminiModel
+	if model == "" {
+		model = "gemini-2.5-flash"
+	}
+	if apiKey == "" {
+		log.Printf("[Analyzer] Gemini API key not configured. Returning directive as literal query.")
+		return []string{directive}, nil
+	}
+
+	if count <= 0 {
+		count = 3
+	}
+	if count > 5 {
+		count = 5
+	}
+
+	currentDate := time.Now().UTC().Format("2006-01-02")
+	targetDesc := "Google Web Search (CTI breach reports, blogs, security vendor alerts, official government/IPA advisories)"
+	guidance := `
+- Mix targeted Japanese threat-hunting terms with English keywords.
+- Include precise incident terms (e.g. "サイバー攻撃", "ランサムウェア", "不正アクセス", "被害", "漏洩", "調査中", "身代金").
+- For vulnerability or technical topics, include "PoC", "悪用", "CVE", "アドバイザリ".
+- Avoid single words or over-generic phrases; construct 3 to 6 word targeted keyword search phrases.`
+
+	if targetType == "x_monitor" {
+		targetDesc = "X (Twitter) search queries to discover breaking threat disclosures from security researchers, CERTs, and tracking bots"
+		guidance = `
+- Include X/Twitter operators where appropriate (e.g. "site:x.com" or "site:twitter.com").
+- You can include reputable researcher handles (e.g. "from:piyokango", "from:jpcert", "from:FalconFeedsio", "from:ransomfeed", "from:DarkTracer_Int") or combine with Japanese breach terms.
+- Focus on breaking leak announcements, initial access disclosures, and ransomware victims.`
+	}
+
+	prompt := fmt.Sprintf(`Today's date is %s.
+You are a senior Cyber Threat Intelligence (CTI) analyst monitoring cybersecurity threats targeting Japan and critical global threats relevant to Japanese defenders.
+
+The user has specified the following threat monitoring directive / focus instruction:
+"%s"
+
+Target platform: %s
+
+Guidelines for query generation:
+%s
+- Generate exactly %d diverse, complementary search queries that together comprehensively cover this directive.
+- Queries must be optimized to discover recent, active 2026 events and freshly reported threat disclosures.
+
+Return ONLY a JSON array of %d string queries, with no markdown code fences or extra text.
+Example:
+["query 1", "query 2", "query 3"]
+`, currentDate, directive, targetDesc, guidance, count, count)
+
+	reqPayload := geminiRequest{
+		Contents: []geminiContent{
+			{
+				Parts: []geminiPart{
+					{Text: prompt},
+				},
+			},
+		},
+		GenerationConfig: &geminiGenConfig{
+			ResponseMimeType: "application/json",
+		},
+	}
+
+	bodyBytes, err := json.Marshal(reqPayload)
+	if err != nil {
+		return []string{directive}, err
+	}
+
+	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return []string{directive}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		log.Printf("[Analyzer] GenerateSearchQueries HTTP request failed: %v", err)
+		return []string{directive}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[Analyzer] GenerateSearchQueries returned status %d: %s", resp.StatusCode, string(respBody))
+		return []string{directive}, nil
+	}
+
+	var geminiResp geminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil || len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return []string{directive}, nil
+	}
+
+	rawJSONText := geminiResp.Candidates[0].Content.Parts[0].Text
+	rawJSONText = strings.TrimPrefix(rawJSONText, "```json")
+	rawJSONText = strings.TrimPrefix(rawJSONText, "```")
+	rawJSONText = strings.TrimSuffix(rawJSONText, "```")
+	rawJSONText = strings.TrimSpace(rawJSONText)
+
+	var queries []string
+	if err := json.Unmarshal([]byte(rawJSONText), &queries); err != nil {
+		log.Printf("[Analyzer] Failed to parse generated queries JSON: %v (raw: %s)", err, rawJSONText)
+		return []string{directive}, nil
+	}
+
+	var cleanQueries []string
+	for _, q := range queries {
+		q = strings.TrimSpace(q)
+		if q != "" {
+			cleanQueries = append(cleanQueries, q)
+		}
+	}
+	if len(cleanQueries) == 0 {
+		return []string{directive}, nil
+	}
+	return cleanQueries, nil
+}

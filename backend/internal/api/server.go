@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"github.com/dapt/information_harvester/backend/internal/analyzer"
 	"github.com/dapt/information_harvester/backend/internal/config"
 	"github.com/dapt/information_harvester/backend/internal/harvesters"
 	"github.com/dapt/information_harvester/backend/internal/logger"
@@ -89,6 +91,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
 		r.Post("/test/notify", s.handleTestNotify)
 		r.Post("/test/notion", s.handleTestNotion)
+		r.Post("/ai/generate-queries", s.handleGenerateQueries)
 	})
 }
 
@@ -663,5 +666,38 @@ func (s *Server) handleTestNotion(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{
 		"status":  "created",
 		"page_id": pageID,
+	})
+}
+
+func (s *Server) handleGenerateQueries(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Directive  string `json:"directive"`
+		TargetType string `json:"target_type"`
+		Count      int    `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Directive) == "" {
+		errorResponse(w, http.StatusBadRequest, "Directive is required")
+		return
+	}
+	if req.Count <= 0 {
+		req.Count = 3
+	}
+
+	az := analyzer.NewGeminiThreatAnalyzer()
+	queries, err := az.GenerateSearchQueries(r.Context(), req.Directive, req.TargetType, req.Count)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to generate queries: %v", err))
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":      "ok",
+		"directive":   req.Directive,
+		"target_type": req.TargetType,
+		"queries":     queries,
 	})
 }

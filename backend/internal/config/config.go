@@ -51,8 +51,10 @@ type DarkwebSourceConfig struct {
 }
 
 type QuerySourceConfig struct {
-	Query   string `yaml:"query" json:"query"`
-	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Name      string `yaml:"name,omitempty" json:"name,omitempty"`
+	Directive string `yaml:"directive,omitempty" json:"directive,omitempty"`
+	Query     string `yaml:"query,omitempty" json:"query,omitempty"`
+	Enabled   bool   `yaml:"enabled" json:"enabled"`
 }
 
 type SourcesConfig struct {
@@ -385,22 +387,30 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 			Enabled: true,
 		})
 	case "x_monitor":
+		directive, _ := data["directive"].(string)
 		q, _ := data["query"].(string)
-		if q == "" {
-			return fmt.Errorf("query is required")
+		name, _ := data["name"].(string)
+		if strings.TrimSpace(directive) == "" && strings.TrimSpace(q) == "" {
+			return fmt.Errorf("directive or query is required")
 		}
 		s.Config.Sources.XMonitor = append(s.Config.Sources.XMonitor, QuerySourceConfig{
-			Query:   q,
-			Enabled: true,
+			Name:      strings.TrimSpace(name),
+			Directive: strings.TrimSpace(directive),
+			Query:     strings.TrimSpace(q),
+			Enabled:   true,
 		})
 	case "web_search":
+		directive, _ := data["directive"].(string)
 		q, _ := data["query"].(string)
-		if q == "" {
-			return fmt.Errorf("query is required")
+		name, _ := data["name"].(string)
+		if strings.TrimSpace(directive) == "" && strings.TrimSpace(q) == "" {
+			return fmt.Errorf("directive or query is required")
 		}
 		s.Config.Sources.WebSearch = append(s.Config.Sources.WebSearch, QuerySourceConfig{
-			Query:   q,
-			Enabled: true,
+			Name:      strings.TrimSpace(name),
+			Directive: strings.TrimSpace(directive),
+			Query:     strings.TrimSpace(q),
+			Enabled:   true,
 		})
 	default:
 		return fmt.Errorf("unsupported source type: %s", sourceType)
@@ -470,12 +480,19 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 
 	case "x_monitor":
 		for i := range s.Config.Sources.XMonitor {
-			if s.Config.Sources.XMonitor[i].Query == identifier {
-				if q, ok := data["query"].(string); ok && strings.TrimSpace(q) != "" {
-					s.Config.Sources.XMonitor[i].Query = strings.TrimSpace(q)
+			item := &s.Config.Sources.XMonitor[i]
+			if matchQuerySource(item, identifier) {
+				if d, ok := data["directive"].(string); ok {
+					item.Directive = strings.TrimSpace(d)
+				}
+				if q, ok := data["query"].(string); ok {
+					item.Query = strings.TrimSpace(q)
+				}
+				if n, ok := data["name"].(string); ok {
+					item.Name = strings.TrimSpace(n)
 				}
 				if en, ok := data["enabled"].(bool); ok {
-					s.Config.Sources.XMonitor[i].Enabled = en
+					item.Enabled = en
 				}
 				return nil
 			}
@@ -484,12 +501,19 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 
 	case "web_search":
 		for i := range s.Config.Sources.WebSearch {
-			if s.Config.Sources.WebSearch[i].Query == identifier {
-				if q, ok := data["query"].(string); ok && strings.TrimSpace(q) != "" {
-					s.Config.Sources.WebSearch[i].Query = strings.TrimSpace(q)
+			item := &s.Config.Sources.WebSearch[i]
+			if matchQuerySource(item, identifier) {
+				if d, ok := data["directive"].(string); ok {
+					item.Directive = strings.TrimSpace(d)
+				}
+				if q, ok := data["query"].(string); ok {
+					item.Query = strings.TrimSpace(q)
+				}
+				if n, ok := data["name"].(string); ok {
+					item.Name = strings.TrimSpace(n)
 				}
 				if en, ok := data["enabled"].(bool); ok {
-					s.Config.Sources.WebSearch[i].Enabled = en
+					item.Enabled = en
 				}
 				return nil
 			}
@@ -499,6 +523,10 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 	default:
 		return fmt.Errorf("unsupported source type: %s", sourceType)
 	}
+}
+
+func matchQuerySource(item *QuerySourceConfig, id string) bool {
+	return item.Query == id || item.Directive == id || (item.Name != "" && item.Name == id)
 }
 
 func (s *SettingsManager) ToggleSource(sourceType, identifier string, enabled bool) bool {
@@ -530,14 +558,14 @@ func (s *SettingsManager) ToggleSource(sourceType, identifier string, enabled bo
 		}
 	case "x_monitor":
 		for i := range s.Config.Sources.XMonitor {
-			if s.Config.Sources.XMonitor[i].Query == identifier {
+			if matchQuerySource(&s.Config.Sources.XMonitor[i], identifier) {
 				s.Config.Sources.XMonitor[i].Enabled = enabled
 				return true
 			}
 		}
 	case "web_search":
 		for i := range s.Config.Sources.WebSearch {
-			if s.Config.Sources.WebSearch[i].Query == identifier {
+			if matchQuerySource(&s.Config.Sources.WebSearch[i], identifier) {
 				s.Config.Sources.WebSearch[i].Enabled = enabled
 				return true
 			}
@@ -586,7 +614,7 @@ func (s *SettingsManager) DeleteSource(sourceType, identifier string) bool {
 		orig := len(s.Config.Sources.XMonitor)
 		filtered := make([]QuerySourceConfig, 0, orig)
 		for _, q := range s.Config.Sources.XMonitor {
-			if q.Query != identifier {
+			if !matchQuerySource(&q, identifier) {
 				filtered = append(filtered, q)
 			}
 		}
@@ -596,7 +624,7 @@ func (s *SettingsManager) DeleteSource(sourceType, identifier string) bool {
 		orig := len(s.Config.Sources.WebSearch)
 		filtered := make([]QuerySourceConfig, 0, orig)
 		for _, q := range s.Config.Sources.WebSearch {
-			if q.Query != identifier {
+			if !matchQuerySource(&q, identifier) {
 				filtered = append(filtered, q)
 			}
 		}

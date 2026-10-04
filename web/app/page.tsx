@@ -34,6 +34,7 @@ import {
   Loader2,
   Pencil,
   Terminal,
+  Sparkles,
 } from "lucide-react";
 import { TerminalConsole } from "./components/TerminalConsole";
 
@@ -126,8 +127,8 @@ interface ConfigData {
     vendor_rss?: Array<{ name: string; url: string; category?: string; enabled: boolean }>;
     telegram?: Array<{ channel: string; enabled: boolean }>;
     darkweb_onion?: Array<{ name: string; url: string; type?: string; enabled: boolean }>;
-    x_monitor?: Array<{ query: string; enabled: boolean }>;
-    web_search?: Array<{ query: string; enabled: boolean }>;
+    x_monitor?: Array<{ name?: string; directive?: string; query: string; enabled: boolean }>;
+    web_search?: Array<{ name?: string; directive?: string; query: string; enabled: boolean }>;
   };
 }
 
@@ -160,23 +161,70 @@ export default function DashboardPage() {
   const [addModal, setAddModal] = useState<{
     visible: boolean;
     type: string;
-    form: { name: string; url: string; channel: string; query: string; type: string };
+    form: {
+      name: string;
+      url: string;
+      channel: string;
+      directive?: string;
+      query: string;
+      type: string;
+      mode?: "directive" | "query";
+    };
   }>({
     visible: false,
     type: "vendor_rss",
-    form: { name: "", url: "", channel: "", query: "", type: "rss" },
+    form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
   });
   const [editModal, setEditModal] = useState<{
     visible: boolean;
     type: string;
     originalId: string;
-    form: { name: string; url: string; category: string; channel: string; query: string; type: string };
+    form: {
+      name: string;
+      url: string;
+      category?: string;
+      channel: string;
+      directive?: string;
+      query: string;
+      type: string;
+      mode?: "directive" | "query";
+    };
   }>({
     visible: false,
     type: "vendor_rss",
     originalId: "",
-    form: { name: "", url: "", category: "general", channel: "", query: "", type: "rss" },
+    form: { name: "", url: "", category: "general", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
   });
+  const [previewQueries, setPreviewQueries] = useState<string[]>([]);
+  const [generatingQueries, setGeneratingQueries] = useState<boolean>(false);
+
+  const handlePreviewAIQueries = async (directive: string, targetType: string) => {
+    if (!directive.trim()) {
+      showToast("注視指示（文章）を入力してください", "error");
+      return;
+    }
+    setGeneratingQueries(true);
+    try {
+      const res = await fetch("/api/ai/generate-queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ directive, target_type: targetType, count: 3 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewQueries(data.queries || []);
+        showToast(`AIが ${data.queries?.length || 0} 件の調査クエリを生成しました`);
+      } else {
+        const err = await res.json();
+        showToast(err.detail || "クエリ生成に失敗しました", "error");
+      }
+    } catch (e) {
+      showToast("クエリ生成中に通信エラーが発生しました", "error");
+    } finally {
+      setGeneratingQueries(false);
+    }
+  };
+
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: "info" | "error" }>({
     visible: false,
     message: "",
@@ -374,7 +422,14 @@ export default function DashboardPage() {
     if (type === "vendor_rss") data = { name: addModal.form.name, url: addModal.form.url, enabled: true };
     if (type === "telegram") data = { channel: addModal.form.channel, enabled: true };
     if (type === "darkweb_onion") data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type, enabled: true };
-    if (type === "x_monitor" || type === "web_search") data = { query: addModal.form.query, enabled: true };
+    if (type === "x_monitor" || type === "web_search") {
+      data = {
+        name: addModal.form.name,
+        directive: addModal.form.mode === "directive" ? addModal.form.directive : "",
+        query: addModal.form.mode === "query" ? addModal.form.query : addModal.form.query,
+        enabled: true,
+      };
+    }
 
     try {
       const res = await fetch("/api/config/sources", {
@@ -406,7 +461,11 @@ export default function DashboardPage() {
     } else if (type === "darkweb_onion") {
       data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type };
     } else if (type === "x_monitor" || type === "web_search") {
-      data = { query: editModal.form.query };
+      data = {
+        name: editModal.form.name,
+        directive: editModal.form.mode === "directive" ? editModal.form.directive : "",
+        query: editModal.form.mode === "query" ? editModal.form.query : editModal.form.query,
+      };
     }
 
     try {
@@ -1333,69 +1392,111 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
                     <Hash className="w-5 h-5 text-sky-400" />
-                    <h3 className="font-bold text-white text-base">X (Twitter) Grounded Search Queries</h3>
+                    <h3 className="font-bold text-white text-base">X (Twitter) Grounded Threat Search & Directives</h3>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400 font-mono">
                       {config?.sources?.x_monitor?.length ?? 0}
                     </span>
                   </div>
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      setPreviewQueries([]);
                       setAddModal({
                         visible: true,
                         type: "x_monitor",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss" },
-                      })
-                    }
+                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+                      });
+                    }}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
                   >
-                    + Add Query
+                    + Add Directive / Query
                   </button>
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.x_monitor?.map((xm) => (
-                    <div key={xm.query} className="py-3 flex items-center justify-between">
-                      <span className="text-sm font-mono text-slate-300">{xm.query}</span>
-                      <div className="flex items-center space-x-3">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={xm.enabled}
-                            onChange={(e) => handleToggleSource("x_monitor", xm.query, e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
-                        <button
-                          onClick={() =>
-                            setEditModal({
-                              visible: true,
-                              type: "x_monitor",
-                              originalId: xm.query,
-                              form: {
-                                name: "",
-                                url: "",
-                                category: "",
-                                channel: "",
-                                query: xm.query,
-                                type: "",
-                              },
-                            })
-                          }
-                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
-                          title="Edit Query"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSource("x_monitor", xm.query)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                  {config?.sources?.x_monitor?.map((xm, idx) => {
+                    const identifier = xm.directive || xm.query || xm.name || `x_${idx}`;
+                    const isDirective = Boolean(xm.directive);
+                    return (
+                      <div key={identifier} className="py-3 flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-1">
+                            {isDirective ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-950 text-sky-300 border border-sky-800 flex items-center">
+                                <Sparkles className="w-3 h-3 mr-1 text-sky-400" />
+                                AI注視指示
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 font-mono">
+                                固定クエリ
+                              </span>
+                            )}
+                            {xm.name && (
+                              <span className="font-semibold text-xs text-slate-200 truncate">
+                                {xm.name}
+                              </span>
+                            )}
+                          </div>
+                          {isDirective ? (
+                            <p className="text-xs text-slate-300 leading-relaxed font-sans break-words">
+                              {xm.directive}
+                            </p>
+                          ) : (
+                            <p className="text-xs font-mono text-slate-300 break-all">
+                              {xm.query}
+                            </p>
+                          )}
+                          {isDirective && xm.query && (
+                            <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
+                              固定補助: {xm.query}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center space-x-3 shrink-0 pt-0.5">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={xm.enabled}
+                              onChange={(e) => handleToggleSource("x_monitor", identifier, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() => {
+                              setPreviewQueries([]);
+                              setEditModal({
+                                visible: true,
+                                type: "x_monitor",
+                                originalId: identifier,
+                                form: {
+                                  name: xm.name || "",
+                                  url: "",
+                                  category: "",
+                                  channel: "",
+                                  directive: xm.directive || "",
+                                  query: xm.query || "",
+                                  type: "",
+                                  mode: xm.directive ? "directive" : "query",
+                                },
+                              });
+                            }}
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("x_monitor", identifier)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1404,69 +1505,111 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
                     <Globe className="w-5 h-5 text-emerald-400" />
-                    <h3 className="font-bold text-white text-base">Gemini Web Search Queries</h3>
+                    <h3 className="font-bold text-white text-base">Gemini Web Search Threat Hunting Directives</h3>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400 font-mono">
                       {config?.sources?.web_search?.length ?? 0}
                     </span>
                   </div>
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      setPreviewQueries([]);
                       setAddModal({
                         visible: true,
                         type: "web_search",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss" },
-                      })
-                    }
+                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+                      });
+                    }}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
                   >
-                    + Add Query
+                    + Add Directive / Query
                   </button>
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.web_search?.map((ws) => (
-                    <div key={ws.query} className="py-3 flex items-center justify-between">
-                      <span className="text-sm font-mono text-slate-300">{ws.query}</span>
-                      <div className="flex items-center space-x-3">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={ws.enabled}
-                            onChange={(e) => handleToggleSource("web_search", ws.query, e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
-                        <button
-                          onClick={() =>
-                            setEditModal({
-                              visible: true,
-                              type: "web_search",
-                              originalId: ws.query,
-                              form: {
-                                name: "",
-                                url: "",
-                                category: "",
-                                channel: "",
-                                query: ws.query,
-                                type: "",
-                              },
-                            })
-                          }
-                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
-                          title="Edit Query"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSource("web_search", ws.query)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                  {config?.sources?.web_search?.map((ws, idx) => {
+                    const identifier = ws.directive || ws.query || ws.name || `ws_${idx}`;
+                    const isDirective = Boolean(ws.directive);
+                    return (
+                      <div key={identifier} className="py-3 flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-2 mb-1">
+                            {isDirective ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center">
+                                <Sparkles className="w-3 h-3 mr-1 text-emerald-400" />
+                                AI注視指示
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 font-mono">
+                                固定クエリ
+                              </span>
+                            )}
+                            {ws.name && (
+                              <span className="font-semibold text-xs text-slate-200 truncate">
+                                {ws.name}
+                              </span>
+                            )}
+                          </div>
+                          {isDirective ? (
+                            <p className="text-xs text-slate-300 leading-relaxed font-sans break-words">
+                              {ws.directive}
+                            </p>
+                          ) : (
+                            <p className="text-xs font-mono text-slate-300 break-all">
+                              {ws.query}
+                            </p>
+                          )}
+                          {isDirective && ws.query && (
+                            <div className="text-[11px] font-mono text-slate-500 mt-1 truncate">
+                              固定補助: {ws.query}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center space-x-3 shrink-0 pt-0.5">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={ws.enabled}
+                              onChange={(e) => handleToggleSource("web_search", identifier, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() => {
+                              setPreviewQueries([]);
+                              setEditModal({
+                                visible: true,
+                                type: "web_search",
+                                originalId: identifier,
+                                form: {
+                                  name: ws.name || "",
+                                  url: "",
+                                  category: "",
+                                  channel: "",
+                                  directive: ws.directive || "",
+                                  query: ws.query || "",
+                                  type: "",
+                                  mode: ws.directive ? "directive" : "query",
+                                },
+                              });
+                            }}
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("web_search", identifier)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1928,15 +2071,116 @@ export default function DashboardPage() {
               )}
 
               {(addModal.type === "x_monitor" || addModal.type === "web_search") && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Search Query</label>
-                  <input
-                    type="text"
-                    value={addModal.form.query}
-                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, query: e.target.value } })}
-                    placeholder="e.g. ransomware breach victim site:x.com"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
+                <div className="space-y-3">
+                  {/* Mode Selector */}
+                  <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setAddModal({ ...addModal, form: { ...addModal.form, mode: "directive" } })}
+                      className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                        addModal.form.mode === "directive"
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>AI注視指示 (自然言語)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAddModal({ ...addModal, form: { ...addModal.form, mode: "query" } })}
+                      className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                        addModal.form.mode === "query"
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>固定クエリ</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">
+                      テーマ名 (管理用・任意)
+                    </label>
+                    <input
+                      type="text"
+                      value={addModal.form.name}
+                      onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
+                      placeholder="例: 重要インフラ・サプライチェーン侵害"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600"
+                    />
+                  </div>
+
+                  {addModal.form.mode === "directive" ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-400">
+                          AIへの注視指示・調査方針 (文章で入力)
+                        </label>
+                        <span className="text-[11px] text-cyan-400 font-mono">Gemini Dynamic Hunting</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={addModal.form.directive || ""}
+                        onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, directive: e.target.value } })}
+                        placeholder="例: 日本国内の医療機関や製薬企業を標的としたランサムウェア被害やシステム停止、二重脅迫の最新動向を注視"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
+                      />
+
+                      <div className="mt-2 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewAIQueries(addModal.form.directive || "", addModal.type)}
+                          disabled={generatingQueries || !addModal.form.directive?.trim()}
+                          className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition disabled:opacity-50"
+                        >
+                          {generatingQueries ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>AIクエリ生成中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>AIクエリ生成テスト</span>
+                            </>
+                          )}
+                        </button>
+                        <span className="text-[11px] text-slate-500">
+                          巡回時にも自動生成されます
+                        </span>
+                      </div>
+
+                      {previewQueries.length > 0 && (
+                        <div className="mt-2.5 p-2.5 rounded-lg bg-slate-950 border border-cyan-900/60 space-y-1.5">
+                          <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">
+                            AIが生成した調査クエリ例 ({previewQueries.length}件):
+                          </div>
+                          {previewQueries.map((pq, i) => (
+                            <div key={i} className="text-xs font-mono text-slate-300 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
+                              <span className="text-cyan-500 text-[10px]">#{i + 1}</span>
+                              <span className="truncate">{pq}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">
+                        固定検索クエリ
+                      </label>
+                      <input
+                        type="text"
+                        value={addModal.form.query}
+                        onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, query: e.target.value } })}
+                        placeholder="例: (from:piyokango OR from:jpcert) site:x.com"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm font-mono text-slate-100 placeholder-slate-600"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2052,15 +2296,116 @@ export default function DashboardPage() {
               )}
 
               {(editModal.type === "x_monitor" || editModal.type === "web_search") && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Search Query</label>
-                  <input
-                    type="text"
-                    value={editModal.form.query}
-                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, query: e.target.value } })}
-                    placeholder="e.g. ransomware breach victim site:x.com"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
+                <div className="space-y-3">
+                  {/* Mode Selector */}
+                  <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setEditModal({ ...editModal, form: { ...editModal.form, mode: "directive" } })}
+                      className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                        editModal.form.mode === "directive"
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>AI注視指示 (自然言語)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditModal({ ...editModal, form: { ...editModal.form, mode: "query" } })}
+                      className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                        editModal.form.mode === "query"
+                          ? "bg-cyan-600 text-white shadow-sm"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>固定クエリ</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">
+                      テーマ名 (管理用・任意)
+                    </label>
+                    <input
+                      type="text"
+                      value={editModal.form.name}
+                      onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                      placeholder="例: 重要インフラ・サプライチェーン侵害"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600"
+                    />
+                  </div>
+
+                  {editModal.form.mode === "directive" ? (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-400">
+                          AIへの注視指示・調査方針 (文章で入力)
+                        </label>
+                        <span className="text-[11px] text-cyan-400 font-mono">Gemini Dynamic Hunting</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={editModal.form.directive || ""}
+                        onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, directive: e.target.value } })}
+                        placeholder="例: 日本国内の医療機関や製薬企業を標的としたランサムウェア被害やシステム停止、二重脅迫の最新動向を注視"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
+                      />
+
+                      <div className="mt-2 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewAIQueries(editModal.form.directive || "", editModal.type)}
+                          disabled={generatingQueries || !editModal.form.directive?.trim()}
+                          className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition disabled:opacity-50"
+                        >
+                          {generatingQueries ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>AIクエリ生成中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>AIクエリ生成テスト</span>
+                            </>
+                          )}
+                        </button>
+                        <span className="text-[11px] text-slate-500">
+                          巡回時にも自動生成されます
+                        </span>
+                      </div>
+
+                      {previewQueries.length > 0 && (
+                        <div className="mt-2.5 p-2.5 rounded-lg bg-slate-950 border border-cyan-900/60 space-y-1.5">
+                          <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">
+                            AIが生成した調査クエリ例 ({previewQueries.length}件):
+                          </div>
+                          {previewQueries.map((pq, i) => (
+                            <div key={i} className="text-xs font-mono text-slate-300 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
+                              <span className="text-cyan-500 text-[10px]">#{i + 1}</span>
+                              <span className="truncate">{pq}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">
+                        固定検索クエリ
+                      </label>
+                      <input
+                        type="text"
+                        value={editModal.form.query}
+                        onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, query: e.target.value } })}
+                        placeholder="例: (from:piyokango OR from:jpcert) site:x.com"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm font-mono text-slate-100 placeholder-slate-600"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>

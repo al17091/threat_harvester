@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dapt/information_harvester/backend/internal/analyzer"
 	"github.com/dapt/information_harvester/backend/internal/config"
 	"github.com/dapt/information_harvester/backend/internal/models"
 )
 
 type XMonitorHarvester struct {
-	client *http.Client
+	client   *http.Client
+	analyzer *analyzer.GeminiThreatAnalyzer
 }
 
 func NewXMonitorHarvester() *XMonitorHarvester {
@@ -24,6 +26,7 @@ func NewXMonitorHarvester() *XMonitorHarvester {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		analyzer: analyzer.NewGeminiThreatAnalyzer(),
 	}
 }
 
@@ -55,8 +58,39 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 			continue
 		}
 
-		query := qCfg.Query
-		log.Printf("[XMonitor] Running Gemini Grounded Search for X: %s", query)
+		var jobs []searchJob
+		directive := strings.TrimSpace(qCfg.Directive)
+		displayName := strings.TrimSpace(qCfg.Name)
+
+		if directive != "" {
+			label := displayName
+			if label == "" {
+				label = models.TruncateRunes(directive, 30)
+			}
+			log.Printf("[XMonitor] Directive detected for '%s'. Generating AI search queries...", label)
+			aiQueries, err := h.analyzer.GenerateSearchQueries(ctx, directive, "x_monitor", 3)
+			if err != nil || len(aiQueries) == 0 {
+				log.Printf("[XMonitor] AI query fallback for directive '%s': %v", label, err)
+				jobs = append(jobs, searchJob{query: directive, directive: directive, displayName: label})
+			} else {
+				log.Printf("[XMonitor] Directive '%s' expanded into %d AI queries: %v", label, len(aiQueries), aiQueries)
+				for _, q := range aiQueries {
+					jobs = append(jobs, searchJob{query: q, directive: directive, displayName: label})
+				}
+			}
+		} else if strings.TrimSpace(qCfg.Query) != "" {
+			label := displayName
+			if label == "" {
+				label = qCfg.Query
+			}
+			jobs = append(jobs, searchJob{query: strings.TrimSpace(qCfg.Query), directive: "", displayName: label})
+		} else {
+			continue
+		}
+
+		for _, job := range jobs {
+			query := job.query
+			log.Printf("[XMonitor] Executing Grounded Search for X query: %s", query)
 
 		currentDate := time.Now().UTC().Format("2006-01-02")
 		prompt := fmt.Sprintf(`
@@ -161,7 +195,19 @@ Only return valid JSON array without Markdown code block formatting.
 				}
 			}
 
-			sourceName := models.TruncateRunes(fmt.Sprintf("XMonitor:%s", query), 30)
+			sourceLabel := job.displayName
+			if sourceLabel == "" {
+				sourceLabel = query
+			}
+			sourceName := models.TruncateRunes(fmt.Sprintf("XMonitor:%s", sourceLabel), 30)
+
+			meta := map[string]interface{}{
+				"victim": res.VictimName,
+				"query":  query,
+			}
+			if job.directive != "" {
+				meta["directive"] = job.directive
+			}
 
 			item := models.NewThreatItem(
 				models.SourceTypeXMonitor,
@@ -171,12 +217,10 @@ Only return valid JSON array without Markdown code block formatting.
 				res.Summary,
 				"",
 				pubDate,
-				map[string]interface{}{
-					"victim": res.VictimName,
-					"query":  query,
-				},
+				meta,
 			)
 			items = append(items, item)
+		}
 		}
 	}
 

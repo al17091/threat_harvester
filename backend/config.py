@@ -57,7 +57,9 @@ class DarkwebSourceConfig(BaseModel):
 
 
 class QuerySourceConfig(BaseModel):
-    query: str
+    name: str = ""
+    directive: str = ""
+    query: str = ""
     enabled: bool = True
 
 
@@ -328,12 +330,12 @@ class Settings:
                     return True
         elif source_type == "x_monitor":
             for xq in self.app_config.sources.x_monitor:
-                if xq.query == identifier:
+                if xq.query == identifier or xq.directive == identifier or (xq.name and xq.name == identifier):
                     xq.enabled = enabled
                     return True
         elif source_type == "web_search":
             for wq in self.app_config.sources.web_search:
-                if wq.query == identifier:
+                if wq.query == identifier or wq.directive == identifier or (wq.name and wq.name == identifier):
                     wq.enabled = enabled
                     return True
         return False
@@ -361,13 +363,15 @@ class Settings:
         elif source_type == "x_monitor":
             orig = len(self.app_config.sources.x_monitor)
             self.app_config.sources.x_monitor = [
-                q for q in self.app_config.sources.x_monitor if q.query != identifier
+                q for q in self.app_config.sources.x_monitor
+                if q.query != identifier and q.directive != identifier and q.name != identifier
             ]
             return len(self.app_config.sources.x_monitor) < orig
         elif source_type == "web_search":
             orig = len(self.app_config.sources.web_search)
             self.app_config.sources.web_search = [
-                q for q in self.app_config.sources.web_search if q.query != identifier
+                q for q in self.app_config.sources.web_search
+                if q.query != identifier and q.directive != identifier and q.name != identifier
             ]
             return len(self.app_config.sources.web_search) < orig
         return False
