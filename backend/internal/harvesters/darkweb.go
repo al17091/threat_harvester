@@ -72,7 +72,7 @@ func (h *DarkwebOnionHarvester) getTorClient(proxyURLStr string) *http.Client {
 func (h *DarkwebOnionHarvester) TestConnection(ctx context.Context) bool {
 	cfg := config.GetSettings().GetConfig()
 	client := h.getTorClient(cfg.Network.TorProxyURL)
-	testCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	testCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(testCtx, http.MethodGet, "https://check.torproject.org/api/ip", nil)
 	if err != nil {
