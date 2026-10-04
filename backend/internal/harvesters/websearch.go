@@ -22,7 +22,7 @@ type WebSearchHarvester struct {
 func NewWebSearchHarvester() *WebSearchHarvester {
 	return &WebSearchHarvester{
 		client: &http.Client{
-			Timeout: 45 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 	}
 }
@@ -96,9 +96,6 @@ Only return valid JSON array without Markdown code block formatting.
 			},
 			"tools": []map[string]interface{}{
 				{"googleSearch": map[string]interface{}{}},
-			},
-			"generationConfig": map[string]interface{}{
-				"responseMimeType": "application/json",
 			},
 		}
 

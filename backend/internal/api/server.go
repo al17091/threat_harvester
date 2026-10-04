@@ -31,6 +31,10 @@ type Server struct {
 	isPipeRunning   bool
 	lastPipeRunAt   *string
 	lastPipeSummary interface{}
+
+	torMu        sync.Mutex
+	lastTorCheck time.Time
+	lastTorState bool
 }
 
 func NewServer(store storage.Store) *Server {
@@ -112,8 +116,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		dbStats = map[string]interface{}{"error": err.Error()}
 	}
 
-	torH := harvesters.NewDarkwebOnionHarvester()
-	torOnline := torH.TestConnection(ctx)
+	s.torMu.Lock()
+	if time.Since(s.lastTorCheck) > 60*time.Second {
+		torH := harvesters.NewDarkwebOnionHarvester()
+		s.lastTorState = torH.TestConnection(ctx)
+		s.lastTorCheck = time.Now()
+	}
+	torOnline := s.lastTorState
+	s.torMu.Unlock()
 
 	totalRSS := len(cfg.Sources.VendorRSS)
 	activeRSS := 0

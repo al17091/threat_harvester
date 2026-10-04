@@ -53,8 +53,8 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	cfg := config.GetSettings().GetConfig()
 	if lookbackHours <= 0 {
 		lookbackHours = cfg.Pipeline.CheckIntervalHours
-		if lookbackHours <= 0 {
-			lookbackHours = 1
+		if lookbackHours < 48 {
+			lookbackHours = 48
 		}
 	}
 
