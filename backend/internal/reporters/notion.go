@@ -220,8 +220,5 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 }
 
 func truncate(s string, max int) string {
-	if len(s) > max {
-		return s[:max]
-	}
-	return s
+	return models.TruncateRunes(s, max)
 }

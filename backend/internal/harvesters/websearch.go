@@ -171,10 +171,7 @@ Only return valid JSON array without Markdown code block formatting.
 				}
 			}
 
-			sourceName := fmt.Sprintf("WebSearch:%s", query)
-			if len(sourceName) > 30 {
-				sourceName = sourceName[:30]
-			}
+			sourceName := models.TruncateRunes(fmt.Sprintf("WebSearch:%s", query), 30)
 
 			item := models.NewThreatItem(
 				models.SourceTypeWebSearch,

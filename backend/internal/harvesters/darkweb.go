@@ -210,6 +210,27 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 							permalink, _ = post["website"].(string)
 						}
 
+						var pubDate *time.Time
+						if discStr, ok := post["discovered"].(string); ok && discStr != "" {
+							layouts := []string{
+								"2006-01-02 15:04:05.999999",
+								"2006-01-02 15:04:05",
+								"2006-01-02T15:04:05Z07:00",
+								"2006-01-02",
+							}
+							for _, layout := range layouts {
+								if t, err := time.Parse(layout, strings.TrimSpace(discStr)); err == nil {
+									utc := t.UTC()
+									pubDate = &utc
+									break
+								}
+							}
+						}
+
+						if since != nil && pubDate != nil && pubDate.Before(*since) {
+							continue
+						}
+
 						upperVictim := strings.ToUpper(victimName)
 						upperCountry := strings.ToUpper(country)
 						upperDesc := strings.ToUpper(description)
@@ -225,7 +246,7 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 							permalink,
 							summary,
 							"",
-							nil,
+							pubDate,
 							map[string]interface{}{
 								"victim":   victimName,
 								"group":    groupName,

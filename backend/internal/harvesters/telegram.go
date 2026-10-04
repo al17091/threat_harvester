@@ -106,15 +106,12 @@ func (h *TelegramHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 			// Title from first line
 			lines := strings.Split(text, "\n")
 			firstLine := strings.TrimSpace(lines[0])
-			if len(firstLine) > 80 {
-				firstLine = firstLine[:80] + "..."
+			if len([]rune(firstLine)) > 80 {
+				firstLine = models.TruncateRunes(firstLine, 80) + "..."
 			}
 			title := fmt.Sprintf("[@%s] %s", cleanCh, firstLine)
 
-			summary := text
-			if len(summary) > 1000 {
-				summary = summary[:1000]
-			}
+			summary := models.TruncateRunes(text, 1000)
 
 			item := models.NewThreatItem(
 				models.SourceTypeTelegram,

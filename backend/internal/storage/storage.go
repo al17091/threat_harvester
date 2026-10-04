@@ -29,6 +29,8 @@ type HistoryFilter struct {
 
 type Store interface {
 	IsSeen(ctx context.Context, itemID string) (bool, error)
+	IsSeenItem(ctx context.Context, item models.ThreatItem) (bool, error)
+	IsRecentlyNotified(ctx context.Context, victimOrgs []string, title string, withinHours int) (bool, error)
 	MarkSeen(ctx context.Context, item models.ThreatItem, enriched *models.EnrichedThreat, notified bool) error
 	GetStats(ctx context.Context) (map[string]interface{}, error)
 	GetHistory(ctx context.Context, filter HistoryFilter) ([]map[string]interface{}, error)
@@ -145,6 +147,8 @@ func (s *SQLStore) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_harvested_at ON threat_items(harvested_at);
 	CREATE INDEX IF NOT EXISTS idx_published_at ON threat_items(published_at);
 	CREATE INDEX IF NOT EXISTS idx_source_type ON threat_items(source_type);
+	CREATE INDEX IF NOT EXISTS idx_url ON threat_items(url);
+	CREATE INDEX IF NOT EXISTS idx_notified_at ON threat_items(notified_at);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -164,6 +168,123 @@ func (s *SQLStore) IsSeen(ctx context.Context, itemID string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *SQLStore) IsSeenItem(ctx context.Context, item models.ThreatItem) (bool, error) {
+	if item.ID == "" && item.URL == "" {
+		return false, nil
+	}
+
+	var query string
+	var args []interface{}
+
+	if item.URL != "" {
+		if s.isSQLite {
+			query = "SELECT 1 FROM threat_items WHERE id = ? OR (url IS NOT NULL AND url != '' AND url = ?) LIMIT 1"
+		} else {
+			query = "SELECT 1 FROM threat_items WHERE id = $1 OR (url IS NOT NULL AND url != '' AND url = $2) LIMIT 1"
+		}
+		args = []interface{}{item.ID, item.URL}
+	} else {
+		if s.isSQLite {
+			query = "SELECT 1 FROM threat_items WHERE id = ? LIMIT 1"
+		} else {
+			query = "SELECT 1 FROM threat_items WHERE id = $1 LIMIT 1"
+		}
+		args = []interface{}{item.ID}
+	}
+
+	var exists int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+var genericOrgNames = map[string]bool{
+	"japan": true, "japanese": true, "日本": true, "日本企業": true, "日本組織": true,
+	"国内企業": true, "国内組織": true, "政府機関": true, "各企業": true, "複数企業": true,
+	"multiple": true, "unknown": true, "n/a": true, "none": true, "various": true,
+	"victim": true, "target": true, "organization": true,
+}
+
+func isGenericOrg(name string) bool {
+	cleaned := strings.ToLower(strings.TrimSpace(name))
+	return genericOrgNames[cleaned]
+}
+
+func (s *SQLStore) IsRecentlyNotified(ctx context.Context, victimOrgs []string, title string, withinHours int) (bool, error) {
+	if withinHours <= 0 {
+		withinHours = 48
+	}
+	cutoffStr := time.Now().UTC().Add(-time.Duration(withinHours) * time.Hour).Format(time.RFC3339)
+
+	var query string
+	if s.isSQLite {
+		query = "SELECT title, enriched_data FROM threat_items WHERE notified_at IS NOT NULL AND notified_at >= ? LIMIT 100"
+	} else {
+		query = "SELECT title, enriched_data FROM threat_items WHERE notified_at IS NOT NULL AND notified_at >= $1 LIMIT 100"
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, cutoffStr)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	cveRegex := regexp.MustCompile(`(?i)CVE-\d{4}-\d+`)
+	currentCVEs := cveRegex.FindAllString(title, -1)
+	lowerTitle := strings.ToLower(strings.TrimSpace(title))
+
+	for rows.Next() {
+		var rowTitle string
+		var rowEnriched sql.NullString
+		if err := rows.Scan(&rowTitle, &rowEnriched); err != nil {
+			continue
+		}
+
+		lowerRowTitle := strings.ToLower(strings.TrimSpace(rowTitle))
+
+		// Check CVE match
+		if len(currentCVEs) > 0 {
+			rowCVEs := cveRegex.FindAllString(rowTitle, -1)
+			if rowEnriched.Valid {
+				rowCVEs = append(rowCVEs, cveRegex.FindAllString(rowEnriched.String, -1)...)
+			}
+			for _, curCVE := range currentCVEs {
+				for _, rCVE := range rowCVEs {
+					if strings.EqualFold(curCVE, rCVE) {
+						return true, nil
+					}
+				}
+			}
+		}
+
+		// Check victim org match
+		for _, org := range victimOrgs {
+			trimmedOrg := strings.TrimSpace(org)
+			if len([]rune(trimmedOrg)) >= 2 && !isGenericOrg(trimmedOrg) {
+				lowerOrg := strings.ToLower(trimmedOrg)
+				if strings.Contains(lowerRowTitle, lowerOrg) {
+					return true, nil
+				}
+				if rowEnriched.Valid && strings.Contains(strings.ToLower(rowEnriched.String), lowerOrg) {
+					return true, nil
+				}
+			}
+		}
+
+		// Exact or high title similarity
+		if lowerTitle != "" && lowerRowTitle != "" && (lowerTitle == lowerRowTitle || strings.Contains(lowerTitle, lowerRowTitle) || strings.Contains(lowerRowTitle, lowerTitle)) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriched *models.EnrichedThreat, notified bool) error {

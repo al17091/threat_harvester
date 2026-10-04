@@ -141,8 +141,5 @@ func orDefault(val, def string) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) > max {
-		return s[:max]
-	}
-	return s
+	return models.TruncateRunes(s, max)
 }

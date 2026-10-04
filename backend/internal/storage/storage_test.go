@@ -113,4 +113,41 @@ func TestStorageOperations(t *testing.T) {
 	if retrieved["title"] != item.Title {
 		t.Fatalf("expected title %s, got %v", item.Title, retrieved["title"])
 	}
+
+	// Test IsSeenItem by URL match
+	duplicateURLItem := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"WebSearch",
+		"Completely Different Title Mentioning Flaw",
+		"https://cert.org/123", // same URL as item
+		"New summary",
+		"",
+		&now,
+		nil,
+	)
+	seenItem, err := store.IsSeenItem(ctx, duplicateURLItem)
+	if err != nil {
+		t.Fatalf("IsSeenItem failed: %v", err)
+	}
+	if !seenItem {
+		t.Fatal("expected IsSeenItem to be true due to matching URL")
+	}
+
+	// Test IsRecentlyNotified: Example Corp was notified above
+	recentlyNotified, err := store.IsRecentlyNotified(ctx, []string{"Example Corp"}, "New attack report", 48)
+	if err != nil {
+		t.Fatalf("IsRecentlyNotified failed: %v", err)
+	}
+	if !recentlyNotified {
+		t.Fatal("expected recentlyNotified to be true for Example Corp")
+	}
+
+	// Unrelated org should not trigger cooldown
+	unrelatedNotified, err := store.IsRecentlyNotified(ctx, []string{"Unrelated Org"}, "Different incident", 48)
+	if err != nil {
+		t.Fatalf("IsRecentlyNotified failed: %v", err)
+	}
+	if unrelatedNotified {
+		t.Fatal("expected unrelatedNotified to be false")
+	}
 }

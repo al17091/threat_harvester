@@ -161,10 +161,7 @@ Only return valid JSON array without Markdown code block formatting.
 				}
 			}
 
-			sourceName := fmt.Sprintf("XMonitor:%s", query)
-			if len(sourceName) > 30 {
-				sourceName = sourceName[:30]
-			}
+			sourceName := models.TruncateRunes(fmt.Sprintf("XMonitor:%s", query), 30)
 
 			item := models.NewThreatItem(
 				models.SourceTypeXMonitor,

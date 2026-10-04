@@ -76,10 +76,7 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 
 	if apiKey == "" {
 		log.Printf("[Analyzer] Gemini API key not configured. Returning basic enrichment for %s", item.Title)
-		summaryJa := item.Summary
-		if len(summaryJa) > 200 {
-			summaryJa = summaryJa[:200]
-		}
+		summaryJa := models.TruncateRunes(item.Summary, 200)
 		return &models.EnrichedThreat{
 			ItemID:               item.ID,
 			Item:                 item,
