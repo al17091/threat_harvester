@@ -33,7 +33,7 @@ sinks:
   notion:
     enabled: true
     api_key: "${NOTION_API_KEY:-}"
-    database_id: "${NOTION_DATABASE_ID:-}"
+    database_id: "${NOTION_DATABASE_ID:-3ef6bf4bdc72815c94a9e28f7ebf56c4}"
 
 network:
   tor_proxy_url: "${TOR_PROXY_URL:-socks5h://127.0.0.1:9050}"

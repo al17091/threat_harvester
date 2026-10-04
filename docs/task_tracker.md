@@ -70,6 +70,9 @@ Status tracking for the **Threat Information Harvester** project. This file is r
   - GUI threat intelligence source management with toggle, add, and delete.
   - Live YAML preview and downloadable `config.yaml`.
   - System health probes and test dispatch triggers.
+- [x] **Notion MCP Knowledge Base Integration**:
+  - Created dedicated Notion Database `Cyber Threat Intelligence (CTI) Feed` (`3ef6bf4bdc72815c94a9e28f7ebf56c4`) via Notion MCP.
+  - Verified Go backend Notion sink integration and page generation (`bin/harvester test-notion`).
 
 ### Phase 6: Cluster Deployment & Live Verification (Next Steps)
 - [ ] Run `docker compose up -d` to verify local multi-container stack.
