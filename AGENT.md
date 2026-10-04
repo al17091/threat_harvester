@@ -186,7 +186,7 @@ All Git commit messages MUST be written in English following the Conventional Co
 - **Line 1:** Concise summary of changes (~50 characters recommended).
 - **Line 2:** Empty line.
 - **Line 3+:** Bulleted list (`- `) detailing specific modifications.
-- **Signature:** Use `--no-gpg-sign` during development commits.
+- **Signature:** Sign all commits with GPG/SSH key (`-S` or default `commit.gpgsign=true`). Verified signatures are required.
 
 **Example:**
 ```text

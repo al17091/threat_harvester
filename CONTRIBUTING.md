@@ -54,7 +54,7 @@ All Git commit messages MUST follow the **Conventional Commits** format in Engli
 
 - **Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`
 - **Scope**: Module name (e.g., `harvester`, `analyzer`, `helm`, `cli`, `cache`)
-- **Signature**: Please use `--no-gpg-sign` during development commits unless instructed otherwise.
+- **Signature**: Sign all commits with GPG/SSH key (`-S` or default `commit.gpgsign=true`). Verified signatures are required.
 
 **Example:**
 ```text
