@@ -29,7 +29,9 @@ import {
   Globe,
   Loader2,
   Pencil,
+  Terminal,
 } from "lucide-react";
+import { TerminalConsole } from "./components/TerminalConsole";
 
 interface Incident {
   id: string;
@@ -118,7 +120,8 @@ interface ConfigData {
 }
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState<"incidents" | "sources" | "config" | "status">("incidents");
+  const [activeTab, setActiveTab] = useState<"incidents" | "sources" | "config" | "status" | "console">("incidents");
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [config, setConfig] = useState<ConfigData | null>(null);
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -228,20 +231,21 @@ export default function DashboardPage() {
     return () => clearTimeout(timer);
   }, [search, severityFilter, japanOnly, sourceTypeFilter, sortBy]);
 
+  const handleHarvestFinished = async () => {
+    setHarvesting(false);
+    showToast("Threat harvesting pipeline completed.");
+    await fetchIncidents();
+    await fetchStatus();
+  };
+
   const triggerHarvest = async () => {
     setHarvesting(true);
-    showToast("Starting background threat intelligence harvest...");
+    setTerminalOpen(true);
+    showToast("Threat intelligence harvest started.");
     try {
       const res = await fetch("/api/pipeline/run", { method: "POST" });
       const data = await res.json();
-      if (data.status === "started") {
-        setTimeout(async () => {
-          await fetchIncidents();
-          await fetchStatus();
-          setHarvesting(false);
-          showToast("Threat harvesting pipeline completed.");
-        }, 4000);
-      } else {
+      if (data.status !== "started") {
         showToast(data.message || "A job is already running", "error");
         setHarvesting(false);
       }
@@ -466,6 +470,22 @@ export default function DashboardPage() {
 
           {/* Header Action Buttons */}
           <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setTerminalOpen(!terminalOpen)}
+              className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
+                terminalOpen || harvesting
+                  ? "bg-slate-800 text-cyan-300 border-cyan-600/80 shadow-sm shadow-cyan-950"
+                  : "bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
+              }`}
+              title="Toggle Live Harvesting Terminal Console"
+            >
+              <Terminal className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
+              <span>Console</span>
+              {harvesting && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 ml-1.5 animate-ping" />
+              )}
+            </button>
+
             <a
               href="/api/config/export"
               download="config.yaml"
@@ -545,6 +565,21 @@ export default function DashboardPage() {
             <Activity className="w-4 h-4" />
             <span>System Health</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab("console")}
+            className={`py-3 border-b-2 transition flex items-center space-x-2 ${
+              activeTab === "console"
+                ? "border-cyan-400 text-cyan-400 font-semibold"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Terminal className="w-4 h-4" />
+            <span>Live Console</span>
+            {harvesting && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            )}
+          </button>
         </div>
       </header>
 
@@ -563,6 +598,17 @@ export default function DashboardPage() {
             {toast.type === "error" ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
             <span>{toast.message}</span>
           </div>
+        )}
+
+        {/* Live Terminal Console (Collapsible HUD) */}
+        {terminalOpen && activeTab !== "console" && (
+          <TerminalConsole
+            isOpen={terminalOpen}
+            onClose={() => setTerminalOpen(false)}
+            isHarvesting={harvesting}
+            onTriggerHarvest={triggerHarvest}
+            onHarvestFinished={handleHarvestFinished}
+          />
         )}
 
         {/* TAB 1: INCIDENTS FEED */}
@@ -1380,6 +1426,20 @@ export default function DashboardPage() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* TAB 5: LIVE CONSOLE (FULL-PAGE VIEW) */}
+        {activeTab === "console" && (
+          <div className="w-full">
+            <TerminalConsole
+              isOpen={true}
+              onClose={() => setActiveTab("incidents")}
+              isHarvesting={harvesting}
+              onTriggerHarvest={triggerHarvest}
+              onHarvestFinished={handleHarvestFinished}
+              fullTabMode={true}
+            />
           </div>
         )}
 

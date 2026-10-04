@@ -128,13 +128,16 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	notifiedCount := 0
 	notionReportedCount := 0
 
-	for _, item := range newItems {
+	for idx, item := range newItems {
+		log.Printf("[Pipeline] [%d/%d] Analyzing threat with Gemini: %s (%s)", idx+1, len(newItems), item.Title, item.SourceName)
 		enriched, err := p.analyzer.Analyze(ctx, item)
 		if err != nil || enriched == nil {
 			log.Printf("[Pipeline] Error analyzing '%s': %v", item.Title, err)
 			continue
 		}
 		analyzedCount++
+		log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
+			idx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
 
 		shouldNotify := false
 		// High-value alerting criteria:

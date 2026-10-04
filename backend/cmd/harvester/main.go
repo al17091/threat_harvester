@@ -14,11 +14,13 @@ import (
 
 	"github.com/dapt/information_harvester/backend/internal/api"
 	"github.com/dapt/information_harvester/backend/internal/config"
+	"github.com/dapt/information_harvester/backend/internal/logger"
 	"github.com/dapt/information_harvester/backend/internal/pipeline"
 	"github.com/dapt/information_harvester/backend/internal/storage"
 )
 
 func main() {
+	logger.InitGlobalLogger()
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)

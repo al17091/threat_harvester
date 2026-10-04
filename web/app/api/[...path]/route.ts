@@ -28,6 +28,11 @@ async function handleProxy(req: NextRequest, { params }: { params: { path: strin
 
     const res = await fetch(targetUrl, init);
     const resHeaders = new Headers(res.headers);
+    if (resHeaders.get("content-type")?.includes("text/event-stream")) {
+      resHeaders.set("Cache-Control", "no-cache, no-transform");
+      resHeaders.set("Connection", "keep-alive");
+      resHeaders.set("X-Accel-Buffering", "no");
+    }
 
     return new NextResponse(res.body, {
       status: res.status,

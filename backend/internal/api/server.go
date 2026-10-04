@@ -15,6 +15,7 @@ import (
 
 	"github.com/dapt/information_harvester/backend/internal/config"
 	"github.com/dapt/information_harvester/backend/internal/harvesters"
+	"github.com/dapt/information_harvester/backend/internal/logger"
 	"github.com/dapt/information_harvester/backend/internal/models"
 	"github.com/dapt/information_harvester/backend/internal/notifiers"
 	"github.com/dapt/information_harvester/backend/internal/pipeline"
@@ -38,6 +39,7 @@ type Server struct {
 }
 
 func NewServer(store storage.Store) *Server {
+	logger.InitGlobalLogger()
 	s := &Server{
 		store:    store,
 		pipeline: pipeline.NewPipeline(store),
@@ -79,6 +81,9 @@ func (s *Server) setupRoutes() {
 		r.Post("/config/sources", s.handleManageSources)
 
 		r.Post("/pipeline/run", s.handleTriggerPipeline)
+		r.Get("/pipeline/stream", s.handlePipelineStream)
+		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
+		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
 		r.Post("/test/notify", s.handleTestNotify)
 		r.Post("/test/notion", s.handleTestNotion)
 	})
@@ -431,6 +436,89 @@ func (s *Server) handleTriggerPipeline(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, map[string]string{
 		"status":  "started",
 		"message": "Harvest pipeline started in background",
+	})
+}
+
+func (s *Server) handlePipelineStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Subscribe to live log stream
+	ch, unsub := logger.DefaultHub.Subscribe()
+	defer unsub()
+
+	// Flush initial recent logs
+	recent := logger.DefaultHub.GetEntries(100)
+	for _, entry := range recent {
+		data, _ := json.Marshal(entry)
+		fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+	}
+
+	s.pipeMu.Lock()
+	statusData, _ := json.Marshal(map[string]interface{}{
+		"is_running":  s.isPipeRunning,
+		"last_run_at": s.lastPipeRunAt,
+	})
+	s.pipeMu.Unlock()
+	fmt.Fprintf(w, "event: status\ndata: %s\n\n", statusData)
+	flusher.Flush()
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case entry, ok := <-ch:
+			if !ok {
+				return
+			}
+			data, _ := json.Marshal(entry)
+			fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleGetPipelineLogs(w http.ResponseWriter, r *http.Request) {
+	limit := 150
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	entries := logger.DefaultHub.GetEntries(limit)
+
+	s.pipeMu.Lock()
+	isRunning := s.isPipeRunning
+	lastRunAt := s.lastPipeRunAt
+	s.pipeMu.Unlock()
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"logs":        entries,
+		"is_running":  isRunning,
+		"last_run_at": lastRunAt,
+	})
+}
+
+func (s *Server) handleClearPipelineLogs(w http.ResponseWriter, r *http.Request) {
+	logger.DefaultHub.Clear()
+	jsonResponse(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Logs cleared",
 	})
 }
 
