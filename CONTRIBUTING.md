@@ -10,10 +10,10 @@ The fastest way to start contributing is using the provided development containe
 
 ```bash
 # Build the dev container
-docker build -t threat-harvester:dev -f Dockerfile.dev .
+docker build -t information_harvester:dev -f Dockerfile.dev .
 
 # Run dev shell
-docker run -it --rm -v $(pwd):/app threat-harvester:dev bash
+docker run -it --rm -v $(pwd):/app information_harvester:dev bash
 ```
 
 Or using a local virtual environment (Python 3.11+):

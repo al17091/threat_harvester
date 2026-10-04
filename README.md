@@ -47,13 +47,13 @@ Kubernetes環境（k3s等）上で稼働し、Helmによりワンストップで
 ### 開発コンテナの起動（ローカルDocker）
 ```bash
 # 開発イメージのビルド
-docker build -t threat-harvester:dev -f Dockerfile.dev .
+docker build -t information_harvester:dev -f Dockerfile.dev .
 
 # 開発コンテナの起動
 docker run -it --rm \
   -e GEMINI_API_KEY="your-gemini-api-key" \
   -e DISCORD_WEBHOOK_URL="your-discord-webhook" \
-  threat-harvester:dev bash
+  information_harvester:dev bash
 ```
 
 ### CLI コマンド一覧 (`harvester`)

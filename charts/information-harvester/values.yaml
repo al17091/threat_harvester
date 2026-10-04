@@ -2,13 +2,13 @@
 
 # Production image for CronJob
 image:
-  repository: ghcr.io/dapt/information-harvester
+  repository: ghcr.io/dapt/information_harvester
   tag: latest
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
 devImage:
-  repository: ghcr.io/dapt/information-harvester
+  repository: ghcr.io/dapt/information_harvester
   tag: dev
   pullPolicy: IfNotPresent
 
