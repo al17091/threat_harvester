@@ -137,6 +137,7 @@ func (s *SQLStore) initSchema() error {
 		title TEXT NOT NULL,
 		url TEXT,
 		summary TEXT,
+		raw_content TEXT,
 		published_at TEXT,
 		harvested_at TEXT NOT NULL,
 		severity VARCHAR(32),
@@ -150,8 +151,21 @@ func (s *SQLStore) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_url ON threat_items(url);
 	CREATE INDEX IF NOT EXISTS idx_notified_at ON threat_items(notified_at);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Migrate existing tables to ensure raw_content column exists
+	if s.isSQLite {
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN raw_content TEXT")
+	} else {
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS raw_content TEXT")
+	}
+
+	// Backfill existing records if raw_content is NULL
+	_, _ = s.db.Exec("UPDATE threat_items SET raw_content = summary WHERE raw_content IS NULL AND summary IS NOT NULL")
+
+	return nil
 }
 
 func (s *SQLStore) IsSeen(ctx context.Context, itemID string) (bool, error) {
@@ -313,16 +327,24 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		notifiedStr = &nowStr
 	}
 
+	var rawStr *string
+	if item.RawContent != "" {
+		rawStr = &item.RawContent
+	} else if item.Summary != "" {
+		rawStr = &item.Summary
+	}
+
 	var query string
 	if s.isSQLite {
 		query = `
 		INSERT INTO threat_items (
-			id, source_type, source_name, title, url, summary, published_at, harvested_at,
+			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
 			severity, japan_relevance, notified_at, enriched_data
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			summary = excluded.summary,
+			raw_content = COALESCE(NULLIF(excluded.raw_content, ''), threat_items.raw_content),
 			harvested_at = excluded.harvested_at,
 			severity = excluded.severity,
 			japan_relevance = excluded.japan_relevance,
@@ -332,12 +354,13 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 	} else {
 		query = `
 		INSERT INTO threat_items (
-			id, source_type, source_name, title, url, summary, published_at, harvested_at,
+			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
 			severity, japan_relevance, notified_at, enriched_data
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT(id) DO UPDATE SET
 			title = EXCLUDED.title,
 			summary = EXCLUDED.summary,
+			raw_content = COALESCE(NULLIF(EXCLUDED.raw_content, ''), threat_items.raw_content),
 			harvested_at = EXCLUDED.harvested_at,
 			severity = EXCLUDED.severity,
 			japan_relevance = EXCLUDED.japan_relevance,
@@ -353,6 +376,7 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		item.Title,
 		item.URL,
 		item.Summary,
+		rawStr,
 		pubStr,
 		nowStr,
 		severityStr,
@@ -424,17 +448,17 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 	if f.Search != "" {
 		pattern := "%" + f.Search + "%"
 		if s.isSQLite {
-			conditions = append(conditions, "(title LIKE ? OR summary LIKE ? OR source_name LIKE ? OR enriched_data LIKE ?)")
-			args = append(args, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, "(title LIKE ? OR summary LIKE ? OR raw_content LIKE ? OR source_name LIKE ? OR enriched_data LIKE ?)")
+			args = append(args, pattern, pattern, pattern, pattern, pattern)
 		} else {
-			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR summary ILIKE $%d OR source_name ILIKE $%d OR enriched_data ILIKE $%d)",
-				argIdx, argIdx+1, argIdx+2, argIdx+3))
-			argIdx += 4
-			args = append(args, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR summary ILIKE $%d OR raw_content ILIKE $%d OR source_name ILIKE $%d OR enriched_data ILIKE $%d)",
+				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4))
+			argIdx += 5
+			args = append(args, pattern, pattern, pattern, pattern, pattern)
 		}
 	}
 
-	query := "SELECT id, source_type, source_name, title, url, summary, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items"
+	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items"
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -464,9 +488,9 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 	for rows.Next() {
 		var (
 			id, srcType, srcName, title, harvestedAt string
-			url, summary, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
+			url, summary, rawContent, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
 		)
-		if err := rows.Scan(&id, &srcType, &srcName, &title, &url, &summary, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData); err != nil {
+		if err := rows.Scan(&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData); err != nil {
 			continue
 		}
 
@@ -478,6 +502,7 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 			"harvested_at":    harvestedAt,
 			"url":             nullStringVal(url),
 			"summary":         nullStringVal(summary),
+			"raw_content":     nullStringVal(rawContent),
 			"published_at":    nullStringVal(pubAt),
 			"severity":        nullStringVal(sev),
 			"japan_relevance": nullStringVal(jrel),
@@ -499,19 +524,19 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 }
 
 func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]interface{}, error) {
-	query := "SELECT id, source_type, source_name, title, url, summary, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = ? OR id LIKE ? LIMIT 1"
+	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = ? OR id LIKE ? LIMIT 1"
 	prefix := itemID + "%"
 	args := []interface{}{itemID, prefix}
 	if !s.isSQLite {
-		query = "SELECT id, source_type, source_name, title, url, summary, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = $1 OR id LIKE $2 LIMIT 1"
+		query = "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = $1 OR id LIKE $2 LIMIT 1"
 	}
 
 	var (
 		id, srcType, srcName, title, harvestedAt string
-		url, summary, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
+		url, summary, rawContent, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
 	)
 
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&id, &srcType, &srcName, &title, &url, &summary, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData)
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -527,6 +552,7 @@ func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]inter
 		"harvested_at":    harvestedAt,
 		"url":             nullStringVal(url),
 		"summary":         nullStringVal(summary),
+		"raw_content":     nullStringVal(rawContent),
 		"published_at":    nullStringVal(pubAt),
 		"severity":        nullStringVal(sev),
 		"japan_relevance": nullStringVal(jrel),

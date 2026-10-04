@@ -113,6 +113,9 @@ func TestStorageOperations(t *testing.T) {
 	if retrieved["title"] != item.Title {
 		t.Fatalf("expected title %s, got %v", item.Title, retrieved["title"])
 	}
+	if retrieved["raw_content"] != item.RawContent {
+		t.Fatalf("expected raw_content %q, got %v", item.RawContent, retrieved["raw_content"])
+	}
 
 	// Test IsSeenItem by URL match
 	duplicateURLItem := models.NewThreatItem(

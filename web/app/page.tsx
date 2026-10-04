@@ -16,6 +16,7 @@ import {
   Radio,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   X,
   Plus,
   Trash2,
@@ -40,6 +41,7 @@ interface Incident {
   title: string;
   url: string | null;
   summary: string;
+  raw_content?: string | null;
   published_at: string | null;
   harvested_at: string;
   severity: string | null;
@@ -139,6 +141,26 @@ export default function DashboardPage() {
 
   // Modals & Toast
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [showRawInModal, setShowRawInModal] = useState<boolean>(false);
+  const [expandedRawCardIds, setExpandedRawCardIds] = useState<Set<string>>(new Set());
+
+  const toggleRawCard = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedRawCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const openIncidentModal = (item: Incident) => {
+    setSelectedIncident(item);
+    setShowRawInModal(false);
+  };
   const [addModal, setAddModal] = useState<{
     visible: boolean;
     type: string;
@@ -750,7 +772,7 @@ export default function DashboardPage() {
               {incidents.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => setSelectedIncident(item)}
+                  onClick={() => openIncidentModal(item)}
                   className="bg-slate-900/90 border border-slate-800 hover:border-slate-700 rounded-xl p-4 transition cursor-pointer"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -813,9 +835,29 @@ export default function DashboardPage() {
                     {item.enriched_parsed?.title_ja || item.title}
                   </h3>
 
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-3">
+                  <p className="text-xs text-slate-400 line-clamp-2 mb-2.5">
                     {item.enriched_parsed?.summary_ja || item.summary}
                   </p>
+
+                  {/* Collapsible Raw Source Preview on Card */}
+                  <div className="mb-3">
+                    <button
+                      type="button"
+                      onClick={(e) => toggleRawCard(item.id, e)}
+                      className="inline-flex items-center space-x-1 text-[11px] text-slate-400 hover:text-cyan-400 transition font-mono"
+                    >
+                      <FileCode className="w-3.5 h-3.5 text-cyan-500" />
+                      <span>{expandedRawCardIds.has(item.id) ? "原文を閉じる ▲" : "原文を表示 ▼"}</span>
+                    </button>
+                    {expandedRawCardIds.has(item.id) && (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-2 p-2.5 rounded-lg bg-slate-950/90 border border-slate-800 font-mono text-[11px] text-slate-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto select-text leading-relaxed"
+                      >
+                        {item.raw_content || item.summary || "原文データなし"}
+                      </div>
+                    )}
+                  </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
                     {item.enriched_parsed?.victim_orgs && item.enriched_parsed.victim_orgs.length > 0 && (
@@ -1507,6 +1549,38 @@ export default function DashboardPage() {
                 <p className="text-slate-300 bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
                   {selectedIncident.enriched_parsed?.summary_ja || selectedIncident.summary}
                 </p>
+              </div>
+
+              {/* RAW SOURCE ACCORDION IN MODAL */}
+              <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/70">
+                <button
+                  type="button"
+                  onClick={() => setShowRawInModal(!showRawInModal)}
+                  className="w-full px-3 py-2 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800/80 transition"
+                >
+                  <div className="flex items-center space-x-2">
+                    <FileCode className="w-4 h-4 text-cyan-400" />
+                    <span>原文データ / Raw Source Content</span>
+                    {selectedIncident.raw_content ? (
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        ({selectedIncident.raw_content.length} chars)
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center space-x-1.5 text-slate-400">
+                    <span className="text-[10px]">{showRawInModal ? "閉じる" : "開いて表示"}</span>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                        showRawInModal ? "rotate-180" : ""
+                      }`}
+                    />
+                  </div>
+                </button>
+                {showRawInModal && (
+                  <div className="p-3 border-t border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 whitespace-pre-wrap break-words max-h-80 overflow-y-auto select-text leading-relaxed">
+                    {selectedIncident.raw_content || selectedIncident.summary || "原文データなし"}
+                  </div>
+                )}
               </div>
 
               {selectedIncident.enriched_parsed?.impact_analysis_ja && (

@@ -245,7 +245,7 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 							title,
 							permalink,
 							summary,
-							"",
+							description,
 							pubDate,
 							map[string]interface{}{
 								"victim":   victimName,

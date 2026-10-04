@@ -187,6 +187,11 @@ func NewThreatItem(
 		metadata = make(map[string]interface{})
 	}
 
+	cleanRaw := strings.TrimSpace(rawContent)
+	if cleanRaw == "" {
+		cleanRaw = cleanSummary
+	}
+
 	return ThreatItem{
 		ID:          itemID,
 		SourceType:  sourceType,
@@ -194,7 +199,7 @@ func NewThreatItem(
 		Title:       cleanTitle,
 		URL:         normURL,
 		Summary:     cleanSummary,
-		RawContent:  strings.TrimSpace(rawContent),
+		RawContent:  cleanRaw,
 		PublishedAt: publishedAt,
 		HarvestedAt: time.Now().UTC(),
 		Metadata:    metadata,

@@ -45,6 +45,7 @@ class ThreatCache:
             sa.Column("title", sa.Text, nullable=False),
             sa.Column("url", sa.Text, nullable=True),
             sa.Column("summary", sa.Text, nullable=True),
+            sa.Column("raw_content", sa.Text, nullable=True),
             sa.Column("published_at", sa.Text, nullable=True),
             sa.Column("harvested_at", sa.Text, nullable=False),
             sa.Column("severity", sa.String(32), nullable=True),
@@ -100,6 +101,10 @@ class ThreatCache:
             with self.engine.begin() as conn:
                 try:
                     conn.execute(sa.text("ALTER TABLE threat_items ADD COLUMN enriched_data TEXT"))
+                except Exception:
+                    pass
+                try:
+                    conn.execute(sa.text("ALTER TABLE threat_items ADD COLUMN raw_content TEXT"))
                 except Exception:
                     pass
         except Exception as e:
