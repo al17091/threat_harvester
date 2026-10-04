@@ -40,10 +40,19 @@ func TestSourceMutationAndExport(t *testing.T) {
 		t.Fatal("expected toggle to succeed")
 	}
 
+	// Update source
+	err = mgr.UpdateSource("vendor_rss", "https://example.com/rss", map[string]interface{}{
+		"name":     "Updated Feed Name",
+		"category": "threat_intel",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSource failed: %v", err)
+	}
+
 	// Export YAML
 	yamlStr := mgr.ExportYAML(true)
-	if !strings.Contains(yamlStr, "Test Feed") {
-		t.Fatal("expected exported YAML to contain added feed")
+	if !strings.Contains(yamlStr, "Updated Feed Name") {
+		t.Fatal("expected exported YAML to contain updated feed name")
 	}
 
 	// Delete source

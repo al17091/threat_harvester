@@ -28,6 +28,7 @@ import {
   Hash,
   Globe,
   Loader2,
+  Pencil,
 } from "lucide-react";
 
 interface Incident {
@@ -142,6 +143,17 @@ export default function DashboardPage() {
     visible: false,
     type: "vendor_rss",
     form: { name: "", url: "", channel: "", query: "", type: "rss" },
+  });
+  const [editModal, setEditModal] = useState<{
+    visible: boolean;
+    type: string;
+    originalId: string;
+    form: { name: string; url: string; category: string; channel: string; query: string; type: string };
+  }>({
+    visible: false,
+    type: "vendor_rss",
+    originalId: "",
+    form: { name: "", url: "", category: "general", channel: "", query: "", type: "rss" },
   });
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: "info" | "error" }>({
     visible: false,
@@ -294,6 +306,44 @@ export default function DashboardPage() {
       } else {
         const err = await res.json();
         showToast(err.detail || "Failed to add source", "error");
+      }
+    } catch (e) {
+      showToast("Failed to communicate with API", "error");
+    }
+  };
+
+  const handleEditSource = async () => {
+    const type = editModal.type;
+    let data: any = {};
+    if (type === "vendor_rss") {
+      data = { name: editModal.form.name, url: editModal.form.url, category: editModal.form.category };
+    } else if (type === "telegram") {
+      data = { channel: editModal.form.channel };
+    } else if (type === "darkweb_onion") {
+      data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type };
+    } else if (type === "x_monitor" || type === "web_search") {
+      data = { query: editModal.form.query };
+    }
+
+    try {
+      const res = await fetch("/api/config/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source_type: type,
+          action: "update",
+          identifier: editModal.originalId,
+          data,
+        }),
+      });
+      if (res.ok) {
+        showToast("Threat intelligence source updated successfully");
+        setEditModal((prev) => ({ ...prev, visible: false }));
+        await fetchConfig();
+        await fetchStatus();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || "Failed to update source", "error");
       }
     } catch (e) {
       showToast("Failed to communicate with API", "error");
@@ -807,6 +857,27 @@ export default function DashboardPage() {
                           <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
                         </label>
                         <button
+                          onClick={() =>
+                            setEditModal({
+                              visible: true,
+                              type: "vendor_rss",
+                              originalId: feed.url,
+                              form: {
+                                name: feed.name,
+                                url: feed.url,
+                                category: feed.category || "general",
+                                channel: "",
+                                query: "",
+                                type: "rss",
+                              },
+                            })
+                          }
+                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                          title="Edit Feed"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleDeleteSource("vendor_rss", feed.url)}
                           className="p-1 text-slate-500 hover:text-rose-400 transition"
                         >
@@ -865,6 +936,27 @@ export default function DashboardPage() {
                           />
                           <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
                         </label>
+                        <button
+                          onClick={() =>
+                            setEditModal({
+                              visible: true,
+                              type: "darkweb_onion",
+                              originalId: dw.url,
+                              form: {
+                                name: dw.name,
+                                url: dw.url,
+                                category: "darkweb",
+                                channel: "",
+                                query: "",
+                                type: dw.type || "rss",
+                              },
+                            })
+                          }
+                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                          title="Edit Target"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleDeleteSource("darkweb_onion", dw.url)}
                           className="p-1 text-slate-500 hover:text-rose-400 transition"
@@ -927,6 +1019,27 @@ export default function DashboardPage() {
                           <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
                         </label>
                         <button
+                          onClick={() =>
+                            setEditModal({
+                              visible: true,
+                              type: "telegram",
+                              originalId: tg.channel,
+                              form: {
+                                name: "",
+                                url: "",
+                                category: "",
+                                channel: tg.channel,
+                                query: "",
+                                type: "",
+                              },
+                            })
+                          }
+                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                          title="Edit Channel"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleDeleteSource("telegram", tg.channel)}
                           className="p-1 text-slate-500 hover:text-rose-400 transition"
                         >
@@ -977,6 +1090,27 @@ export default function DashboardPage() {
                           <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
                         </label>
                         <button
+                          onClick={() =>
+                            setEditModal({
+                              visible: true,
+                              type: "x_monitor",
+                              originalId: xm.query,
+                              form: {
+                                name: "",
+                                url: "",
+                                category: "",
+                                channel: "",
+                                query: xm.query,
+                                type: "",
+                              },
+                            })
+                          }
+                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                          title="Edit Query"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleDeleteSource("x_monitor", xm.query)}
                           className="p-1 text-slate-500 hover:text-rose-400 transition"
                         >
@@ -1026,6 +1160,27 @@ export default function DashboardPage() {
                           />
                           <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
                         </label>
+                        <button
+                          onClick={() =>
+                            setEditModal({
+                              visible: true,
+                              type: "web_search",
+                              originalId: ws.query,
+                              form: {
+                                name: "",
+                                url: "",
+                                category: "",
+                                channel: "",
+                                query: ws.query,
+                                type: "",
+                              },
+                            })
+                          }
+                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                          title="Edit Query"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={() => handleDeleteSource("web_search", ws.query)}
                           className="p-1 text-slate-500 hover:text-rose-400 transition"
@@ -1433,6 +1588,130 @@ export default function DashboardPage() {
                 className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow"
               >
                 Add Source
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT SOURCE MODAL */}
+      {editModal.visible && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-white">Edit Threat Intelligence Source</h3>
+              <button
+                onClick={() => setEditModal({ ...editModal, visible: false })}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-6">
+              {editModal.type === "vendor_rss" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Feed Name</label>
+                  <input
+                    type="text"
+                    value={editModal.form.name}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                    placeholder="e.g. JPCERT/CC Alerts"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">RSS URL</label>
+                  <input
+                    type="url"
+                    value={editModal.form.url}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
+                    placeholder="https://..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Category</label>
+                  <input
+                    type="text"
+                    value={editModal.form.category}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, category: e.target.value } })}
+                    placeholder="e.g. general, vendor, cert"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                </div>
+              )}
+
+              {editModal.type === "telegram" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">
+                    Channel Identifier (t.me/s/&lt;channel&gt;)
+                  </label>
+                  <input
+                    type="text"
+                    value={editModal.form.channel}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, channel: e.target.value } })}
+                    placeholder="e.g. redabyss_cti"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                </div>
+              )}
+
+              {editModal.type === "darkweb_onion" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Target Name</label>
+                  <input
+                    type="text"
+                    value={editModal.form.name}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                    placeholder="e.g. RansomFeed RSS"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
+                    URL (http/https/.onion)
+                  </label>
+                  <input
+                    type="text"
+                    value={editModal.form.url}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
+                    placeholder="http://...onion"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Format Type</label>
+                  <select
+                    value={editModal.form.type}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  >
+                    <option value="rss">rss</option>
+                    <option value="api">api</option>
+                    <option value="onion">onion</option>
+                  </select>
+                </div>
+              )}
+
+              {(editModal.type === "x_monitor" || editModal.type === "web_search") && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Search Query</label>
+                  <input
+                    type="text"
+                    value={editModal.form.query}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, query: e.target.value } })}
+                    placeholder="e.g. ransomware breach victim site:x.com"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end space-x-2">
+              <button
+                onClick={() => setEditModal({ ...editModal, visible: false })}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditSource}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow"
+              >
+                Save Changes
               </button>
             </div>
           </div>

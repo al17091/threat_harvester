@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/dapt/information_harvester/backend/internal/storage"
 )
 
 func TestAPIRoutes(t *testing.T) {
+	defer os.Remove("config.yaml")
 	store, err := storage.NewStore("", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to create memory store: %v", err)
@@ -62,6 +64,24 @@ func TestAPIRoutes(t *testing.T) {
 	}
 	b, _ := json.Marshal(addPayload)
 	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(b))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 5b. POST /api/config/sources (update)
+	updatePayload := map[string]interface{}{
+		"source_type": "vendor_rss",
+		"action":      "update",
+		"identifier":  "https://example.com/test_feed.rss",
+		"data": map[string]interface{}{
+			"name":     "Updated Unit Test Source",
+			"category": "updated_cat",
+		},
+	}
+	bUpdate, _ := json.Marshal(updatePayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(bUpdate))
 	w = httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

@@ -408,6 +408,99 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 	return nil
 }
 
+func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[string]interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch sourceType {
+	case "vendor_rss":
+		for i := range s.Config.Sources.VendorRSS {
+			if s.Config.Sources.VendorRSS[i].URL == identifier || s.Config.Sources.VendorRSS[i].Name == identifier {
+				if name, ok := data["name"].(string); ok && strings.TrimSpace(name) != "" {
+					s.Config.Sources.VendorRSS[i].Name = strings.TrimSpace(name)
+				}
+				if u, ok := data["url"].(string); ok && strings.TrimSpace(u) != "" {
+					s.Config.Sources.VendorRSS[i].URL = strings.TrimSpace(u)
+				}
+				if cat, ok := data["category"].(string); ok && strings.TrimSpace(cat) != "" {
+					s.Config.Sources.VendorRSS[i].Category = strings.TrimSpace(cat)
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.VendorRSS[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("vendor_rss source not found: %s", identifier)
+
+	case "telegram":
+		cleanID := strings.TrimPrefix(identifier, "@")
+		for i := range s.Config.Sources.Telegram {
+			if s.Config.Sources.Telegram[i].Channel == cleanID {
+				if ch, ok := data["channel"].(string); ok && strings.TrimSpace(ch) != "" {
+					s.Config.Sources.Telegram[i].Channel = strings.TrimPrefix(strings.TrimSpace(ch), "@")
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.Telegram[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("telegram source not found: %s", identifier)
+
+	case "darkweb_onion":
+		for i := range s.Config.Sources.DarkwebOnion {
+			if s.Config.Sources.DarkwebOnion[i].URL == identifier || s.Config.Sources.DarkwebOnion[i].Name == identifier {
+				if name, ok := data["name"].(string); ok && strings.TrimSpace(name) != "" {
+					s.Config.Sources.DarkwebOnion[i].Name = strings.TrimSpace(name)
+				}
+				if u, ok := data["url"].(string); ok && strings.TrimSpace(u) != "" {
+					s.Config.Sources.DarkwebOnion[i].URL = strings.TrimSpace(u)
+				}
+				if t, ok := data["type"].(string); ok && strings.TrimSpace(t) != "" {
+					s.Config.Sources.DarkwebOnion[i].Type = strings.TrimSpace(t)
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.DarkwebOnion[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("darkweb_onion source not found: %s", identifier)
+
+	case "x_monitor":
+		for i := range s.Config.Sources.XMonitor {
+			if s.Config.Sources.XMonitor[i].Query == identifier {
+				if q, ok := data["query"].(string); ok && strings.TrimSpace(q) != "" {
+					s.Config.Sources.XMonitor[i].Query = strings.TrimSpace(q)
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.XMonitor[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("x_monitor source not found: %s", identifier)
+
+	case "web_search":
+		for i := range s.Config.Sources.WebSearch {
+			if s.Config.Sources.WebSearch[i].Query == identifier {
+				if q, ok := data["query"].(string); ok && strings.TrimSpace(q) != "" {
+					s.Config.Sources.WebSearch[i].Query = strings.TrimSpace(q)
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.WebSearch[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("web_search source not found: %s", identifier)
+
+	default:
+		return fmt.Errorf("unsupported source type: %s", sourceType)
+	}
+}
+
 func (s *SettingsManager) ToggleSource(sourceType, identifier string, enabled bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

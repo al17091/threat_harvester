@@ -365,6 +365,31 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = mgr.Save("")
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source deleted"})
+	case "edit", "update":
+		id := req.Identifier
+		if id == "" && req.Data != nil {
+			if old, _ := req.Data["old_identifier"].(string); old != "" {
+				id = old
+			} else if u, _ := req.Data["url"].(string); u != "" {
+				id = u
+			} else if n, _ := req.Data["name"].(string); n != "" {
+				id = n
+			} else if c, _ := req.Data["channel"].(string); c != "" {
+				id = c
+			} else if q, _ := req.Data["query"].(string); q != "" {
+				id = q
+			}
+		}
+		if id == "" {
+			errorResponse(w, http.StatusBadRequest, "Missing identifier for update")
+			return
+		}
+		if err := mgr.UpdateSource(req.SourceType, id, req.Data); err != nil {
+			errorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		_ = mgr.Save("")
+		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source updated"})
 	default:
 		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %s", req.Action))
 	}
