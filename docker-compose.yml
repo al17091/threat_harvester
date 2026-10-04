@@ -22,7 +22,7 @@ services:
       - "8000:8000"
     environment:
       - PORT=8000
-      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/information_harvester
+      - DATABASE_URL=postgres://postgres:postgres@db:5432/information_harvester
       - TOR_PROXY_URL=socks5h://tor:9050
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}

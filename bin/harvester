@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
-# CLI wrapper for Threat Information Harvester
-export PYTHONPATH="${PYTHONPATH}:/app:$(pwd)"
-exec python3 -m backend.cli "$@"
+# CLI wrapper for Threat Information Harvester (Go)
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BIN="${DIR}/information-harvester"
+
+if [ ! -f "$BIN" ]; then
+    echo "Compiling information-harvester..." >&2
+    (cd "${DIR}/../backend" && go build -o "$BIN" ./cmd/harvester)
+fi
+
+exec "$BIN" "$@"

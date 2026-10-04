@@ -53,3 +53,8 @@ out/
 *.swp
 *~
 .DS_Store
+
+# Go
+bin/information-harvester
+*.exe
+*.test

@@ -1,26 +1,26 @@
-FROM python:3.12-slim
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Install system utilities and curl for health probes
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/go.mod backend/go.sum ./backend/
+WORKDIR /app/backend
+RUN go mod download
 
 COPY backend/ /app/backend/
-COPY bin/ /app/bin/
-COPY config.example.yaml config.yaml app.py /app/
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/harvester ./cmd/harvester
 
-RUN chmod +x /app/bin/harvester /app/app.py && \
-    ln -sf /app/bin/harvester /usr/local/bin/harvester
+FROM alpine:3.20
 
-ENV PYTHONPATH=/app
+RUN apk add --no-cache ca-certificates tzdata curl
+WORKDIR /app
+
+COPY --from=builder /app/harvester /usr/local/bin/harvester
+COPY --from=builder /app/harvester /app/harvester
+COPY config.example.yaml config.yaml ./
+
 ENV PORT=8000
-
 EXPOSE 8000
 
-CMD ["python", "app.py"]
+ENTRYPOINT ["harvester"]
+CMD ["web", "--port", "8000"]

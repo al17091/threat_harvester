@@ -1,0 +1,161 @@
+package pipeline
+
+import (
+	"context"
+	"log"
+	"sync"
+	"time"
+
+	"github.com/dapt/information_harvester/backend/internal/analyzer"
+	"github.com/dapt/information_harvester/backend/internal/config"
+	"github.com/dapt/information_harvester/backend/internal/harvesters"
+	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/dapt/information_harvester/backend/internal/notifiers"
+	"github.com/dapt/information_harvester/backend/internal/reporters"
+	"github.com/dapt/information_harvester/backend/internal/storage"
+)
+
+type PipelineSummary struct {
+	TotalHarvested   int            `json:"total_harvested"`
+	NewItems         int            `json:"new_items"`
+	Analyzed         int            `json:"analyzed"`
+	Notified         int            `json:"notified"`
+	NotionReported   int            `json:"notion_reported"`
+	NotionConfigured bool           `json:"notion_configured"`
+	SourceBreakdown  map[string]int `json:"source_breakdown"`
+}
+
+type Pipeline struct {
+	store          storage.Store
+	analyzer       *analyzer.GeminiThreatAnalyzer
+	notifier       *notifiers.NotificationManager
+	notionReporter *reporters.NotionReporter
+	harvesterList  []harvesters.Harvester
+}
+
+func NewPipeline(store storage.Store) *Pipeline {
+	return &Pipeline{
+		store:          store,
+		analyzer:       analyzer.NewGeminiThreatAnalyzer(),
+		notifier:       notifiers.NewNotificationManager(),
+		notionReporter: reporters.NewNotionReporter(),
+		harvesterList: []harvesters.Harvester{
+			harvesters.NewVendorRSSHarvester(),
+			harvesters.NewDarkwebOnionHarvester(),
+			harvesters.NewTelegramHarvester(),
+			harvesters.NewWebSearchHarvester(),
+			harvesters.NewXMonitorHarvester(),
+		},
+	}
+}
+
+func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOnly bool) (PipelineSummary, error) {
+	cfg := config.GetSettings().GetConfig()
+	if lookbackHours <= 0 {
+		lookbackHours = cfg.Pipeline.CheckIntervalHours
+		if lookbackHours <= 0 {
+			lookbackHours = 1
+		}
+	}
+
+	since := time.Now().UTC().Add(-time.Duration(lookbackHours)*time.Hour - 15*time.Minute)
+	log.Printf("=== Starting threat collection cycle (lookback: %dh, since: %s) ===", lookbackHours, since.Format(time.RFC3339))
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var allItems []models.ThreatItem
+	sourceCounts := make(map[string]int)
+
+	for _, h := range p.harvesterList {
+		wg.Add(1)
+		go func(h harvesters.Harvester) {
+			defer wg.Done()
+			log.Printf("[Pipeline] Starting harvester: %s", h.Name())
+
+			hCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			defer cancel()
+
+			items, err := h.Harvest(hCtx, &since)
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				log.Printf("[Pipeline] Harvester %s encountered error: %v", h.Name(), err)
+				sourceCounts[string(h.SourceType())] = 0
+				return
+			}
+
+			sourceCounts[string(h.SourceType())] = len(items)
+			allItems = append(allItems, items...)
+			log.Printf("[Pipeline] Harvester %s finished: %d items", h.Name(), len(items))
+		}(h)
+	}
+
+	wg.Wait()
+
+	// Deduplication
+	var newItems []models.ThreatItem
+	for _, item := range allItems {
+		seen, err := p.store.IsSeen(ctx, item.ID)
+		if err != nil || !seen {
+			newItems = append(newItems, item)
+		} else {
+			log.Printf("[Pipeline] Skipping seen item: %s", item.Title)
+		}
+	}
+
+	log.Printf("[Pipeline] Collected total: %d, New unique items to analyze: %d", len(allItems), len(newItems))
+
+	analyzedCount := 0
+	notifiedCount := 0
+	notionReportedCount := 0
+
+	for _, item := range newItems {
+		enriched, err := p.analyzer.Analyze(ctx, item)
+		if err != nil || enriched == nil {
+			log.Printf("[Pipeline] Error analyzing '%s': %v", item.Title, err)
+			continue
+		}
+		analyzedCount++
+
+		shouldNotify := false
+		if (enriched.JapanRelevance == models.JapanRelevanceDirect &&
+			(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh || enriched.Severity == models.SeverityMedium)) ||
+			enriched.Severity == models.SeverityCritical ||
+			(!notifyDirectOnly && enriched.Severity == models.SeverityHigh && enriched.JapanRelevance == models.JapanRelevanceIndirect) {
+			shouldNotify = true
+		}
+
+		notified := false
+		if shouldNotify {
+			log.Printf("[Pipeline] Alerting on threat: [%s] [%s] %s", enriched.Severity, enriched.JapanRelevance, enriched.TitleJa)
+			notified = p.notifier.Dispatch(ctx, enriched)
+			if notified {
+				notifiedCount++
+			}
+
+			if p.notionReporter.IsConfigured() {
+				if _, err := p.notionReporter.CreateIncidentPage(ctx, enriched); err == nil {
+					notionReportedCount++
+				}
+			}
+		}
+
+		if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {
+			log.Printf("[Pipeline] Failed to mark seen in store: %v", err)
+		}
+	}
+
+	summary := PipelineSummary{
+		TotalHarvested:   len(allItems),
+		NewItems:         len(newItems),
+		Analyzed:         analyzedCount,
+		Notified:         notifiedCount,
+		NotionReported:   notionReportedCount,
+		NotionConfigured: p.notionReporter.IsConfigured(),
+		SourceBreakdown:  sourceCounts,
+	}
+
+	log.Printf("=== Harvesting cycle complete: %+v ===", summary)
+	return summary, nil
+}

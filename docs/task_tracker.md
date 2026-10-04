@@ -52,12 +52,18 @@ Status tracking for the **Threat Information Harvester** project. This file is r
 - [x] **Kubernetes / Helm Enhancements**:
   - Added CloudNativePG (`Cluster` CRD) integration and secret binding.
 
-### Phase 5: Decoupled Full-Stack Architecture & Next.js SOC Dashboard
+### Phase 5: Decoupled Full-Stack Architecture, Next.js SOC Dashboard & Go Backend
 - [x] **Service Decoupling (`backend/` & `web/`)**:
   - Renamed and organized modules symmetrically into `backend/` and `web/`.
   - Removed awkward legacy folder structure.
+- [x] **High-Performance Go CTI Engine (`backend/`)**:
+  - Rebuilt backend in Go 1.22 with single static binary (`bin/information-harvester`, 25MB).
+  - Parallel concurrent harvesting using Goroutines across RSS, Dark Web (.onion via Tor SOCKS5), Telegram, X, and Gemini Grounded Search.
+  - Pure Go SQLite (`modernc.org/sqlite`, zero CGO) and PostgreSQL (CNPG) dual-engine support.
+  - Chi-based lightweight, high-throughput REST API with full CORS support.
+  - Multi-stage minimal Dockerfile (~25MB Alpine runner image).
 - [x] **Docker Compose (`docker-compose.yml`)**:
-  - Complete multi-container orchestration for `web` (Next.js), `backend` (FastAPI), `db` (Postgres 16), and `tor` (Tor SOCKS5 proxy).
+  - Complete multi-container orchestration for `web` (Next.js), `backend` (Go CTI Engine), `db` (Postgres 16), and `tor` (Tor SOCKS5 proxy).
 - [x] **Next.js 14 Cyber SOC Web Dashboard (`web/`)**:
   - Pure English user interface.
   - Reactive incident feeds, real-time filtering, detailed intelligence modal.
