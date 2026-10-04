@@ -66,13 +66,19 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 		query := qCfg.Query
 		log.Printf("[WebSearch] Running Gemini Grounded Search for query: %s", query)
 
+		currentDate := time.Now().UTC().Format("2006-01-02")
 		prompt := fmt.Sprintf(`
-You are a cyber threat intelligence researcher monitoring threats against Japan.
-Search for recent cyber attacks, ransomware incidents, data breaches, and zero-day advisories targeting Japanese companies, government, or infrastructure.
+Today's date is %s. You are a cyber threat intelligence researcher monitoring recent and active cyber threats against Japan.
+Search for breaking and recent cyber attacks, ransomware incidents, data breaches, and zero-day advisories targeting Japanese companies, government, or infrastructure.
+
+CRITICAL INSTRUCTION ON TIMESTAMPS:
+- Prioritize newly reported active incidents from the current year (2026) or within the last few weeks.
+- Do NOT output old historical archive incidents from previous years (such as 2023 or 2024) unless there is a fresh disclosure published today (%s).
+- Ensure "published_date" reflects the actual date of the report in ISO-8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ).
 
 Query context: %s
 
-Extract any distinct recent incidents found (up to 5 incidents per query).
+Extract distinct recent incidents found (up to 5 incidents per query).
 For each incident, output a JSON array of objects with the following schema:
 [
   {
@@ -84,7 +90,7 @@ For each incident, output a JSON array of objects with the following schema:
   }
 ]
 Only return valid JSON array without Markdown code block formatting.
-`, query)
+`, currentDate, currentDate, query)
 
 		reqPayload := map[string]interface{}{
 			"contents": []map[string]interface{}{

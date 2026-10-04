@@ -226,6 +226,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 	severity := q.Get("severity")
 	sourceType := q.Get("source_type")
 	search := q.Get("search")
+	sortBy := q.Get("sort_by")
 
 	items, err := s.store.GetHistory(ctx, storage.HistoryFilter{
 		Limit:      limit,
@@ -234,6 +235,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		Severity:   severity,
 		SourceType: sourceType,
 		Search:     search,
+		OrderBy:    sortBy,
 	})
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, err.Error())

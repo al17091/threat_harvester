@@ -132,6 +132,7 @@ export default function DashboardPage() {
   const [severityFilter, setSeverityFilter] = useState("");
   const [japanOnly, setJapanOnly] = useState(false);
   const [sourceTypeFilter, setSourceTypeFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"published_at" | "harvested_at">("published_at");
 
   // Modals & Toast
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
@@ -200,6 +201,7 @@ export default function DashboardPage() {
       if (severityFilter) params.append("severity", severityFilter);
       if (japanOnly) params.append("japan_only", "true");
       if (sourceTypeFilter) params.append("source_type", sourceTypeFilter);
+      if (sortBy) params.append("sort_by", sortBy);
 
       const res = await fetch(`/api/incidents?${params.toString()}`);
       if (res.ok) {
@@ -224,7 +226,7 @@ export default function DashboardPage() {
       fetchIncidents();
     }, 300);
     return () => clearTimeout(timer);
-  }, [search, severityFilter, japanOnly, sourceTypeFilter]);
+  }, [search, severityFilter, japanOnly, sourceTypeFilter, sortBy]);
 
   const triggerHarvest = async () => {
     setHarvesting(true);
@@ -665,6 +667,15 @@ export default function DashboardPage() {
                   <option value="web_search">Web Search</option>
                 </select>
 
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as "published_at" | "harvested_at")}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-500 font-medium"
+                >
+                  <option value="published_at">Sort: Source Published Date (Newest)</option>
+                  <option value="harvested_at">Sort: Ingestion Date (Newest)</option>
+                </select>
+
                 <button
                   onClick={fetchIncidents}
                   title="Refresh list"
@@ -730,7 +741,26 @@ export default function DashboardPage() {
                       <span className="text-xs text-slate-400 font-mono">{item.source_name}</span>
                     </div>
 
-                    <span className="text-xs text-slate-500 font-mono">{formatDate(item.harvested_at)}</span>
+                    <div className="text-right">
+                      <div className="text-xs text-cyan-400 font-mono font-medium flex items-center justify-end">
+                        {item.published_at ? (
+                          <>
+                            <span className="text-[10px] text-slate-500 mr-1.5 uppercase font-sans font-normal">Source:</span>
+                            {formatDate(item.published_at)}
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-[10px] text-slate-500 mr-1.5 uppercase font-sans font-normal">Harvested:</span>
+                            {formatDate(item.harvested_at)}
+                          </>
+                        )}
+                      </div>
+                      {item.published_at && (
+                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                          Collected: {formatDate(item.harvested_at)}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="text-base font-semibold text-white mb-2 leading-snug hover:text-cyan-400 transition">
@@ -1388,6 +1418,18 @@ export default function DashboardPage() {
                 <h2 className="text-lg font-bold text-white leading-snug">
                   {selectedIncident.enriched_parsed?.title_ja || selectedIncident.title}
                 </h2>
+                <div className="flex flex-wrap items-center gap-4 mt-2.5 text-xs text-slate-400 font-mono">
+                  <div>
+                    <span className="text-slate-500 mr-1.5 uppercase font-sans">Source Published:</span>
+                    <span className="text-cyan-300 font-medium">
+                      {selectedIncident.published_at ? formatDate(selectedIncident.published_at) : "Unknown / Realtime"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 mr-1.5 uppercase font-sans">Harvest Ingested:</span>
+                    <span className="text-slate-300">{formatDate(selectedIncident.harvested_at)}</span>
+                  </div>
+                </div>
               </div>
               <button
                 onClick={() => setSelectedIncident(null)}

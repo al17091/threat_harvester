@@ -80,6 +80,31 @@ func TestStorageOperations(t *testing.T) {
 		t.Fatalf("expected 1 history item, got %d", len(history))
 	}
 
+	// Insert older published item to test ordering
+	olderTime := now.Add(-24 * time.Hour)
+	olderItem := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"CERT-JP",
+		"Older advisory",
+		"https://cert.org/older",
+		"Older description",
+		"",
+		&olderTime,
+		nil,
+	)
+	_ = store.MarkSeen(ctx, olderItem, enriched, false)
+
+	historyOrdered, err := store.GetHistory(ctx, HistoryFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("GetHistory with ordering failed: %v", err)
+	}
+	if len(historyOrdered) < 2 {
+		t.Fatalf("expected at least 2 items, got %d", len(historyOrdered))
+	}
+	if historyOrdered[0]["id"] != item.ID {
+		t.Fatalf("expected newer published item to be first, got %v", historyOrdered[0]["id"])
+	}
+
 	// GetItem
 	retrieved, err := store.GetItem(ctx, item.ID)
 	if err != nil || retrieved == nil {

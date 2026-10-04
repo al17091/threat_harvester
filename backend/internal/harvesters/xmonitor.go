@@ -58,11 +58,17 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 		query := qCfg.Query
 		log.Printf("[XMonitor] Running Gemini Grounded Search for X: %s", query)
 
+		currentDate := time.Now().UTC().Format("2006-01-02")
 		prompt := fmt.Sprintf(`
-You are a cybersecurity intelligence analyst monitoring security researcher posts and breaking threat alerts on X (Twitter).
+Today's date is %s. You are a cybersecurity intelligence analyst monitoring security researcher posts and breaking threat alerts on X (Twitter).
 Search for recent tweets, threads, and reports regarding cyber attacks, zero-days, or data leaks related to: %s
 
-Extract any distinct recent incidents found (up to 5 posts/incidents per query).
+CRITICAL INSTRUCTION ON TIMESTAMPS:
+- Prioritize newly reported active incidents from the current year (2026) or within the last few weeks.
+- Do NOT output old historical archive incidents from previous years (such as 2023 or 2024) unless there is a fresh disclosure published today (%s).
+- Ensure "published_date" reflects the actual date of the tweet/disclosure in ISO-8601 (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ).
+
+Extract distinct recent incidents found (up to 5 posts/incidents per query).
 For each incident, output a JSON array of objects with the following schema:
 [
   {
@@ -74,7 +80,7 @@ For each incident, output a JSON array of objects with the following schema:
   }
 ]
 Only return valid JSON array without Markdown code block formatting.
-`, query)
+`, currentDate, query, currentDate)
 
 		reqPayload := map[string]interface{}{
 			"contents": []map[string]interface{}{

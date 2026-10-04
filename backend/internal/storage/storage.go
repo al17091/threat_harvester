@@ -24,6 +24,7 @@ type HistoryFilter struct {
 	Severity   string
 	SourceType string
 	Search     string
+	OrderBy    string
 }
 
 type Store interface {
@@ -142,6 +143,7 @@ func (s *SQLStore) initSchema() error {
 		enriched_data TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_harvested_at ON threat_items(harvested_at);
+	CREATE INDEX IF NOT EXISTS idx_published_at ON threat_items(published_at);
 	CREATE INDEX IF NOT EXISTS idx_source_type ON threat_items(source_type);
 	`
 	_, err := s.db.Exec(schema)
@@ -315,7 +317,11 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
-	query += " ORDER BY harvested_at DESC"
+	if f.OrderBy == "harvested_at" {
+		query += " ORDER BY harvested_at DESC"
+	} else {
+		query += " ORDER BY COALESCE(NULLIF(published_at, ''), harvested_at) DESC, harvested_at DESC"
+	}
 
 	limit := f.Limit
 	if limit <= 0 {
