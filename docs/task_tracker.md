@@ -41,13 +41,19 @@ Status tracking for the **Threat Information Harvester** project. This file is r
   - SQLite persistent cache for deduplication.
   - Rich Discord notifications with Japan-target highlight flags.
 
-### Phase 3: Cluster Testing & Dev Container Validation (Next Steps)
+### Phase 3: Open Source Governance & Community Readiness
+- [x] Establish **MIT License** explicitly permitting commercial and non-commercial usage.
+- [x] Create **SECURITY.md** with responsible CTI use disclaimer and vulnerability reporting policy.
+- [x] Create **CONTRIBUTING.md** defining PR workflow, quality checks, and Conventional Commits.
+- [x] Update **README.md** and **AGENT.md** with open-source badges and policy guidelines.
+
+### Phase 4: Cluster Testing & Dev Container Validation (Next Steps)
 - [ ] Deploy Helm chart in test namespace or local k3s (`helm upgrade --install`).
 - [ ] Exec into the `information-harvester-dev` Pod and run `harvester status`.
 - [ ] Test in-cluster Tor SOCKS5 proxy connectivity with `.onion` targets.
 - [ ] Verify automated CronJob execution and log output.
 
-### Phase 4: Refinements & Documentation
+### Phase 5: Refinements & Future Roadmap
 - [ ] Add CLI command to inspect historical cached threats (`harvester history`).
 - [ ] Provide optional Slack Webhook support alongside Discord.
 - [ ] Integrate SearXNG internal search engine if configured in cluster.

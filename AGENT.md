@@ -21,6 +21,12 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 - **Cost Efficiency**: High-cost commercial APIs (e.g., paid Twitter Enterprise API, commercial CTI feeds) are avoided. Free tiers, open-source solutions, web previews, RSS feeds, Tor proxying, and Gemini Grounded Search are prioritized.
 - **Target Audience**: Security analysts and DevOps engineers operating within Kubernetes environments.
 
+### 1.4 Open Source Software (OSS) & Commercial Use Policy
+- **Open Source Release**: This project is published as open-source software under the **MIT License**.
+- **Commercial Use Allowed**: Commercial use, modification, distribution, and private use are fully permitted without restriction.
+- **Third-Party Dependency Compliance**: All bundled dependencies, container base images, and Helm templates must use permissive open-source licenses compatible with commercial usage (MIT, Apache 2.0, BSD, etc.). Copyleft licenses requiring disclosure of proprietary user code (e.g., AGPL) should be avoided.
+- **Responsible Use & Disclaimer**: Operational adherence to [SECURITY.md](SECURITY.md) and legal compliance regarding passive OSINT/CTI collection is mandatory.
+
 ---
 
 ## 2. Architecture & System Design
@@ -64,6 +70,9 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 .
 ├── AGENT.md                      # Agent and contributor instructions
 ├── README.md                     # Project documentation
+├── LICENSE                       # MIT License (commercial use permitted)
+├── SECURITY.md                   # Security policy & responsible CTI use disclaimer
+├── CONTRIBUTING.md               # Open source contribution guidelines
 ├── Dockerfile                    # Production container image
 ├── Dockerfile.dev                # Development & CLI container image
 ├── requirements.txt              # Production Python dependencies

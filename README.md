@@ -1,7 +1,12 @@
 # Threat Information Harvester (Japan Cyber Threat Intelligence)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python: 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/information-harvester)
+
 脅威情報（Cyber Threat Intelligence: CTI）の自動収集・AI分析・通知プラットフォームです。  
 特に**日本国内を標的・関係先とするサイバー攻撃やインシデント情報**の網羅的かつ低コストな収集に特化しています。
+
 
 ---
 
@@ -115,7 +120,17 @@ harvester test --source vendor
 
 ---
 
-## 5. 開発規約
+## 5. 開発規約・コミュニティ
 
-本リポジトリの開発規約、Conventional Commits フォーマット、エージェント対応方針は [AGENT.md](AGENT.md) に定義されています。
-タスクの進捗状況および今後のロードマップは [docs/task_tracker.md](docs/task_tracker.md) を参照してください。
+- **開発規約**: コミット規約やエージェント対応方針は [AGENT.md](AGENT.md) に定義されています。
+- **コントリビューション**: プルリクエストや機能提案の手順は [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
+- **タスク追跡**: 進捗状況および今後のロードマップは [docs/task_tracker.md](docs/task_tracker.md) を参照してください。
+- **セキュリティ & 免責事項**: 脆弱性報告や利用上の免責事項は [SECURITY.md](SECURITY.md) をご確認ください。
+
+---
+
+## 6. ライセンス (License)
+
+本プロジェクトは **[MIT License](LICENSE)** の下で公開されているオープンソースソフトウェアです。  
+商用・非商用を問わず自由にご利用・改変・再配布いただけます。
+
