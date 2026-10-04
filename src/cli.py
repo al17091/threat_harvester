@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -154,6 +155,68 @@ def test_onion_command(url: str):
         click.echo(f"[+] Preview:\n{resp.text[:500]}...")
     except Exception as e:
         click.echo(f"[!] Error fetching {url} through Tor: {e}", err=True)
+
+
+@cli.command("history")
+@click.option("--limit", default=20, help="Number of items to show (default: 20)")
+@click.option("--japan-only", is_flag=True, help="Only show items targeting Japan directly")
+@click.option("--db", default=None, help="Custom SQLite cache database path")
+def history_command(limit: int, japan_only: bool, db: str | None):
+    """View collected threat items from the database cache."""
+    db_path = db or os.getenv("CACHE_DB_PATH", settings.cache_db_path)
+    cache = ThreatCache(db_path)
+    rows = cache.get_history(limit=limit, japan_only=japan_only)
+
+    if not rows:
+        click.echo("No threat intelligence records found in cache.")
+        return
+
+    table_data = []
+    for r in rows:
+        item_id = r["id"][:8]
+        src = f"{r['source_type']} ({r['source_name'][:12]})"
+        title = r["title"][:50]
+        sev = r.get("severity") or "-"
+        jp = r.get("japan_relevance") or "-"
+        notified = "Yes" if r.get("notified_at") else "No"
+        table_data.append([item_id, src, sev, jp, notified, title])
+
+    headers = ["ID", "Source", "Severity", "Japan Rel", "Notified", "Title"]
+    click.echo(tabulate(table_data, headers=headers, tablefmt="fancy_grid"))
+    click.echo(f"\nShowing {len(rows)} items (use 'harvester show <id>' for details)")
+
+
+@cli.command("show")
+@click.argument("item_id")
+@click.option("--db", default=None, help="Custom SQLite cache database path")
+def show_command(item_id: str, db: str | None):
+    """Show detailed view of a specific threat record by ID."""
+    db_path = db or os.getenv("CACHE_DB_PATH", settings.cache_db_path)
+    cache = ThreatCache(db_path)
+    # Search by prefix or exact ID
+    with cache._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM threat_items WHERE id LIKE ?", (f"{item_id}%",))
+        row = cursor.fetchone()
+
+    if not row:
+        click.echo(f"[!] Threat item not found matching ID '{item_id}'", err=True)
+        return
+
+    data = dict(row)
+    click.echo("\n" + "=" * 60)
+    click.echo(f"ID:              {data['id']}")
+    click.echo(f"Source:          {data['source_type']} ({data['source_name']})")
+    click.echo(f"Title:           {data['title']}")
+    click.echo(f"URL:             {data.get('url') or 'N/A'}")
+    click.echo(f"Severity:        {data.get('severity') or 'Unknown'}")
+    click.echo(f"Japan Relevance: {data.get('japan_relevance') or 'Unknown'}")
+    click.echo(f"Harvested At:    {data['harvested_at']}")
+    click.echo(f"Notified:        {data.get('notified_at') or 'No'}")
+    click.echo("-" * 60)
+    click.echo("Summary / Content:")
+    click.echo(data.get("summary", ""))
+    click.echo("=" * 60 + "\n")
 
 
 if __name__ == "__main__":

@@ -104,6 +104,34 @@ class ThreatCache:
                 "db_path": self.db_path,
             }
 
+    def get_history(
+        self,
+        limit: int = 20,
+        japan_only: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Retrieve recent threat items from the database."""
+        query = "SELECT * FROM threat_items WHERE 1=1"
+        params: list[Any] = []
+
+        if japan_only:
+            query += " AND japan_relevance = 'Direct'"
+
+        query += " ORDER BY harvested_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, tuple(params))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_item(self, item_id: str) -> dict[str, Any] | None:
+        """Retrieve single threat item by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM threat_items WHERE id = ?", (item_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
     def cleanup_old(self, retention_days: int = 60) -> int:
         """Remove records older than retention_days."""
         threshold = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
@@ -113,3 +141,4 @@ class ThreatCache:
             deleted = cursor.rowcount
             conn.commit()
             return deleted
+
