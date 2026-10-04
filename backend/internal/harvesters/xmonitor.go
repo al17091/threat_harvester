@@ -54,7 +54,11 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 	var items []models.ThreatItem
 
 	for _, qCfg := range cfg.Sources.XMonitor {
-		if !qCfg.Enabled {
+		tier := qCfg.ComplianceTier
+		if tier == "" {
+			tier = config.TierCommercialViaOfficialAPI
+		}
+		if !qCfg.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 

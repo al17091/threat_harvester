@@ -39,7 +39,11 @@ func (h *TelegramHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 	var items []models.ThreatItem
 
 	for _, ch := range cfg.Sources.Telegram {
-		if !ch.Enabled {
+		tier := ch.ComplianceTier
+		if tier == "" {
+			tier = config.TierToSRestricted
+		}
+		if !ch.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 

@@ -68,7 +68,11 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 	var items []models.ThreatItem
 
 	for _, qCfg := range cfg.Sources.WebSearch {
-		if !qCfg.Enabled {
+		tier := qCfg.ComplianceTier
+		if tier == "" {
+			tier = config.TierCommercialViaOfficialAPI
+		}
+		if !qCfg.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 

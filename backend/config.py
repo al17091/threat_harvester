@@ -33,10 +33,23 @@ def expand_env_vars(data: Any) -> Any:
 # --- Configuration Models ---
 
 
+class ComplianceTiersConfig(BaseModel):
+    commercial_ready: bool = True
+    commercial_via_official_api: bool = True
+    tos_restricted: bool = True
+    darkweb_access: bool = True
+
+
+class ComplianceConfig(BaseModel):
+    mode: str = "all"
+    tiers: ComplianceTiersConfig = Field(default_factory=ComplianceTiersConfig)
+
+
 class FeedSourceConfig(BaseModel):
     name: str
     url: str
     category: str = "general"
+    compliance_tier: str = "commercial_ready"
     enabled: bool = True
 
 
@@ -46,6 +59,7 @@ FeedConfig = FeedSourceConfig
 
 class TelegramSourceConfig(BaseModel):
     channel: str
+    compliance_tier: str = "tos_restricted"
     enabled: bool = True
 
 
@@ -53,6 +67,7 @@ class DarkwebSourceConfig(BaseModel):
     name: str
     url: str
     type: str = "api"  # "api", "rss", or "onion"
+    compliance_tier: str = "commercial_via_official_api"
     enabled: bool = True
 
 
@@ -60,6 +75,7 @@ class QuerySourceConfig(BaseModel):
     name: str = ""
     directive: str = ""
     query: str = ""
+    compliance_tier: str = "commercial_via_official_api"
     enabled: bool = True
 
 
@@ -118,6 +134,7 @@ class PipelineConfig(BaseModel):
 
 class AppConfig(BaseModel):
     version: str = "1.0"
+    compliance: ComplianceConfig = Field(default_factory=ComplianceConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     ai: AiConfig = Field(default_factory=AiConfig)
     sinks: SinksConfig = Field(default_factory=SinksConfig)

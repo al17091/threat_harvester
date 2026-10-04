@@ -42,7 +42,11 @@ func (h *VendorRSSHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 	var items []models.ThreatItem
 
 	for _, feedCfg := range cfg.Sources.VendorRSS {
-		if !feedCfg.Enabled {
+		tier := feedCfg.ComplianceTier
+		if tier == "" {
+			tier = config.TierCommercialReady
+		}
+		if !feedCfg.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 

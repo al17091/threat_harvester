@@ -104,7 +104,15 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 	var items []models.ThreatItem
 
 	for _, target := range cfg.Sources.DarkwebOnion {
-		if !target.Enabled {
+		tier := target.ComplianceTier
+		if tier == "" {
+			if target.Type == "api" {
+				tier = config.TierCommercialViaOfficialAPI
+			} else {
+				tier = config.TierDarkwebAccess
+			}
+		}
+		if !target.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 

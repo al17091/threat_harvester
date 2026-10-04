@@ -35,8 +35,22 @@ import {
   Pencil,
   Terminal,
   Sparkles,
+  Scale,
+  ShieldCheck,
 } from "lucide-react";
 import { TerminalConsole } from "./components/TerminalConsole";
+
+interface ComplianceTiers {
+  commercial_ready: boolean;
+  commercial_via_official_api: boolean;
+  tos_restricted: boolean;
+  darkweb_access: boolean;
+}
+
+interface ComplianceConfig {
+  mode: string;
+  tiers: ComplianceTiers;
+}
 
 interface Incident {
   id: string;
@@ -74,6 +88,11 @@ interface SystemStatus {
     database_url?: string;
     db_path?: string;
   };
+  compliance?: {
+    mode: string;
+    tiers: ComplianceTiers;
+    tier_breakdown?: Record<string, { total: number; active: number }>;
+  };
   tor_proxy: {
     online: boolean;
     url: string;
@@ -107,6 +126,7 @@ interface SystemStatus {
 
 interface ConfigData {
   version?: string;
+  compliance?: ComplianceConfig;
   database?: {
     type?: string;
     host?: string;
@@ -124,11 +144,11 @@ interface ConfigData {
     request_timeout?: number;
   };
   sources?: {
-    vendor_rss?: Array<{ name: string; url: string; category?: string; enabled: boolean }>;
-    telegram?: Array<{ channel: string; enabled: boolean }>;
-    darkweb_onion?: Array<{ name: string; url: string; type?: string; enabled: boolean }>;
-    x_monitor?: Array<{ name?: string; directive?: string; query: string; enabled: boolean }>;
-    web_search?: Array<{ name?: string; directive?: string; query: string; enabled: boolean }>;
+    vendor_rss?: Array<{ name: string; url: string; category?: string; compliance_tier?: string; enabled: boolean }>;
+    telegram?: Array<{ channel: string; compliance_tier?: string; enabled: boolean }>;
+    darkweb_onion?: Array<{ name: string; url: string; type?: string; compliance_tier?: string; enabled: boolean }>;
+    x_monitor?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
+    web_search?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
   };
 }
 
@@ -168,12 +188,13 @@ export default function DashboardPage() {
       directive?: string;
       query: string;
       type: string;
+      compliance_tier?: string;
       mode?: "directive" | "query";
     };
   }>({
     visible: false,
     type: "vendor_rss",
-    form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+    form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", compliance_tier: "commercial_ready", mode: "directive" },
   });
   const [editModal, setEditModal] = useState<{
     visible: boolean;
@@ -187,13 +208,14 @@ export default function DashboardPage() {
       directive?: string;
       query: string;
       type: string;
+      compliance_tier?: string;
       mode?: "directive" | "query";
     };
   }>({
     visible: false,
     type: "vendor_rss",
     originalId: "",
-    form: { name: "", url: "", category: "general", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+    form: { name: "", url: "", category: "general", channel: "", directive: "", query: "", type: "rss", compliance_tier: "commercial_ready", mode: "directive" },
   });
   const [previewQueries, setPreviewQueries] = useState<string[]>([]);
   const [generatingQueries, setGeneratingQueries] = useState<boolean>(false);
@@ -416,6 +438,141 @@ export default function DashboardPage() {
     }
   };
 
+  const handleSetComplianceMode = async (mode: string) => {
+    try {
+      const res = await fetch("/api/config/compliance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      if (res.ok) {
+        showToast(`Compliance mode updated to ${mode.toUpperCase()}`);
+        await fetchConfig();
+        await fetchStatus();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || "Failed to update compliance mode", "error");
+      }
+    } catch (e) {
+      showToast("Network error updating compliance mode", "error");
+    }
+  };
+
+  const handleToggleComplianceTier = async (tier: string, enabled: boolean) => {
+    try {
+      const res = await fetch("/api/config/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "toggle_compliance_tier", identifier: tier, enabled }),
+      });
+      if (res.ok) {
+        showToast(`Tier '${tier}' ${enabled ? "enabled" : "disabled"}`);
+        await fetchConfig();
+        await fetchStatus();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || "Failed to update compliance tier", "error");
+      }
+    } catch (e) {
+      showToast("Network error updating compliance tier", "error");
+    }
+  };
+
+  const getSourceComplianceTier = (sourceType: string, item: any): string => {
+    if (item.compliance_tier) return item.compliance_tier;
+    if (sourceType === "vendor_rss") return "commercial_ready";
+    if (sourceType === "telegram") return "tos_restricted";
+    if (sourceType === "darkweb_onion") {
+      return item.type === "api" ? "commercial_via_official_api" : "darkweb_access";
+    }
+    if (sourceType === "x_monitor" || sourceType === "web_search") return "commercial_via_official_api";
+    return "commercial_ready";
+  };
+
+  const isTierActive = (tier: string): boolean => {
+    const tiers = config?.compliance?.tiers;
+    if (!tiers) return true;
+    switch (tier) {
+      case "commercial_ready":
+        return tiers.commercial_ready;
+      case "commercial_via_official_api":
+        return tiers.commercial_via_official_api;
+      case "tos_restricted":
+        return tiers.tos_restricted;
+      case "darkweb_access":
+        return tiers.darkweb_access;
+      default:
+        return true;
+    }
+  };
+
+  const renderComplianceBadge = (tier: string, active: boolean) => {
+    switch (tier) {
+      case "commercial_ready":
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border font-mono ${
+              active
+                ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/80"
+                : "bg-slate-900 text-slate-500 border-slate-800 line-through opacity-70"
+            }`}
+            title="Commercial Ready: Permissive official RSS feeds & APIs"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-emerald-400" : "bg-slate-600"}`} />
+            Commercial Ready
+            {!active && <span className="ml-1 text-[9px] text-rose-400 no-underline font-sans">[Disabled]</span>}
+          </span>
+        );
+      case "commercial_via_official_api":
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border font-mono ${
+              active
+                ? "bg-amber-950/80 text-amber-300 border-amber-800/80"
+                : "bg-slate-900 text-slate-500 border-slate-800 line-through opacity-70"
+            }`}
+            title="Commercial via Official API: Requires switching to Twitter API v2, Telegram Bot API, Vertex AI, etc."
+          >
+            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-amber-400" : "bg-slate-600"}`} />
+            Commercial via Official API
+            {!active && <span className="ml-1 text-[9px] text-rose-400 no-underline font-sans">[Disabled]</span>}
+          </span>
+        );
+      case "tos_restricted":
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border font-mono ${
+              active
+                ? "bg-orange-950/80 text-orange-400 border-orange-800/80"
+                : "bg-slate-900 text-slate-500 border-slate-800 line-through opacity-70"
+            }`}
+            title="Non-Commercial (ToS Scraping): Web preview / scraping violates platform terms of service without official API"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-orange-400" : "bg-slate-600"}`} />
+            Non-Commercial: ToS Scraping
+            {!active && <span className="ml-1 text-[9px] text-rose-400 no-underline font-sans">[Disabled]</span>}
+          </span>
+        );
+      case "darkweb_access":
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border font-mono ${
+              active
+                ? "bg-rose-950/80 text-rose-400 border-rose-800/80"
+                : "bg-slate-900 text-slate-500 border-slate-800 line-through opacity-70"
+            }`}
+            title="Non-Commercial (Dark Web): Direct .onion crawler / Tor reachability for security research only"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-rose-400" : "bg-slate-600"}`} />
+            Non-Commercial: Dark Web
+            {!active && <span className="ml-1 text-[9px] text-rose-400 no-underline font-sans">[Disabled]</span>}
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
+
   const handleAddSource = async () => {
     const type = addModal.type;
     let data: any = {};
@@ -429,6 +586,9 @@ export default function DashboardPage() {
         query: addModal.form.mode === "query" ? addModal.form.query : addModal.form.query,
         enabled: true,
       };
+    }
+    if (addModal.form.compliance_tier) {
+      data.compliance_tier = addModal.form.compliance_tier;
     }
 
     try {
@@ -466,6 +626,9 @@ export default function DashboardPage() {
         directive: editModal.form.mode === "directive" ? editModal.form.directive : "",
         query: editModal.form.mode === "query" ? editModal.form.query : editModal.form.query,
       };
+    }
+    if (editModal.form.compliance_tier) {
+      data.compliance_tier = editModal.form.compliance_tier;
     }
 
     try {
@@ -1144,6 +1307,180 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* Commercial Compliance & Usage Controls Bar */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 mb-6 shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <Scale className="w-5 h-5 text-cyan-400" />
+                    <h3 className="font-bold text-white text-base">Commercial Compliance & Usage Controls</h3>
+                    <span className="px-2.5 py-0.5 rounded text-[11px] font-mono bg-cyan-950/80 text-cyan-300 border border-cyan-800/60 uppercase">
+                      Mode: {config?.compliance?.mode || "all"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Control data harvesting tiers for commercial OSS usage, legal licensing compliance, and security research safety.
+                  </p>
+                </div>
+
+                {/* Preset Profiles */}
+                <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                  <button
+                    onClick={() => handleSetComplianceMode("commercial_only")}
+                    className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                      config?.compliance?.mode === "commercial_only"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-slate-400 hover:text-emerald-300 hover:bg-slate-900"
+                    }`}
+                    title="Enable only fully commercial-ready sources (Vendor RSS, Official Sinks)"
+                  >
+                    🏢 Commercial Only
+                  </button>
+                  <button
+                    onClick={() => handleSetComplianceMode("official_api_ready")}
+                    className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                      config?.compliance?.mode === "official_api_ready"
+                        ? "bg-amber-600 text-white shadow"
+                        : "text-slate-400 hover:text-amber-300 hover:bg-slate-900"
+                    }`}
+                    title="Enable Commercial Ready + Official API sources (requires API keys)"
+                  >
+                    🔑 Official API Ready
+                  </button>
+                  <button
+                    onClick={() => handleSetComplianceMode("all")}
+                    className={`px-3 py-1 rounded text-xs font-semibold transition ${
+                      config?.compliance?.mode === "all"
+                        ? "bg-purple-600 text-white shadow"
+                        : "text-slate-400 hover:text-purple-300 hover:bg-slate-900"
+                    }`}
+                    title="Enable all sources including Darkweb and Web Scraping for security research"
+                  >
+                    🧪 All / Research
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 Compliance Tiers Grid / Toggles */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                {/* 1. Commercial Ready */}
+                <div className={`p-3.5 rounded-lg border transition ${
+                  config?.compliance?.tiers?.commercial_ready
+                    ? "bg-emerald-950/20 border-emerald-800/60"
+                    : "bg-slate-950/60 border-slate-800 opacity-60"
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center text-xs font-bold text-emerald-400 font-mono">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
+                      Commercial Ready
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config?.compliance?.tiers?.commercial_ready ?? true}
+                        onChange={(e) => handleToggleComplianceTier("commercial_ready", e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-500" />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Permissive official RSS/Atom feeds, open CERT DBs, and standard Webhook sinks.
+                  </p>
+                  <div className="mt-2 text-[10px] font-mono text-emerald-500/80">
+                    Active: {status?.compliance?.tier_breakdown?.commercial_ready?.active ?? 0} / {status?.compliance?.tier_breakdown?.commercial_ready?.total ?? 0}
+                  </div>
+                </div>
+
+                {/* 2. Commercial via Official API */}
+                <div className={`p-3.5 rounded-lg border transition ${
+                  config?.compliance?.tiers?.commercial_via_official_api
+                    ? "bg-amber-950/20 border-amber-800/60"
+                    : "bg-slate-950/60 border-slate-800 opacity-60"
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center text-xs font-bold text-amber-300 font-mono">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 mr-1.5" />
+                      Commercial via Official API
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config?.compliance?.tiers?.commercial_via_official_api ?? true}
+                        onChange={(e) => handleToggleComplianceTier("commercial_via_official_api", e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-amber-500" />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Can be commercialized by plugging in Twitter API v2, Web Search API, or Vertex AI.
+                  </p>
+                  <div className="mt-2 text-[10px] font-mono text-amber-500/80">
+                    Active: {status?.compliance?.tier_breakdown?.commercial_via_official_api?.active ?? 0} / {status?.compliance?.tier_breakdown?.commercial_via_official_api?.total ?? 0}
+                  </div>
+                </div>
+
+                {/* 3. Non-Commercial: ToS Scraping */}
+                <div className={`p-3.5 rounded-lg border transition ${
+                  config?.compliance?.tiers?.tos_restricted
+                    ? "bg-orange-950/20 border-orange-800/60"
+                    : "bg-slate-950/60 border-slate-800 opacity-60"
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center text-xs font-bold text-orange-400 font-mono">
+                      <span className="w-2 h-2 rounded-full bg-orange-400 mr-1.5" />
+                      Non-Commercial: ToS Scraping
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config?.compliance?.tiers?.tos_restricted ?? true}
+                        onChange={(e) => handleToggleComplianceTier("tos_restricted", e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-orange-500" />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Web preview scraping (e.g. Telegram web) without official API keys.
+                  </p>
+                  <div className="mt-2 text-[10px] font-mono text-orange-500/80">
+                    Active: {status?.compliance?.tier_breakdown?.tos_restricted?.active ?? 0} / {status?.compliance?.tier_breakdown?.tos_restricted?.total ?? 0}
+                  </div>
+                </div>
+
+                {/* 4. Non-Commercial: Dark Web */}
+                <div className={`p-3.5 rounded-lg border transition ${
+                  config?.compliance?.tiers?.darkweb_access
+                    ? "bg-rose-950/20 border-rose-800/60"
+                    : "bg-slate-950/60 border-slate-800 opacity-60"
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center text-xs font-bold text-rose-400 font-mono">
+                      <span className="w-2 h-2 rounded-full bg-rose-400 mr-1.5" />
+                      Non-Commercial: Dark Web
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config?.compliance?.tiers?.darkweb_access ?? true}
+                        onChange={(e) => handleToggleComplianceTier("darkweb_access", e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:left-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-rose-500" />
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-snug">
+                    Direct Tor .onion crawler reaching ransomware DLS leaks. Research use only.
+                  </p>
+                  <div className="mt-2 text-[10px] font-mono text-rose-500/80">
+                    Active: {status?.compliance?.tier_breakdown?.darkweb_access?.active ?? 0} / {status?.compliance?.tier_breakdown?.darkweb_access?.total ?? 0}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-6">
               {/* 1. RSS Feeds */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
@@ -1160,7 +1497,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "vendor_rss",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss" },
+                        form: { name: "", url: "", channel: "", query: "", type: "rss", compliance_tier: "commercial_ready" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1170,58 +1507,64 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.vendor_rss?.map((feed) => (
-                    <div key={feed.url} className="py-3 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-sm text-slate-200">{feed.name}</span>
-                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
-                            {feed.category}
-                          </span>
+                  {config?.sources?.vendor_rss?.map((feed) => {
+                    const tier = getSourceComplianceTier("vendor_rss", feed);
+                    const active = isTierActive(tier);
+                    return (
+                      <div key={feed.url} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium text-sm text-slate-200">{feed.name}</span>
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">
+                              {feed.category}
+                            </span>
+                            {renderComplianceBadge(tier, active)}
+                          </div>
+                          <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{feed.url}</div>
                         </div>
-                        <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{feed.url}</div>
-                      </div>
 
-                      <div className="flex items-center space-x-3">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={feed.enabled}
-                            onChange={(e) => handleToggleSource("vendor_rss", feed.url, e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
-                        <button
-                          onClick={() =>
-                            setEditModal({
-                              visible: true,
-                              type: "vendor_rss",
-                              originalId: feed.url,
-                              form: {
-                                name: feed.name,
-                                url: feed.url,
-                                category: feed.category || "general",
-                                channel: "",
-                                query: "",
-                                type: "rss",
-                              },
-                            })
-                          }
-                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
-                          title="Edit Feed"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSource("vendor_rss", feed.url)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center space-x-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={feed.enabled}
+                              onChange={(e) => handleToggleSource("vendor_rss", feed.url, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() =>
+                              setEditModal({
+                                visible: true,
+                                type: "vendor_rss",
+                                originalId: feed.url,
+                                form: {
+                                  name: feed.name,
+                                  url: feed.url,
+                                  category: feed.category || "general",
+                                  channel: "",
+                                  query: "",
+                                  type: "rss",
+                                  compliance_tier: feed.compliance_tier || tier,
+                                },
+                              })
+                            }
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit Feed"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("vendor_rss", feed.url)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1240,7 +1583,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "darkweb_onion",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss" },
+                        form: { name: "", url: "", channel: "", query: "", type: "rss", compliance_tier: "darkweb_access" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1250,58 +1593,64 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.darkweb_onion?.map((dw) => (
-                    <div key={dw.url} className="py-3 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <span className="font-medium text-sm text-slate-200">{dw.name}</span>
-                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-purple-950 text-purple-300 font-mono uppercase">
-                            {dw.type}
-                          </span>
+                  {config?.sources?.darkweb_onion?.map((dw) => {
+                    const tier = getSourceComplianceTier("darkweb_onion", dw);
+                    const active = isTierActive(tier);
+                    return (
+                      <div key={dw.url} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium text-sm text-slate-200">{dw.name}</span>
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-purple-950 text-purple-300 font-mono uppercase">
+                              {dw.type}
+                            </span>
+                            {renderComplianceBadge(tier, active)}
+                          </div>
+                          <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{dw.url}</div>
                         </div>
-                        <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{dw.url}</div>
-                      </div>
 
-                      <div className="flex items-center space-x-3">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={dw.enabled}
-                            onChange={(e) => handleToggleSource("darkweb_onion", dw.url, e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
-                        <button
-                          onClick={() =>
-                            setEditModal({
-                              visible: true,
-                              type: "darkweb_onion",
-                              originalId: dw.url,
-                              form: {
-                                name: dw.name,
-                                url: dw.url,
-                                category: "darkweb",
-                                channel: "",
-                                query: "",
-                                type: dw.type || "rss",
-                              },
-                            })
-                          }
-                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
-                          title="Edit Target"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSource("darkweb_onion", dw.url)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center space-x-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={dw.enabled}
+                              onChange={(e) => handleToggleSource("darkweb_onion", dw.url, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() =>
+                              setEditModal({
+                                visible: true,
+                                type: "darkweb_onion",
+                                originalId: dw.url,
+                                form: {
+                                  name: dw.name,
+                                  url: dw.url,
+                                  category: "darkweb",
+                                  channel: "",
+                                  query: "",
+                                  type: dw.type || "rss",
+                                  compliance_tier: dw.compliance_tier || tier,
+                                },
+                              })
+                            }
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit Target"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("darkweb_onion", dw.url)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1320,7 +1669,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "telegram",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss" },
+                        form: { name: "", url: "", channel: "", query: "", type: "rss", compliance_tier: "tos_restricted" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1330,60 +1679,66 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.telegram?.map((tg) => (
-                    <div key={tg.channel} className="py-3 flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm font-mono text-cyan-300">@{tg.channel}</span>
-                        <a
-                          href={`https://t.me/s/${tg.channel}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-slate-500 hover:text-cyan-400"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 inline" />
-                        </a>
-                      </div>
+                  {config?.sources?.telegram?.map((tg) => {
+                    const tier = getSourceComplianceTier("telegram", tg);
+                    const active = isTierActive(tier);
+                    return (
+                      <div key={tg.channel} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-mono text-cyan-300">@{tg.channel}</span>
+                          <a
+                            href={`https://t.me/s/${tg.channel}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-slate-500 hover:text-cyan-400"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 inline" />
+                          </a>
+                          {renderComplianceBadge(tier, active)}
+                        </div>
 
-                      <div className="flex items-center space-x-3">
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={tg.enabled}
-                            onChange={(e) => handleToggleSource("telegram", tg.channel, e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
-                        <button
-                          onClick={() =>
-                            setEditModal({
-                              visible: true,
-                              type: "telegram",
-                              originalId: tg.channel,
-                              form: {
-                                name: "",
-                                url: "",
-                                category: "",
-                                channel: tg.channel,
-                                query: "",
-                                type: "",
-                              },
-                            })
-                          }
-                          className="p-1 text-slate-500 hover:text-cyan-400 transition"
-                          title="Edit Channel"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSource("telegram", tg.channel)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center space-x-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={tg.enabled}
+                              onChange={(e) => handleToggleSource("telegram", tg.channel, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() =>
+                              setEditModal({
+                                visible: true,
+                                type: "telegram",
+                                originalId: tg.channel,
+                                form: {
+                                  name: "",
+                                  url: "",
+                                  category: "",
+                                  channel: tg.channel,
+                                  query: "",
+                                  type: "",
+                                  compliance_tier: tg.compliance_tier || tier,
+                                },
+                              })
+                            }
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit Channel"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("telegram", tg.channel)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1403,7 +1758,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "x_monitor",
-                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", compliance_tier: "tos_restricted", mode: "directive" },
                       });
                     }}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1416,8 +1771,10 @@ export default function DashboardPage() {
                   {config?.sources?.x_monitor?.map((xm, idx) => {
                     const identifier = xm.directive || xm.query || xm.name || `x_${idx}`;
                     const isDirective = Boolean(xm.directive);
+                    const tier = getSourceComplianceTier("x_monitor", xm);
+                    const active = isTierActive(tier);
                     return (
-                      <div key={identifier} className="py-3 flex items-start justify-between gap-4">
+                      <div key={identifier} className={`py-3 flex items-start justify-between gap-4 transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-2 mb-1">
                             {isDirective ? (
@@ -1435,6 +1792,7 @@ export default function DashboardPage() {
                                 {xm.name}
                               </span>
                             )}
+                            {renderComplianceBadge(tier, active)}
                           </div>
                           {isDirective ? (
                             <p className="text-xs text-slate-300 leading-relaxed font-sans break-words">
@@ -1477,6 +1835,7 @@ export default function DashboardPage() {
                                   directive: xm.directive || "",
                                   query: xm.query || "",
                                   type: "",
+                                  compliance_tier: xm.compliance_tier || tier,
                                   mode: xm.directive ? "directive" : "query",
                                 },
                               });
@@ -1516,7 +1875,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "web_search",
-                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", mode: "directive" },
+                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "rss", compliance_tier: "commercial_via_official_api", mode: "directive" },
                       });
                     }}
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1529,8 +1888,10 @@ export default function DashboardPage() {
                   {config?.sources?.web_search?.map((ws, idx) => {
                     const identifier = ws.directive || ws.query || ws.name || `ws_${idx}`;
                     const isDirective = Boolean(ws.directive);
+                    const tier = getSourceComplianceTier("web_search", ws);
+                    const active = isTierActive(tier);
                     return (
-                      <div key={identifier} className="py-3 flex items-start justify-between gap-4">
+                      <div key={identifier} className={`py-3 flex items-start justify-between gap-4 transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-2 mb-1">
                             {isDirective ? (
@@ -1548,6 +1909,7 @@ export default function DashboardPage() {
                                 {ws.name}
                               </span>
                             )}
+                            {renderComplianceBadge(tier, active)}
                           </div>
                           {isDirective ? (
                             <p className="text-xs text-slate-300 leading-relaxed font-sans break-words">
@@ -1590,6 +1952,7 @@ export default function DashboardPage() {
                                   directive: ws.directive || "",
                                   query: ws.query || "",
                                   type: "",
+                                  compliance_tier: ws.compliance_tier || tier,
                                   mode: ws.directive ? "directive" : "query",
                                 },
                               });
@@ -2183,6 +2546,30 @@ export default function DashboardPage() {
                   )}
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Compliance Classification Tier
+                </label>
+                <select
+                  value={addModal.form.compliance_tier || "commercial_ready"}
+                  onChange={(e) =>
+                    setAddModal({
+                      ...addModal,
+                      form: { ...addModal.form, compliance_tier: e.target.value },
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="commercial_ready">🟢 Commercial Ready (Safe for OSS / Commercial distribution)</option>
+                  <option value="commercial_via_official_api">🟡 Commercial via Official API (Requires API Key / Official Endpoint)</option>
+                  <option value="tos_restricted">🟠 Non-Commercial: ToS Scraping (Research only / Web Scraping)</option>
+                  <option value="darkweb_access">🔴 Non-Commercial: Dark Web (Research only / Onion Routing)</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Controls commercial readiness and global tier killswitch behavior.
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center justify-end space-x-2">
@@ -2408,6 +2795,30 @@ export default function DashboardPage() {
                   )}
                 </div>
               )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Compliance Classification Tier
+                </label>
+                <select
+                  value={editModal.form.compliance_tier || "commercial_ready"}
+                  onChange={(e) =>
+                    setEditModal({
+                      ...editModal,
+                      form: { ...editModal.form, compliance_tier: e.target.value },
+                    })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="commercial_ready">🟢 Commercial Ready (Safe for OSS / Commercial distribution)</option>
+                  <option value="commercial_via_official_api">🟡 Commercial via Official API (Requires API Key / Official Endpoint)</option>
+                  <option value="tos_restricted">🟠 Non-Commercial: ToS Scraping (Research only / Web Scraping)</option>
+                  <option value="darkweb_access">🔴 Non-Commercial: Dark Web (Research only / Onion Routing)</option>
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Controls commercial readiness and global tier killswitch behavior.
+                </p>
+              </div>
             </div>
 
             <div className="flex items-center justify-end space-x-2">

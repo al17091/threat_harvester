@@ -84,6 +84,7 @@ func (s *Server) setupRoutes() {
 		r.Get("/config/export", s.handleExportConfig)
 		r.Post("/config/save", s.handleSaveConfig)
 		r.Post("/config/sources", s.handleManageSources)
+		r.Post("/config/compliance", s.handleUpdateCompliance)
 
 		r.Post("/pipeline/run", s.handleTriggerPipeline)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
@@ -136,10 +137,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	torOnline := s.lastTorState
 	s.torMu.Unlock()
 
+	mgr := config.GetSettings()
+
 	totalRSS := len(cfg.Sources.VendorRSS)
 	activeRSS := 0
 	for _, f := range cfg.Sources.VendorRSS {
-		if f.Enabled {
+		if mgr.IsSourceActive("vendor_rss", f.Enabled, f.ComplianceTier) {
 			activeRSS++
 		}
 	}
@@ -147,7 +150,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	totalTG := len(cfg.Sources.Telegram)
 	activeTG := 0
 	for _, c := range cfg.Sources.Telegram {
-		if c.Enabled {
+		if mgr.IsSourceActive("telegram", c.Enabled, c.ComplianceTier) {
 			activeTG++
 		}
 	}
@@ -155,7 +158,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	totalDW := len(cfg.Sources.DarkwebOnion)
 	activeDW := 0
 	for _, d := range cfg.Sources.DarkwebOnion {
-		if d.Enabled {
+		tier := d.ComplianceTier
+		if tier == "" {
+			tier = config.GetDefaultTierForSource("darkweb_onion", d.Type)
+		}
+		if mgr.IsSourceActive("darkweb_onion", d.Enabled, tier) {
 			activeDW++
 		}
 	}
@@ -163,7 +170,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	totalX := len(cfg.Sources.XMonitor)
 	activeX := 0
 	for _, q := range cfg.Sources.XMonitor {
-		if q.Enabled {
+		if mgr.IsSourceActive("x_monitor", q.Enabled, q.ComplianceTier) {
 			activeX++
 		}
 	}
@@ -171,7 +178,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	totalWeb := len(cfg.Sources.WebSearch)
 	activeWeb := 0
 	for _, q := range cfg.Sources.WebSearch {
-		if q.Enabled {
+		if mgr.IsSourceActive("web_search", q.Enabled, q.ComplianceTier) {
 			activeWeb++
 		}
 	}
@@ -191,6 +198,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"database":  dbStats,
+		"compliance": mgr.GetComplianceSummary(),
 		"tor_proxy": map[string]interface{}{
 			"online": torOnline,
 			"url":    cfg.Network.TorProxyURL,
@@ -414,9 +422,77 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = mgr.Save("")
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source updated"})
+	case "toggle_tier", "toggle_compliance_tier":
+		tier := req.Identifier
+		if tier == "" && req.Data != nil {
+			tier, _ = req.Data["tier"].(string)
+		}
+		if tier == "" {
+			errorResponse(w, http.StatusBadRequest, "Missing tier identifier")
+			return
+		}
+		if err := mgr.ToggleComplianceTier(tier, req.Enabled); err != nil {
+			errorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		_ = mgr.Save("")
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"status":     "ok",
+			"message":    fmt.Sprintf("Compliance tier '%s' status updated", tier),
+			"compliance": mgr.GetComplianceSummary(),
+		})
+	case "set_compliance_mode":
+		mode := req.Identifier
+		if mode == "" && req.Data != nil {
+			mode, _ = req.Data["mode"].(string)
+		}
+		if mode == "" {
+			errorResponse(w, http.StatusBadRequest, "Missing compliance mode")
+			return
+		}
+		if err := mgr.SetComplianceMode(mode); err != nil {
+			errorResponse(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		_ = mgr.Save("")
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"status":     "ok",
+			"message":    fmt.Sprintf("Compliance mode set to '%s'", mode),
+			"compliance": mgr.GetComplianceSummary(),
+		})
 	default:
 		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %s", req.Action))
 	}
+}
+
+type updateComplianceReq struct {
+	Mode  string                       `json:"mode"`
+	Tiers *config.ComplianceTiersConfig `json:"tiers,omitempty"`
+}
+
+func (s *Server) handleUpdateCompliance(w http.ResponseWriter, r *http.Request) {
+	var req updateComplianceReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	mgr := config.GetSettings()
+	if req.Tiers != nil {
+		_ = mgr.UpdateCompliance(req.Mode, *req.Tiers)
+	} else if req.Mode != "" {
+		_ = mgr.SetComplianceMode(req.Mode)
+	} else {
+		errorResponse(w, http.StatusBadRequest, "Either mode or tiers must be provided")
+		return
+	}
+
+	_ = mgr.Save("")
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":     "ok",
+		"message":    "Compliance configuration updated",
+		"compliance": mgr.GetComplianceSummary(),
+	})
 }
 
 // RunHarvestJob executes the full pipeline cycle safely under a mutex lock.

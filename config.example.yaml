@@ -4,6 +4,19 @@
 
 version: "1.0"
 
+# Compliance & Commercial Use Controls
+compliance:
+  # Mode presets: "commercial_only" | "official_api_ready" | "all" | "custom"
+  # - commercial_only: Enable only commercial-ready sources (no ToS scraping, no darkweb)
+  # - official_api_ready: Commercial sources + official API sources
+  # - all: Enable all sources including darkweb and scraping (research / evaluation)
+  mode: "${COMPLIANCE_MODE:-all}"
+  tiers:
+    commercial_ready: true            # Commercial Ready
+    commercial_via_official_api: true  # Commercial via Official API
+    tos_restricted: true              # Non-Commercial: ToS Scraping
+    darkweb_access: true              # Non-Commercial: Dark Web
+
 database:
   # Database type: 'postgres' (recommended for k3s CNPG cluster) or 'sqlite'
   type: "${DB_TYPE:-postgres}"

@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dapt/information_harvester/backend/internal/config"
 	"github.com/dapt/information_harvester/backend/internal/storage"
 )
 
@@ -18,6 +19,16 @@ func TestAPIRoutes(t *testing.T) {
 		t.Fatalf("failed to create memory store: %v", err)
 	}
 	defer store.Close()
+
+	mgr := config.GetSettings()
+	if mgr != nil && mgr.ConfigPath != "" {
+		origConfig, _ := os.ReadFile(mgr.ConfigPath)
+		defer func() {
+			if len(origConfig) > 0 {
+				_ = os.WriteFile(mgr.ConfigPath, origConfig, 0644)
+			}
+		}()
+	}
 
 	srv := NewServer(store)
 
@@ -94,5 +105,31 @@ func TestAPIRoutes(t *testing.T) {
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// 7. POST /api/config/compliance (update mode)
+	compPayload := map[string]interface{}{
+		"mode": "commercial_only",
+	}
+	bComp, _ := json.Marshal(compPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/config/compliance", bytes.NewReader(bComp))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 8. POST /api/config/sources (toggle compliance tier)
+	tierTogglePayload := map[string]interface{}{
+		"action":     "toggle_compliance_tier",
+		"identifier": "darkweb_access",
+		"enabled":    false,
+	}
+	bTier, _ := json.Marshal(tierTogglePayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(bTier))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }

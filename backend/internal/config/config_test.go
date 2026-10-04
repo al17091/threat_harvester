@@ -61,3 +61,58 @@ func TestSourceMutationAndExport(t *testing.T) {
 		t.Fatal("expected delete to succeed")
 	}
 }
+
+func TestComplianceControl(t *testing.T) {
+	mgr := GetSettings()
+
+	// Test preset modes
+	_ = mgr.SetComplianceMode(ComplianceModeCommercialOnly)
+	cfg := mgr.GetConfig()
+	if !cfg.Compliance.Tiers.CommercialReady || cfg.Compliance.Tiers.CommercialViaOfficialAPI ||
+		cfg.Compliance.Tiers.ToSRestricted || cfg.Compliance.Tiers.DarkwebAccess {
+		t.Fatalf("unexpected tiers for commercial_only: %+v", cfg.Compliance.Tiers)
+	}
+
+	// Commercial item enabled
+	if !mgr.IsSourceActive("vendor_rss", true, TierCommercialReady) {
+		t.Fatal("expected commercial_ready item to be active in commercial_only mode")
+	}
+	// Telegram / ToS restricted item disabled
+	if mgr.IsSourceActive("telegram", true, TierToSRestricted) {
+		t.Fatal("expected tos_restricted item to be inactive in commercial_only mode")
+	}
+	// Darkweb item disabled
+	if mgr.IsSourceActive("darkweb_onion", true, TierDarkwebAccess) {
+		t.Fatal("expected darkweb_access item to be inactive in commercial_only mode")
+	}
+
+	// Test Official API Ready mode
+	_ = mgr.SetComplianceMode(ComplianceModeOfficialAPIReady)
+	if !mgr.IsSourceActive("x_monitor", true, TierCommercialViaOfficialAPI) {
+		t.Fatal("expected commercial_via_official_api item to be active in official_api_ready mode")
+	}
+	if mgr.IsSourceActive("darkweb_onion", true, TierDarkwebAccess) {
+		t.Fatal("expected darkweb_access item to be inactive in official_api_ready mode")
+	}
+
+	// Test Individual Tier Toggle
+	_ = mgr.ToggleComplianceTier(TierDarkwebAccess, true)
+	if !mgr.IsSourceActive("darkweb_onion", true, TierDarkwebAccess) {
+		t.Fatal("expected darkweb_access item to be active after toggling on")
+	}
+
+	// Test Individual Source Item Toggle overrides tier
+	if mgr.IsSourceActive("darkweb_onion", false, TierDarkwebAccess) {
+		t.Fatal("expected item to be inactive if its individual enabled flag is false")
+	}
+
+	// Summary check
+	summary := mgr.GetComplianceSummary()
+	if summary["mode"] == "" {
+		t.Fatal("expected summary to include mode")
+	}
+
+	// Reset to All
+	_ = mgr.SetComplianceMode(ComplianceModeAll)
+}
+
