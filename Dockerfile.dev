@@ -23,5 +23,7 @@ COPY . /app/
 RUN chmod +x /app/bin/harvester /app/docker/entrypoint-dev.sh && \
     ln -sf /app/bin/harvester /usr/local/bin/harvester
 
+ENV PYTHONPATH=/app
+
 ENTRYPOINT ["/app/docker/entrypoint-dev.sh"]
 CMD ["bash"]

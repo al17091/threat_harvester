@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from src.analyzer.gemini_analyzer import GeminiThreatAnalyzer
-from src.models import JapanRelevance, Severity, SourceType, ThreatItem
+from backend.analyzer.gemini_analyzer import GeminiThreatAnalyzer
+from backend.models import JapanRelevance, Severity, SourceType, ThreatItem
 
 
 def test_gemini_analyzer_mock(monkeypatch):

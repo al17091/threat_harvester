@@ -1,0 +1,79 @@
+services:
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: harvester-web
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: harvester-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql+psycopg://postgres:postgres@db:5432/information_harvester
+      - TOR_PROXY_URL=socks5h://tor:9050
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - GENERIC_WEBHOOK_URL=${GENERIC_WEBHOOK_URL:-}
+      - NOTION_API_KEY=${NOTION_API_KEY:-}
+      - NOTION_DATABASE_ID=${NOTION_DATABASE_ID:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - backend_data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+      tor:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    container_name: harvester-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=information_harvester
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d information_harvester"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  tor:
+    image: alpine:3.20
+    container_name: harvester-tor
+    command: >
+      sh -c "apk add --no-cache tor &&
+             tor --SocksPort 0.0.0.0:9050 --RunAsDaemon 0"
+    ports:
+      - "9050:9050"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_data:

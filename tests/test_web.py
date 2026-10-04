@@ -1,17 +1,18 @@
 from fastapi.testclient import TestClient
 
-from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-from src.storage.cache import ThreatCache
-from src.web.app import app
+from backend.api import app
+from backend.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+from backend.storage.cache import ThreatCache
 
 client = TestClient(app)
 
 
-def test_index_page():
+def test_root_endpoint():
     response = client.get("/")
     assert response.status_code == 200
-    assert "THREAT HARVESTER" in response.text
-    assert "text/html" in response.headers["content-type"]
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "Threat Information Harvester API" in data["service"]
 
 
 def test_api_status():

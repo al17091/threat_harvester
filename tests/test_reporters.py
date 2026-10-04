@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-from src.reporters.notion_reporter import NotionReporter
+from backend.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+from backend.reporters.notion_reporter import NotionReporter
 
 
 def test_notion_reporter_unconfigured():

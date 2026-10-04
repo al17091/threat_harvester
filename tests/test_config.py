@@ -1,6 +1,6 @@
 import os
 
-from src.config import Settings, expand_env_vars
+from backend.config import Settings, expand_env_vars
 
 
 def test_expand_env_vars(monkeypatch):

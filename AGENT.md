@@ -9,12 +9,16 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
 1. **Permissive Open Source (MIT)**:
    - Code must remain fully compatible with the MIT License (commercial and non-commercial use allowed).
    - Only dependencies with permissive open-source licenses (MIT, Apache 2.0, BSD) are allowed. Avoid copyleft licenses (e.g., AGPL/GPL).
-2. **Container Image Naming**:
+2. **Project Structure**:
+   - `backend/`: Python FastAPI CTI Engine, Gemini AI analyzer, and threat collectors.
+   - `web/`: Next.js 14 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
+   - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/information-harvester/` for k3s).
+3. **Container Image Naming**:
    - The Docker image name is strictly `information_harvester` (underscored, e.g., `ghcr.io/dapt/information_harvester`). Never use `threat-harvester` or other aliases.
-3. **Database & Architecture Target**:
+4. **Database & Architecture Target**:
    - Deployment target is k3s with PostgreSQL provided by CloudNativePG (CNPG), falling back to SQLite for local development.
-   - All database operations in `src/storage/` must remain dialect-aware (PostgreSQL + SQLite) via SQLAlchemy.
-4. **Security & Secrets**:
+   - All database operations in `backend/storage/` must remain dialect-aware (PostgreSQL + SQLite) via SQLAlchemy.
+5. **Security & Secrets**:
    - Never commit hardcoded tokens, API keys, passwords, or webhook URLs.
    - Configuration must load from `config.yaml` with dynamic `${ENV_VAR}` expansion or direct environment variables.
 
@@ -53,12 +57,14 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 
 1. **Language & Environment**:
    - Python 3.11+ using the local virtual environment (`.venv/bin/python`, `.venv/bin/pytest`).
+   - Node.js 20+ / Next.js for the `web/` dashboard.
 2. **Type Annotations**:
    - All new functions, methods, and data structures must have complete type annotations.
 3. **Quality Gates**:
    - **Linter**: `ruff check .` must pass with zero errors.
    - **Tests**: `pytest tests/` must pass completely before concluding any task.
+   - **Frontend Build**: `npm --prefix web run build` must compile cleanly without errors.
    - **Helm Lint**: `helm lint charts/information-harvester` must report 0 failures when chart manifests are modified.
 4. **Resilience & Fault Tolerance**:
-   - Threat collectors (`src/harvesters/`) must never crash the pipeline on external timeouts or HTTP errors. Handle exceptions gracefully with informative logging.
-   - Sinks (`src/notifiers/`, `src/reporters/`) must fail safely without interrupting data collection.
+   - Threat collectors (`backend/harvesters/`) must never crash the pipeline on external timeouts or HTTP errors. Handle exceptions gracefully with informative logging.
+   - Sinks (`backend/notifiers/`, `backend/reporters/`) must fail safely without interrupting data collection.

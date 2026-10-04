@@ -40,6 +40,13 @@ data/
 *.sqlite3
 *.log
 
+# Node.js & Next.js
+node_modules/
+.next/
+out/
+.npm
+*.tsbuildinfo
+
 # IDE
 .idea/
 .vscode/

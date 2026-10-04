@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Main entrypoint for Information Harvester (Web Dashboard and Batch runner)."""
+"""Main entrypoint for Threat Information Harvester (API and Batch runner)."""
 
 import logging
 import os
@@ -20,7 +20,7 @@ logger = logging.getLogger("information_harvester")
 def run_batch():
     """Run batch harvesting pipeline for scheduled jobs."""
     logger.info("Threat Information Harvester starting batch execution...")
-    from src.pipeline import HarvesterPipeline
+    from backend.pipeline import HarvesterPipeline
 
     check_interval = int(os.getenv("CHECK_INTERVAL_HOURS", "1"))
     direct_only = os.getenv("NOTIFY_DIRECT_ONLY", "false").lower() in ("true", "1", "yes")
@@ -30,13 +30,13 @@ def run_batch():
     logger.info(f"Batch execution finished successfully: {summary}")
 
 
-def run_web():
-    """Run FastAPI Web Dashboard server."""
-    port = int(os.getenv("PORT", "8080"))
+def run_api():
+    """Run FastAPI REST API server."""
+    port = int(os.getenv("PORT", "8000"))
     host = os.getenv("HOST", "0.0.0.0")
-    logger.info(f"Starting Threat Information Harvester Web Dashboard on http://{host}:{port}")
+    logger.info(f"Starting Threat Information Harvester API on http://{host}:{port}")
     uvicorn.run(
-        "src.web.app:app",
+        "backend.api:app",
         host=host,
         port=port,
         reload=False,
@@ -46,11 +46,11 @@ def run_web():
 
 
 def main():
-    mode = os.getenv("MODE", "web").lower()
+    mode = os.getenv("MODE", "api").lower()
     if mode == "batch" or "--batch" in sys.argv:
         run_batch()
     else:
-        run_web()
+        run_api()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
-from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-from src.storage.cache import ThreatCache
+from backend.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+from backend.storage.cache import ThreatCache
 
 
 def test_cache_deduplication(tmp_path):

@@ -1,9 +1,9 @@
 from unittest.mock import MagicMock
 
-from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-from src.notifiers import NotificationManager
-from src.notifiers.generic_webhook import GenericWebhookNotifier
-from src.notifiers.slack import SlackNotifier
+from backend.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+from backend.notifiers import NotificationManager
+from backend.notifiers.generic_webhook import GenericWebhookNotifier
+from backend.notifiers.slack import SlackNotifier
 
 
 def _make_threat():

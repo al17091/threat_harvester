@@ -1,4 +1,4 @@
-from src.models import SourceType, ThreatItem
+from backend.models import SourceType, ThreatItem
 
 
 def test_threat_item_create():

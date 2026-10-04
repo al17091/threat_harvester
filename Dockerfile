@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install ca-certificates and curl for health probes
+# Install system utilities and curl for health probes
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -11,14 +11,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY src/ /app/src/
+COPY backend/ /app/backend/
 COPY bin/ /app/bin/
-COPY config.example.yaml config.yaml /app/
-COPY app.py /app/
+COPY config.example.yaml config.yaml app.py /app/
 
 RUN chmod +x /app/bin/harvester /app/app.py && \
     ln -sf /app/bin/harvester /usr/local/bin/harvester
 
-EXPOSE 8080
+ENV PYTHONPATH=/app
+ENV PORT=8000
+
+EXPOSE 8000
 
 CMD ["python", "app.py"]

@@ -1,6 +1,6 @@
 from click.testing import CliRunner
 
-from src.cli import cli
+from backend.cli import cli
 
 
 def test_cli_help():
@@ -26,8 +26,8 @@ def test_cli_history_and_show(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
     monkeypatch.setenv("CACHE_DB_PATH", db_path)
 
-    from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-    from src.storage.cache import ThreatCache
+    from backend.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+    from backend.storage.cache import ThreatCache
 
     cache = ThreatCache(db_path)
     item = ThreatItem.create(
