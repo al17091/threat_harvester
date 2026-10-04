@@ -1,0 +1,20 @@
+{{- if and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "information-harvester.fullname" . }}-db
+  labels:
+    {{- include "information-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  instances: {{ .Values.database.cnpg.instances | default 1 }}
+  storage:
+    size: {{ .Values.database.cnpg.storage.size | default "5Gi" }}
+    {{- if .Values.database.cnpg.storage.storageClass }}
+    storageClass: {{ .Values.database.cnpg.storage.storageClass }}
+    {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.name | default "information_harvester" }}
+      owner: {{ .Values.database.user | default "harvester" }}
+{{- end }}

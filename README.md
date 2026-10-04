@@ -4,9 +4,8 @@
 [![Python: 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/information-harvester)
 
-脅威情報（Cyber Threat Intelligence: CTI）の自動収集・AI分析・通知プラットフォームです。  
-特に**日本国内を標的・関係先とするサイバー攻撃やインシデント情報**の網羅的かつ低コストな収集に特化しています。
-
+脅威情報（Cyber Threat Intelligence: CTI）の自動収集・AI分析・ダッシュボード可視化・通知プラットフォームです。  
+特に**日本国内を標的・関係先とするサイバー攻撃やインシデント情報**の網羅的かつ低コストな収集と、直感的なSOC Webダッシュボードを提供します。
 
 ---
 
@@ -20,53 +19,62 @@
 | **X (Twitter) 監視** | Gemini Grounded Search によるX速報・リサーチャー投稿監視 | 高額なX API不要、低コスト |
 | **セキュリティベンダー/CERT** | JPCERT/CC, IPA, ScanNetSecurity, Security Next, BleepingComputer, CISA 等のRSS | 完全無料・高精度 |
 
-### Gemini AI による脅威インテリジェンス分析
-収集された脅威データは Gemini 2.5 Flash により以下の分析が行われます：
-- **日本への関連度判定**: `Direct`（国内組織が直接被害）, `Indirect`（世界規模のゼロデイなど国内波及）, `None`
-- **深刻度判定**: `Critical`, `High`, `Medium`, `Low`
-- **日本語要約と影響分析**: 3行以内の平易な技術要約と国内への具体的影響
-- **推奨対策**: 初動対応や防御アクションの提案
+### 高性能 Web ダッシュボード (SOC GUI)
+- **タイムライン & インシデント詳細**: 危険度（Critical/High/Medium/Low）、国内標的（Direct/Indirect）、被害組織、攻撃者グループ、推奨対策を瞬時に閲覧。
+- **収集ソースGUI管理**: RSSフィード、ダークウェブターゲット、Telegramチャンネル、検索クエリの追加・トグルON/OFF・削除を画面から直感操作。
+- **YAML設定ファイル エクスポート**: GUIで更新した収集設定を即座に `config.yaml` としてダウンロード可能。
+- **即時収集実行 & 疎通テスト**: 「即時収集実行」ボタンによる非同期パイプライン実行、Discord/Slack/Notion連携テスト。
+
+### 統一 YAML 設定 (`config.yaml`) & データベース
+- **統一設定管理**: すべての接続先（DB、Tor、Notion、Webhook、Gemini）と収集ソースを単一の `config.yaml` で管理。`${ENV_VAR}` 展開に対応。
+- **CloudNativePG (CNPG) on k3s 対応**: 本番運用では Kubernetes / k3s 上の PostgreSQL (CNPG) を第一級サポート。ローカル開発時は SQLite に自動フォールバック。
 
 ---
 
-## 2. アーキテクチャ
+## 2. クイックスタート (Web ダッシュボード起動)
 
-Kubernetes環境（k3s等）上で稼働し、Helmによりワンストップでデプロイ可能です。
-
-- **Harvester CronJob**: 定期実行バッチ（デフォルト毎時実行）。重複排除（SQLite）を行い、条件に合致した脅威をDiscord等へ通知。
-- **Tor Proxy Pod**: Alpineベースの軽量Tor SOCKS5デーモン。Onionサイトへの安全な接続を提供。
-- **Dev / CLI Container**: 運用・開発コマンドを集約した常駐Pod。クラスタ内外から手動調査やソース別テストを直接実行可能。
-- **Persistent Volume Claim**: 過去インシデント履歴および重複排除キャッシュを永続化。
-
----
-
-## 3. 開発用コンテナと CLI 運用
-
-すべての運用・テスト用コマンドは開発コンテナおよび `harvester` CLI に集約されています。
-
-### 開発コンテナの起動（ローカルDocker）
+### ローカル実行
 ```bash
-# 開発イメージのビルド
-docker build -t information_harvester:dev -f Dockerfile.dev .
+# 仮想環境の依存関係インストール
+pip install -r requirements.txt
 
-# 開発コンテナの起動
-docker run -it --rm \
-  -e GEMINI_API_KEY="your-gemini-api-key" \
-  -e DISCORD_WEBHOOK_URL="your-discord-webhook" \
-  information_harvester:dev bash
+# Web ダッシュボードの起動 (デフォルトポート: 8080)
+python app.py
+# または
+harvester serve --port 8080
+
+# ブラウザでアクセス
+open http://localhost:8080
 ```
 
-### CLI コマンド一覧 (`harvester`)
+### Docker による起動
+```bash
+# イメージのビルド
+docker build -t information_harvester:latest .
+
+# コンテナ起動 (Web UI)
+docker run -p 8080:8080 \
+  -e GEMINI_API_KEY="your-gemini-api-key" \
+  -e DISCORD_WEBHOOK_URL="your-discord-webhook" \
+  information_harvester:latest
+```
+
+---
+
+## 3. CLI 運用 (`harvester`)
+
+コンテナ内またはローカル環境から CLI コマンドによる調査・テストも可能です。
 
 ```bash
-# 1. システム・ソース・プロキシの稼働状況ヘルスチェック
+# 1. Web ダッシュボード起動
+harvester serve --port 8080
+
+# 2. システム・ソース・プロキシの稼働状況ヘルスチェック
 harvester status
 
-# 2. 全収集ソースの一括実行 (直近24時間)
+# 3. 全収集ソースの一括実行 (直近24時間)
 harvester run --hours 24
-
-# 3. 日本直接標的のみに絞って通知テスト
-harvester run --hours 24 --direct-only
+harvester run --hours 24 --direct-only    # 日本直接標的のみ通知
 
 # 4. 各ソース単体の動作テスト (vendor, web, tor, telegram, x)
 harvester test --source vendor
@@ -79,7 +87,7 @@ harvester search "日本国内 ランサムウェア 被害"
 # 6. Tor SOCKS5経由での onion URL / Web 接続テスト
 harvester test-onion "http://check.torproject.org"
 
-# 7. 収集済みインシデントの確認 (SQLiteキャッシュ)
+# 7. 収集済みインシデントの確認
 harvester history                 # 直近の収集一覧テーブル表示
 harvester history --japan-only    # 日本直接標的のみ絞り込み
 harvester show <ID>               # 詳細・要約・影響・推奨対策を表示
@@ -89,56 +97,38 @@ harvester test-notify             # 設定済みWebhook (Discord/Slack/Generic) 
 harvester test-notion             # Notionデータベースにテストページ起票
 ```
 
-### レポート・通知先の連携設定
-環境変数または Helm の `values.yaml` で連携先を設定できます：
-- **Discord**: `DISCORD_WEBHOOK_URL`
-- **Slack**: `SLACK_WEBHOOK_URL`
-- **Generic JSON Webhook**: `GENERIC_WEBHOOK_URL` (任意の監視ツールや自動化ワークフローにPOST)
-- **Notion データベース**: `NOTION_API_KEY` および `NOTION_DATABASE_ID` (CTI ナレッジベースとして自動起票)
-
 ---
 
-## 4. Kubernetes / Helm によるデプロイ
+## 4. Kubernetes / k3s (CloudNativePG) デプロイ
 
-### 1. Helm Chart のインストール
-`charts/information-harvester` を使用してクラスタにデプロイします。
+Helm Chart (`charts/information-harvester`) を使用して k3s や Kubernetes クラスタへデプロイします。
+
+### 1. CloudNativePG (PostgreSQL) 連携
+k3s クラスタ上に CloudNativePG (CNPG) を配置している場合、CNPG が生成する Secret (`<cluster-name>-app`) の `uri` キーから自動接続できます。
 
 ```bash
 helm upgrade --install information-harvester ./charts/information-harvester \
   --namespace security \
   --create-namespace \
+  --set database.type="postgres" \
+  --set database.existingSecret="information-harvester-db-app" \
   --set secrets.geminiApiKey="YOUR_GEMINI_API_KEY" \
   --set secrets.discordWebhookUrl="YOUR_DISCORD_WEBHOOK_URL"
 ```
 
-### 2. クラスタ内 Dev Pod へのアクセス（コマンド集約運用）
-Helmデプロイ時、開発・管理用のDev Podが常駐起動します。このコンテナに `exec` してCLIコマンドを実行できます。
+※ 本 Chart 内で直接 CNPG Cluster マニフェストを作成する場合は、`--set database.cnpg.enabled=true` を指定します。
 
+### 2. ポートフォワードによるダッシュボード確認
 ```bash
-# Dev Pod の名前を確認
-kubectl get pods -n security -l app.kubernetes.io/component=dev-cli
-
-# Dev Pod に入ってコマンドを実行
-kubectl exec -it deployment/information-harvester-dev -n security -- bash
-
-# コンテナ内で直接ヘルスチェックやテストを実行
-harvester status
-harvester test --source vendor
+kubectl port-forward svc/information-harvester 8080:8080 -n security
+# ブラウザで http://localhost:8080 にアクセス
 ```
-
-### 3. 設定のカスタマイズ (`values.yaml`)
-`charts/information-harvester/values.yaml` で以下の項目を調整可能です：
-- `cronjob.schedule`: 実行間隔（デフォルト: `0 * * * *` 毎時0分）
-- `config.notifyDirectOnly`: `true` にすると日本直接標的（Direct）のみ通知
-- `tor.enabled`: Tor プロキシ Pod の有効/無効
-- `devContainer.enabled`: 開発/運用用 Pod の有効/無効
-- `persistence.size`: SQLiteキャッシュ用ボリューム容量（デフォルト: `5Gi`）
 
 ---
 
 ## 5. 開発規約・コミュニティ
 
-- **開発規約**: コミット規約やエージェント対応方針は [AGENT.md](AGENT.md) に定義されています。
+- **開発規約**: コミット規約（SSH/GPG署名必須）やエージェント対応方針は [AGENT.md](AGENT.md) に定義されています。
 - **コントリビューション**: プルリクエストや機能提案の手順は [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
 - **タスク追跡**: 進捗状況および今後のロードマップは [docs/task_tracker.md](docs/task_tracker.md) を参照してください。
 - **セキュリティ & 免責事項**: 脆弱性報告や利用上の免責事項は [SECURITY.md](SECURITY.md) をご確認ください。
@@ -149,4 +139,3 @@ harvester test --source vendor
 
 本プロジェクトは **[MIT License](LICENSE)** の下で公開されているオープンソースソフトウェアです。  
 商用・非商用を問わず自由にご利用・改変・再配布いただけます。
-

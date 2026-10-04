@@ -1,6 +1,6 @@
 # Default values for information-harvester.
 
-# Production image for CronJob
+# Production image for Web Dashboard and Batch runner
 image:
   repository: ghcr.io/dapt/information_harvester
   tag: latest
@@ -15,11 +15,57 @@ devImage:
 nameOverride: ""
 fullnameOverride: ""
 
+# Web Dashboard Service & Deployment
+dashboard:
+  enabled: true
+  replicas: 1
+  port: 8080
+  service:
+    type: ClusterIP
+    port: 8080
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: cti.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Database Configuration (PostgreSQL / CloudNativePG or SQLite fallback)
+database:
+  type: "postgres"  # "postgres" (recommended for k3s CNPG) or "sqlite"
+  # Existing secret name from CNPG cluster (e.g. "information-harvester-db-app")
+  # When set, DATABASE_URL will be mounted from the Secret's "uri" key
+  existingSecret: ""
+  host: "information-harvester-db-rw"
+  port: 5432
+  name: "information_harvester"
+  user: "harvester"
+  password: ""
+  sslmode: "prefer"
+  # CloudNativePG (CNPG) Cluster specification
+  cnpg:
+    enabled: false  # Set to true to create a CloudNativePG Cluster CRD manifest
+    instances: 1
+    storage:
+      size: 5Gi
+      storageClass: ""
+
 # Secrets configuration
 secrets:
   # Existing secret name if managed externally (e.g. sealed-secrets / vault)
   existingSecret: ""
-  # Or provide values directly here (can be set via --set or secret values file)
+  # Or provide values directly here
   geminiApiKey: ""
   discordWebhookUrl: ""
   slackWebhookUrl: ""
@@ -50,9 +96,8 @@ cronjob:
       memory: 256Mi
 
 # Development & Command-execution container
-# Dedicated long-running Pod for running `harvester` CLI commands
 devContainer:
-  enabled: true
+  enabled: false
   replicas: 1
   resources:
     limits:
@@ -78,7 +123,7 @@ tor:
       cpu: 50m
       memory: 64Mi
 
-# Persistent storage for cache and historic records
+# Persistent storage for SQLite cache (if database.type is sqlite)
 persistence:
   enabled: true
   accessMode: ReadWriteOnce

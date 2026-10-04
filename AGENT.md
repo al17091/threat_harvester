@@ -59,10 +59,20 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
                                          │ Enriched CTI Alert
                                          ▼
 +-----------------------------------------------------------------------------------+
-|  Notification & Sinks                                                             |
-|  - Discord Webhooks (Priority alerts with @here for Critical)                     |
-|  - JSON/File Artifacts / SQLite Audit Log                                         |
+|  Storage & Multi-Database Layer                                                   |
+|  - PostgreSQL (CloudNativePG / CNPG on k3s) & SQLite fallback                     |
+|  - Dialect-aware deduplication, history audit, and full AI metadata persistence   |
 +-----------------------------------------------------------------------------------+
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    ▼                                         ▼
++---------------------------------------+ +-----------------------------------------+
+|  High-Performance Web Dashboard (GUI)  | |  Reporting & Notification Sinks         |
+|  - SOC Timeline & AI Analysis Explorer | |  - Discord Webhooks (Priority alerts)   |
+|  - Real-Time Filtering & Search       | |  - Slack Webhooks (Block Kit)           |
+|  - GUI Source Management & Toggling   | |  - Generic JSON Webhooks                |
+|  - Instant config.yaml Export         | |  - Notion CTI Database Synchronizer     |
++---------------------------------------+ +-----------------------------------------+
 ```
 
 ### 2.1 Directory Structure
@@ -73,8 +83,10 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 ├── LICENSE                       # MIT License (commercial use permitted)
 ├── SECURITY.md                   # Security policy & responsible CTI use disclaimer
 ├── CONTRIBUTING.md               # Open source contribution guidelines
-├── Dockerfile                    # Production container image
+├── Dockerfile                    # Production container image (FastAPI Web + Batch)
 ├── Dockerfile.dev                # Development & CLI container image
+├── config.yaml                   # Unified configuration with ${ENV_VAR} support
+├── config.example.yaml           # Configuration template with schema comments
 ├── requirements.txt              # Production Python dependencies
 ├── requirements-dev.txt          # Development Python dependencies
 ├── docs/
@@ -82,8 +94,8 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 │   └── architecture.md           # Detailed architecture & source specifications
 ├── src/
 │   ├── __init__.py
-│   ├── cli.py                    # Unified CLI entrypoint
-│   ├── config.py                 # Configuration loader (Env & ConfigMap)
+│   ├── cli.py                    # Unified CLI entrypoint (`harvester`)
+│   ├── config.py                 # Configuration loader, Pydantic models, and exporter
 │   ├── harvesters/               # Source collectors
 │   │   ├── __init__.py
 │   │   ├── base.py               # Abstract base harvester
@@ -95,28 +107,38 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 │   ├── analyzer/                 # AI Analysis pipeline
 │   │   ├── __init__.py
 │   │   └── gemini_analyzer.py    # Gemini-powered CTI enrichment & Japan relevancy
-│   ├── storage/                  # Deduplication & persistent state
+│   ├── storage/                  # Deduplication & multi-database state
 │   │   ├── __init__.py
-│   │   └── cache.py              # Cache/dedup store (SQLite/JSON)
+│   │   └── cache.py              # SQLAlchemy store (PostgreSQL CNPG & SQLite)
 │   ├── notifiers/                # Alert destinations
 │   │   ├── __init__.py           # NotificationManager dispatcher
 │   │   ├── discord.py            # Discord webhook notifier
 │   │   ├── slack.py              # Slack Incoming Webhook notifier
 │   │   └── generic_webhook.py    # Generic JSON Webhook notifier
-│   └── reporters/                # Knowledge base / reporting sinks
+│   ├── reporters/                # Knowledge base / reporting sinks
+│   │   ├── __init__.py
+│   │   └── notion_reporter.py    # Notion Database CTI reporter
+│   └── web/                      # High-performance SOC Web Dashboard
 │       ├── __init__.py
-│       └── notion_reporter.py    # Notion Database CTI reporter
+│       ├── app.py                # FastAPI REST API & dashboard router
+│       └── templates/
+│           └── index.html        # Responsive Cyber SOC single-page UI
 └── charts/
     └── information-harvester/    # Helm chart for Kubernetes deployment
         ├── Chart.yaml
         ├── values.yaml
         └── templates/
-            ├── cronjob.yaml      # Scheduled collector job
-            ├── dev-pod.yaml      # Development & operational CLI container
-            ├── tor-proxy.yaml    # Tor SOCKS5 proxy deployment & service
-            ├── configmap.yaml    # Feed definitions & keywords
-            ├── secret.yaml       # API keys and webhook secrets
-            └── pvc.yaml          # Persistent storage for cache & history
+            ├── dashboard-deployment.yaml # Web Dashboard deployment
+            ├── dashboard-service.yaml    # Dashboard service (port 8080)
+            ├── dashboard-ingress.yaml    # Dashboard ingress route
+            ├── cnpg-cluster.yaml         # CloudNativePG Cluster CRD template
+            ├── cronjob.yaml              # Scheduled collector batch job
+            ├── dev-deployment.yaml       # Development & operational CLI container
+            ├── tor-deployment.yaml       # Tor SOCKS5 proxy deployment
+            ├── tor-service.yaml          # Tor SOCKS5 proxy service
+            ├── configmap.yaml            # Feed definitions & DB configs
+            ├── secret.yaml               # API keys, passwords, webhook secrets
+            └── pvc.yaml                  # Persistent storage for SQLite cache
 ```
 
 ---

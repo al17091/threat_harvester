@@ -5,10 +5,17 @@ metadata:
   labels:
     {{- include "information-harvester.labels" . | nindent 4 }}
 data:
+  PORT: "8080"
   GEMINI_MODEL: {{ .Values.config.geminiModel | quote }}
   CHECK_INTERVAL_HOURS: {{ .Values.config.checkIntervalHours | quote }}
   NOTIFY_DIRECT_ONLY: {{ .Values.config.notifyDirectOnly | quote }}
   REQUEST_TIMEOUT: {{ .Values.config.requestTimeout | quote }}
+  DB_TYPE: {{ .Values.database.type | quote }}
+  DB_HOST: {{ .Values.database.host | quote }}
+  DB_PORT: {{ .Values.database.port | quote }}
+  DB_NAME: {{ .Values.database.name | quote }}
+  DB_USER: {{ .Values.database.user | quote }}
+  DB_SSLMODE: {{ .Values.database.sslmode | quote }}
   {{- if .Values.tor.enabled }}
   TOR_PROXY_URL: "socks5h://{{ include "information-harvester.fullname" . }}-tor:{{ .Values.tor.port }}"
   {{- else }}

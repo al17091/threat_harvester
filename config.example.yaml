@@ -1,0 +1,111 @@
+# ==============================================================================
+# Cyber Threat Intelligence Harvester - Unified Configuration
+# ==============================================================================
+
+version: "1.0"
+
+database:
+  # Database type: 'postgres' (recommended for k3s CNPG cluster) or 'sqlite'
+  type: "${DB_TYPE:-postgres}"
+  url: "${DATABASE_URL:-}"
+  host: "${DB_HOST:-postgres-cluster-rw}"
+  port: 5432
+  name: "${DB_NAME:-information_harvester}"
+  user: "${DB_USER:-postgres}"
+  password: "${DB_PASSWORD:-}"
+  sslmode: "${DB_SSLMODE:-prefer}"
+  sqlite_path: "${CACHE_DB_PATH:-data/threat_cache.db}"
+
+ai:
+  gemini_api_key: "${GEMINI_API_KEY:-}"
+  gemini_model: "${GEMINI_MODEL:-gemini-2.5-flash}"
+
+sinks:
+  discord:
+    enabled: true
+    webhook_url: "${DISCORD_WEBHOOK_URL:-}"
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL:-}"
+  generic_webhook:
+    enabled: true
+    webhook_url: "${GENERIC_WEBHOOK_URL:-}"
+  notion:
+    enabled: true
+    api_key: "${NOTION_API_KEY:-}"
+    database_id: "${NOTION_DATABASE_ID:-}"
+
+network:
+  tor_proxy_url: "${TOR_PROXY_URL:-socks5h://127.0.0.1:9050}"
+  request_timeout: 25
+
+pipeline:
+  check_interval_hours: 1
+  notify_direct_only: false
+
+sources:
+  vendor_rss:
+    - name: "JPCERT/CC 注意喚起"
+      url: "https://www.jpcert.or.jp/rss/jpcert.rdf"
+      category: "jp_cert"
+      enabled: true
+    - name: "IPA 重要なセキュリティ情報"
+      url: "https://www.ipa.go.jp/security/rss/alert.rdf"
+      category: "jp_cert"
+      enabled: true
+    - name: "ScanNetSecurity"
+      url: "https://scan.netsecurity.ne.jp/rss/index.rdf"
+      category: "jp_news"
+      enabled: true
+    - name: "Security Next"
+      url: "https://www.security-next.com/feed"
+      category: "jp_news"
+      enabled: true
+    - name: "BleepingComputer"
+      url: "https://www.bleepingcomputer.com/feed/"
+      category: "global_news"
+      enabled: true
+    - name: "The Hacker News"
+      url: "https://thehackernews.com/rss.xml"
+      category: "global_news"
+      enabled: true
+    - name: "CISA Alerts"
+      url: "https://www.cisa.gov/uscert/ncas/alerts.xml"
+      category: "global_cert"
+      enabled: true
+
+  telegram:
+    - channel: "redabyss_cti"
+      enabled: true
+    - channel: "malware_traffic"
+      enabled: true
+    - channel: "ransomfeed"
+      enabled: true
+    - channel: "cybersecurity_news_hub"
+      enabled: true
+
+  darkweb_onion:
+    - name: "Ransomlook Tracker"
+      url: "https://www.ransomlook.io/api/recent"
+      type: "api"
+      enabled: true
+    - name: "RansomFeed Aggregator"
+      url: "https://ransomfeed.it/news.rss"
+      type: "rss"
+      enabled: true
+
+  x_monitor:
+    - query: "cyber attack Japan victim site:x.com OR site:twitter.com"
+      enabled: true
+    - query: "ランサムウェア 日本 標的 site:x.com OR site:twitter.com"
+      enabled: true
+    - query: "JPCERT CyberThreat site:x.com OR site:twitter.com"
+      enabled: true
+
+  web_search:
+    - query: "最新 サイバー攻撃 日本 企業 組織 被害 ランサムウェア"
+      enabled: true
+    - query: "Japan targeted cyber attack data breach ransomware recent"
+      enabled: true
+    - query: "セキュリティインシデント 漏洩 日本 国内 最近"
+      enabled: true

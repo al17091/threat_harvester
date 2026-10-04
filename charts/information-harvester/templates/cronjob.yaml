@@ -24,19 +24,36 @@ spec:
             - name: harvester
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["python", "app.py"]
+              env:
+                - name: MODE
+                  value: "batch"
+                {{- if .Values.database.existingSecret }}
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.database.existingSecret }}
+                      key: uri
+                {{- else if and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled }}
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "information-harvester.fullname" . }}-db-app
+                      key: uri
+                {{- end }}
               envFrom:
                 - configMapRef:
                     name: {{ include "information-harvester.fullname" . }}-config
                 - secretRef:
                     name: {{ include "information-harvester.secretName" . }}
-              {{- if .Values.persistence.enabled }}
+              {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
               volumeMounts:
                 - name: data
                   mountPath: /app/data
               {{- end }}
               resources:
                 {{- toYaml .Values.cronjob.resources | nindent 16 }}
-          {{- if .Values.persistence.enabled }}
+          {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
           volumes:
             - name: data
               persistentVolumeClaim:

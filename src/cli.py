@@ -221,17 +221,11 @@ def show_command(item_id: str, db: str | None):
     """Show detailed view of a specific threat record by ID."""
     db_path = db or os.getenv("CACHE_DB_PATH", settings.cache_db_path)
     cache = ThreatCache(db_path)
-    # Search by prefix or exact ID
-    with cache._get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM threat_items WHERE id LIKE ?", (f"{item_id}%",))
-        row = cursor.fetchone()
+    data = cache.get_item(item_id)
 
-    if not row:
+    if not data:
         click.echo(f"[!] Threat item not found matching ID '{item_id}'", err=True)
         return
-
-    data = dict(row)
     click.echo("\n" + "=" * 60)
     click.echo(f"ID:              {data['id']}")
     click.echo(f"Source:          {data['source_type']} ({data['source_name']})")
@@ -322,6 +316,17 @@ def test_notion_command():
         click.echo(f"[+] Notion Page URL: {res.get('url')}")
     else:
         click.echo("[!] Failed to create page in Notion. Check API key and database permissions.", err=True)
+
+
+@cli.command("serve")
+@click.option("--host", default="0.0.0.0", help="Bind host address")
+@click.option("--port", default=8080, type=int, help="Port to listen on")
+def serve_command(host: str, port: int):
+    """Launch the Threat Harvester Web Dashboard."""
+    import uvicorn
+
+    click.echo(f"[*] Launching Threat Harvester Dashboard on http://{host}:{port} ...")
+    uvicorn.run("src.web.app:app", host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
