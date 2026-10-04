@@ -1,0 +1,37 @@
+{{- if .Values.tor.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "information-harvester.fullname" . }}-tor
+  labels:
+    {{- include "information-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tor-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "information-harvester.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tor-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "information-harvester.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tor-proxy
+    spec:
+      containers:
+        - name: tor-proxy
+          image: "{{ .Values.tor.image.repository }}:{{ .Values.tor.image.tag }}"
+          imagePullPolicy: {{ .Values.tor.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache tor
+              tor --SocksPort 0.0.0.0:{{ .Values.tor.port }} --RunAsDaemon 0
+          ports:
+            - name: socks5
+              containerPort: {{ .Values.tor.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.tor.resources | nindent 12 }}
+{{- end }}

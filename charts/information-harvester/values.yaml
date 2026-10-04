@@ -1,0 +1,82 @@
+# Default values for information-harvester.
+
+# Production image for CronJob
+image:
+  repository: ghcr.io/dapt/information-harvester
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Development image for Dev / Ops container
+devImage:
+  repository: ghcr.io/dapt/information-harvester
+  tag: dev
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Secrets configuration
+secrets:
+  # Existing secret name if managed externally (e.g. sealed-secrets / vault)
+  existingSecret: ""
+  # Or provide values directly here (can be set via --set or secret values file)
+  geminiApiKey: ""
+  discordWebhookUrl: ""
+
+# General application configuration
+config:
+  geminiModel: "gemini-2.5-flash"
+  checkIntervalHours: 1
+  notifyDirectOnly: false
+  requestTimeout: 25
+
+# Scheduled harvester CronJob
+cronjob:
+  enabled: true
+  schedule: "0 * * * *"  # Run hourly
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Development & Command-execution container
+# Dedicated long-running Pod for running `harvester` CLI commands
+devContainer:
+  enabled: true
+  replicas: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Tor SOCKS5 Proxy Service & Deployment
+tor:
+  enabled: true
+  image:
+    repository: alpine
+    tag: "3.20"
+    pullPolicy: IfNotPresent
+  port: 9050
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# Persistent storage for cache and historic records
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 5Gi
+  storageClass: ""

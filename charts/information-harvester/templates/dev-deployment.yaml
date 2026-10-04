@@ -1,0 +1,44 @@
+{{- if .Values.devContainer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "information-harvester.fullname" . }}-dev
+  labels:
+    {{- include "information-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-cli
+spec:
+  replicas: {{ .Values.devContainer.replicas }}
+  selector:
+    matchLabels:
+      {{- include "information-harvester.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dev-cli
+  template:
+    metadata:
+      labels:
+        {{- include "information-harvester.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dev-cli
+    spec:
+      containers:
+        - name: dev-cli
+          image: "{{ .Values.devImage.repository }}:{{ .Values.devImage.tag }}"
+          imagePullPolicy: {{ .Values.devImage.pullPolicy }}
+          command: ["sleep", "infinity"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "information-harvester.fullname" . }}-config
+            - secretRef:
+                name: {{ include "information-harvester.secretName" . }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          {{- end }}
+          resources:
+            {{- toYaml .Values.devContainer.resources | nindent 12 }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "information-harvester.fullname" . }}-data
+      {{- end }}
+{{- end }}

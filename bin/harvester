@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# CLI wrapper for Threat Information Harvester
+export PYTHONPATH="${PYTHONPATH}:/app:$(pwd)"
+exec python3 -m src.cli "$@"

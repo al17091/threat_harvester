@@ -1,0 +1,14 @@
+apiVersion: v2
+name: information-harvester
+description: Cyber Threat Intelligence Harvester focusing on Japan-targeted threats with Tor, Gemini, and Dev Container.
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords:
+  - security
+  - threat-intelligence
+  - cti
+  - tor
+  - darkweb
+  - gemini
+  - japan

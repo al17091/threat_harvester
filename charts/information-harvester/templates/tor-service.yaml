@@ -1,0 +1,19 @@
+{{- if .Values.tor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "information-harvester.fullname" . }}-tor
+  labels:
+    {{- include "information-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tor-proxy
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.tor.port }}
+      targetPort: socks5
+      protocol: TCP
+      name: socks5
+  selector:
+    {{- include "information-harvester.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: tor-proxy
+{{- end }}

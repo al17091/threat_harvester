@@ -1,0 +1,45 @@
+{{- if .Values.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "information-harvester.fullname" . }}
+  labels:
+    {{- include "information-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: harvester-cron
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "information-harvester.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: harvester-cron
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: harvester
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "information-harvester.fullname" . }}-config
+                - secretRef:
+                    name: {{ include "information-harvester.secretName" . }}
+              {{- if .Values.persistence.enabled }}
+              volumeMounts:
+                - name: data
+                  mountPath: /app/data
+              {{- end }}
+              resources:
+                {{- toYaml .Values.cronjob.resources | nindent 16 }}
+          {{- if .Values.persistence.enabled }}
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: {{ include "information-harvester.fullname" . }}-data
+          {{- end }}
+{{- end }}
