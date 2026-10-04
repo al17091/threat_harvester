@@ -70,6 +70,7 @@ class SourceActionRequest(BaseModel):
 # --- UI Endpoints ---
 
 
+@app.head("/")
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request):
     """Serve Dashboard single-page application."""
