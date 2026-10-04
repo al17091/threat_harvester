@@ -109,7 +109,8 @@ devContainer:
 
 # Tor SOCKS5 Proxy Service & Deployment
 tor:
-  enabled: true
+  enabled: false  # Disabled by default since Tor SOCKS5 is provided externally
+  externalProxyUrl: "socks5h://127.0.0.1:9050"
   image:
     repository: alpine
     tag: "3.20"

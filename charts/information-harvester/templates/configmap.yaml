@@ -18,6 +18,8 @@ data:
   DB_SSLMODE: {{ .Values.database.sslmode | quote }}
   {{- if .Values.tor.enabled }}
   TOR_PROXY_URL: "socks5h://{{ include "information-harvester.fullname" . }}-tor:{{ .Values.tor.port }}"
+  {{- else if .Values.tor.externalProxyUrl }}
+  TOR_PROXY_URL: {{ .Values.tor.externalProxyUrl | quote }}
   {{- else }}
   TOR_PROXY_URL: "socks5h://127.0.0.1:9050"
   {{- end }}

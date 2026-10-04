@@ -63,7 +63,7 @@ Status tracking for the **Threat Information Harvester** project. This file is r
   - Chi-based lightweight, high-throughput REST API with full CORS support.
   - Multi-stage minimal Dockerfile (~25MB Alpine runner image).
 - [x] **Docker Compose (`docker-compose.yml`)**:
-  - Complete multi-container orchestration for `web` (Next.js), `backend` (Go CTI Engine), `db` (Postgres 16), and `tor` (Tor SOCKS5 proxy).
+  - Multi-container orchestration for `web` (Next.js), `backend` (Go CTI Engine), and `db` (Postgres 16), connecting to external Tor SOCKS5 proxy via `TOR_PROXY_URL`.
 - [x] **Next.js 14 Cyber SOC Web Dashboard (`web/`)**:
   - Pure English user interface.
   - Reactive incident feeds, real-time filtering, detailed intelligence modal.

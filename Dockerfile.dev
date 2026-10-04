@@ -1,7 +1,6 @@
 FROM golang:alpine
 
 RUN apk add --no-cache \
-    tor \
     curl \
     git \
     jq \
