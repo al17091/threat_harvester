@@ -7,7 +7,7 @@ Status tracking for the **Threat Information Harvester** project. This file is r
 
 ## Current Status
 - **Current Phase**: Phase 5 Completed (Docker Compose, Next.js Web Dashboard, and Decoupled Architecture)
-- **Last Updated**: 2026-10-04
+- **Last Updated**: 2026-10-05
 
 ---
 
@@ -73,6 +73,10 @@ Status tracking for the **Threat Information Harvester** project. This file is r
 - [x] **Notion MCP Knowledge Base Integration**:
   - Created dedicated Notion Database `Cyber Threat Intelligence (CTI) Feed` (`3ef6bf4bdc72815c94a9e28f7ebf56c4`) via Notion MCP.
   - Verified Go backend Notion sink integration and page generation (`bin/harvester test-notion`).
+- [x] **OSS Commercial Compliance & 4-Tier Source Control**:
+  - Established 4 compliance tiers: `Commercial Ready`, `Commercial via Official API`, `Non-Commercial: ToS Scraping`, and `Non-Commercial: Dark Web`.
+  - Added preset profiles (`commercial_only`, `official_api_ready`, `all`, `custom`) and tier-level killswitches.
+  - Implemented dynamic filtering in Go CTI engine, REST API, and full GUI management in Next.js SOC Dashboard.
 
 ### Phase 6: Cluster Deployment & Live Verification (Next Steps)
 - [ ] Run `docker compose up -d` to verify local multi-container stack.
