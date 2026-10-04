@@ -1,11 +1,58 @@
 #!/usr/bin/env bash
-# CLI wrapper for Threat Information Harvester (Go)
+# Unified CLI wrapper for Threat Information Harvester (Containerized Go build & execution)
+set -eo pipefail
+
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${DIR}/.." && pwd)"
 BIN="${DIR}/information-harvester"
 
-if [ ! -f "$BIN" ]; then
-    echo "Compiling information-harvester..." >&2
-    (cd "${DIR}/../backend" && go build -o "$BIN" ./cmd/harvester)
-fi
+build_container() {
+    echo "==> Building information-harvester inside Docker container (golang:alpine)..." >&2
+    docker run --rm \
+        -u "$(id -u):$(id -g)" \
+        -v "${ROOT_DIR}:/workspace" \
+        -w /workspace/backend \
+        -e HOME=/tmp \
+        -e GOCACHE=/tmp/go-build \
+        -e GOPATH=/tmp/go-pkg \
+        -e CGO_ENABLED=0 \
+        golang:alpine \
+        go build -ldflags="-s -w" -o /workspace/bin/information-harvester ./cmd/harvester
+    echo "==> Compiled binary: bin/information-harvester" >&2
+}
 
-exec "$BIN" "$@"
+test_container() {
+    echo "==> Running Go unit tests inside Docker container (golang:alpine)..." >&2
+    docker run --rm \
+        -u "$(id -u):$(id -g)" \
+        -v "${ROOT_DIR}:/workspace" \
+        -w /workspace/backend \
+        -e HOME=/tmp \
+        -e GOCACHE=/tmp/go-build \
+        -e GOPATH=/tmp/go-pkg \
+        golang:alpine \
+        go test -v ./...
+}
+
+case "$1" in
+    build)
+        build_container
+        exit 0
+        ;;
+    test)
+        test_container
+        exit 0
+        ;;
+    clean)
+        echo "==> Cleaning local binary..." >&2
+        rm -f "$BIN"
+        exit 0
+        ;;
+    *)
+        if [ ! -f "$BIN" ]; then
+            build_container
+        fi
+        exec "$BIN" "$@"
+        ;;
+esac
+

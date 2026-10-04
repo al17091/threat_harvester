@@ -1,29 +1,21 @@
-FROM python:3.12-slim
+FROM golang:alpine
 
-# Install system dependencies including Tor, curl, git, jq
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
     tor \
     curl \
     git \
     jq \
     ca-certificates \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+    bash \
+    tzdata
 
 WORKDIR /app
 
-# Copy dependency specifications
-COPY requirements.txt requirements-dev.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
-
-# Copy source and configurations
 COPY . /app/
-
-# Setup CLI wrapper
 RUN chmod +x /app/bin/harvester /app/docker/entrypoint-dev.sh && \
     ln -sf /app/bin/harvester /usr/local/bin/harvester
 
-ENV PYTHONPATH=/app
+ENV PORT=8000
 
 ENTRYPOINT ["/app/docker/entrypoint-dev.sh"]
 CMD ["bash"]
