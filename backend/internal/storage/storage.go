@@ -34,6 +34,7 @@ type Store interface {
 	MarkSeen(ctx context.Context, item models.ThreatItem, enriched *models.EnrichedThreat, notified bool) error
 	GetStats(ctx context.Context) (map[string]interface{}, error)
 	GetHistory(ctx context.Context, filter HistoryFilter) ([]map[string]interface{}, error)
+	GetHistoryTotal(ctx context.Context, filter HistoryFilter) (int, error)
 	GetItem(ctx context.Context, itemID string) (map[string]interface{}, error)
 	Close() error
 }
@@ -415,17 +416,13 @@ func (s *SQLStore) maskURL(url string) string {
 	return re.ReplaceAllString(url, ":****@")
 }
 
-func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
+func (s *SQLStore) buildHistoryConditions(f HistoryFilter) (string, []interface{}) {
 	var conditions []string
 	var args []interface{}
 	argIdx := 1
 
 	if f.JapanOnly {
-		if s.isSQLite {
-			conditions = append(conditions, "japan_relevance = 'Direct'")
-		} else {
-			conditions = append(conditions, "japan_relevance = 'Direct'")
-		}
+		conditions = append(conditions, "japan_relevance = 'Direct'")
 	}
 	if f.Severity != "" {
 		if s.isSQLite {
@@ -458,10 +455,24 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 		}
 	}
 
-	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items"
+	whereClause := ""
 	if len(conditions) > 0 {
-		query += " WHERE " + strings.Join(conditions, " AND ")
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
+	return whereClause, args
+}
+
+func (s *SQLStore) GetHistoryTotal(ctx context.Context, f HistoryFilter) (int, error) {
+	whereClause, args := s.buildHistoryConditions(f)
+	query := "SELECT COUNT(*) FROM threat_items" + whereClause
+	var total int
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
+func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
+	whereClause, args := s.buildHistoryConditions(f)
+	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items" + whereClause
 	if f.OrderBy == "harvested_at" {
 		query += " ORDER BY harvested_at DESC"
 	} else {
@@ -472,11 +483,7 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 	if limit <= 0 {
 		limit = 50
 	}
-	if s.isSQLite {
-		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, f.Offset)
-	} else {
-		query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, f.Offset)
-	}
+	query += fmt.Sprintf(" LIMIT %d OFFSET %d", limit, f.Offset)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

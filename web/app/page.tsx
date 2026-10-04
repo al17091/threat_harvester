@@ -16,6 +16,9 @@ import {
   Radio,
   ExternalLink,
   ChevronRight,
+  ChevronLeft,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronDown,
   X,
   Plus,
@@ -218,20 +221,79 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchIncidents = async () => {
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(totalCount / pageSize));
+  }, [totalCount, pageSize]);
+
+  const pageNumbers = useMemo(() => {
+    const pages: (number | "...")[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (currentPage <= 4) {
+        for (let i = 1; i <= 5; i++) pages.push(i);
+        pages.push("...");
+        pages.push(totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        pages.push(1);
+        pages.push("...");
+        for (let i = totalPages - 4; i <= totalPages; i++) pages.push(i);
+      } else {
+        pages.push(1);
+        pages.push("...");
+        pages.push(currentPage - 1);
+        pages.push(currentPage);
+        pages.push(currentPage + 1);
+        pages.push("...");
+        pages.push(totalPages);
+      }
+    }
+    return pages;
+  }, [currentPage, totalPages]);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    setCurrentPage(newPage);
+    fetchIncidents(newPage, pageSize);
+    const el = document.getElementById("incident-feed-section");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1);
+    fetchIncidents(1, newSize);
+  };
+
+  const fetchIncidents = async (targetPage = currentPage, targetPageSize = pageSize) => {
     setLoadingIncidents(true);
     try {
+      const offset = (targetPage - 1) * targetPageSize;
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (severityFilter) params.append("severity", severityFilter);
       if (japanOnly) params.append("japan_only", "true");
       if (sourceTypeFilter) params.append("source_type", sourceTypeFilter);
       if (sortBy) params.append("sort_by", sortBy);
+      params.append("limit", targetPageSize.toString());
+      params.append("offset", offset.toString());
 
       const res = await fetch(`/api/incidents?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setIncidents(data.items || []);
+        if (typeof data.total === "number") {
+          setTotalCount(data.total);
+        } else {
+          setTotalCount(data.count || 0);
+        }
       }
     } catch (err) {
       showToast("Failed to fetch incidents", "error");
@@ -243,12 +305,13 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchStatus();
     fetchConfig();
-    fetchIncidents();
+    fetchIncidents(1, pageSize);
   }, []);
 
   useEffect(() => {
+    setCurrentPage(1);
     const timer = setTimeout(() => {
-      fetchIncidents();
+      fetchIncidents(1, pageSize);
     }, 300);
     return () => clearTimeout(timer);
   }, [search, severityFilter, japanOnly, sourceTypeFilter, sortBy]);
@@ -256,7 +319,7 @@ export default function DashboardPage() {
   const handleHarvestFinished = async () => {
     setHarvesting(false);
     showToast("Threat harvesting pipeline completed.");
-    await fetchIncidents();
+    await fetchIncidents(currentPage, pageSize);
     await fetchStatus();
   };
 
@@ -744,14 +807,66 @@ export default function DashboardPage() {
                   <option value="harvested_at">Sort: Ingestion Date (Newest)</option>
                 </select>
 
+                <div className="flex items-center space-x-1 text-xs text-slate-400">
+                  <span className="text-slate-500 font-sans hidden sm:inline">表示件数:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-cyan-500 font-mono"
+                  >
+                    <option value={10}>10件/頁</option>
+                    <option value={20}>20件/頁</option>
+                    <option value={50}>50件/頁</option>
+                    <option value={100}>100件/頁</option>
+                  </select>
+                </div>
+
                 <button
-                  onClick={fetchIncidents}
+                  onClick={() => fetchIncidents(currentPage, pageSize)}
                   title="Refresh list"
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 text-slate-300"
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 text-slate-300 transition"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className={`w-4 h-4 ${loadingIncidents ? "animate-spin" : ""}`} />
                 </button>
               </div>
+            </div>
+
+            {/* Incident Subheader with Count & Quick Navigation */}
+            <div id="incident-feed-section" className="flex flex-wrap items-center justify-between gap-3 mb-4 text-xs">
+              <div className="flex items-center space-x-2 text-slate-400">
+                <span className="font-semibold text-white">
+                  全 {totalCount.toLocaleString()} 件
+                </span>
+                {totalCount > 0 && (
+                  <span className="text-slate-500 font-mono">
+                    ({((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalCount)} 件目を表示 / {totalPages} ページ中)
+                  </span>
+                )}
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center space-x-1">
+                  <button
+                    disabled={currentPage <= 1 || loadingIncidents}
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:pointer-events-none transition flex items-center text-xs"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5 mr-0.5" />
+                    前へ
+                  </button>
+                  <span className="px-2 py-1 font-mono text-cyan-400 font-medium">
+                    {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    disabled={currentPage >= totalPages || loadingIncidents}
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:pointer-events-none transition flex items-center text-xs"
+                  >
+                    次へ
+                    <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Incidents List */}
@@ -892,6 +1007,107 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+
+            {/* Bottom Pagination Controls */}
+            {totalCount > 0 && (
+              <div className="mt-6 p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="text-xs text-slate-400 flex items-center space-x-2">
+                  <span>表示中:</span>
+                  <span className="font-mono text-slate-200 font-medium">
+                    {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalCount)}
+                  </span>
+                  <span>/</span>
+                  <span className="font-mono text-cyan-400 font-semibold">{totalCount.toLocaleString()} 件</span>
+                  <span className="text-slate-600">|</span>
+                  <span className="font-mono text-slate-400">
+                    ページ {currentPage} / {totalPages}
+                  </span>
+                </div>
+
+                <div className="flex items-center space-x-1">
+                  {/* First Page Button */}
+                  <button
+                    disabled={currentPage <= 1 || loadingIncidents}
+                    onClick={() => handlePageChange(1)}
+                    title="最初のページへ"
+                    className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+
+                  {/* Previous Page Button */}
+                  <button
+                    disabled={currentPage <= 1 || loadingIncidents}
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    title="前のページへ"
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-xs text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:pointer-events-none transition flex items-center"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5 mr-0.5" />
+                    前へ
+                  </button>
+
+                  {/* Numbered Page Buttons */}
+                  <div className="flex items-center space-x-1 mx-1">
+                    {pageNumbers.map((p, idx) =>
+                      p === "..." ? (
+                        <span key={`ellipsis-${idx}`} className="px-1.5 py-1 text-slate-500 font-mono text-xs">
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={p}
+                          disabled={loadingIncidents}
+                          onClick={() => handlePageChange(p as number)}
+                          className={`min-w-[32px] h-8 px-2 rounded-lg text-xs font-mono font-medium transition ${
+                            currentPage === p
+                              ? "bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/20"
+                              : "bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+                  </div>
+
+                  {/* Next Page Button */}
+                  <button
+                    disabled={currentPage >= totalPages || loadingIncidents}
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    title="次のページへ"
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-xs text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:pointer-events-none transition flex items-center"
+                  >
+                    次へ
+                    <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                  </button>
+
+                  {/* Last Page Button */}
+                  <button
+                    disabled={currentPage >= totalPages || loadingIncidents}
+                    onClick={() => handlePageChange(totalPages)}
+                    title="最後のページへ"
+                    className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:pointer-events-none transition"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Bottom Page Size Selector */}
+                <div className="flex items-center space-x-2 text-xs text-slate-400">
+                  <span>表示件数:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                    className="bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                  >
+                    <option value={10}>10件</option>
+                    <option value={20}>20件</option>
+                    <option value={50}>50件</option>
+                    <option value={100}>100件</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

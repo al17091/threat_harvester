@@ -80,6 +80,14 @@ func TestStorageOperations(t *testing.T) {
 		t.Fatalf("expected 1 history item, got %d", len(history))
 	}
 
+	total, err := store.GetHistoryTotal(ctx, HistoryFilter{JapanOnly: true})
+	if err != nil {
+		t.Fatalf("GetHistoryTotal failed: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected total 1, got %d", total)
+	}
+
 	// Insert older published item to test ordering
 	olderTime := now.Add(-24 * time.Hour)
 	olderItem := models.NewThreatItem(

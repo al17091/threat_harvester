@@ -233,7 +233,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 	search := q.Get("search")
 	sortBy := q.Get("sort_by")
 
-	items, err := s.store.GetHistory(ctx, storage.HistoryFilter{
+	filter := storage.HistoryFilter{
 		Limit:      limit,
 		Offset:     offset,
 		JapanOnly:  japanOnly,
@@ -241,10 +241,17 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		SourceType: sourceType,
 		Search:     search,
 		OrderBy:    sortBy,
-	})
+	}
+
+	items, err := s.store.GetHistory(ctx, filter)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	total, err := s.store.GetHistoryTotal(ctx, filter)
+	if err != nil {
+		total = len(items)
 	}
 
 	if items == nil {
@@ -253,6 +260,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"count":  len(items),
+		"total":  total,
 		"limit":  limit,
 		"offset": offset,
 		"items":  items,

@@ -45,7 +45,6 @@ class ThreatCache:
             sa.Column("title", sa.Text, nullable=False),
             sa.Column("url", sa.Text, nullable=True),
             sa.Column("summary", sa.Text, nullable=True),
-            sa.Column("raw_content", sa.Text, nullable=True),
             sa.Column("published_at", sa.Text, nullable=True),
             sa.Column("harvested_at", sa.Text, nullable=False),
             sa.Column("severity", sa.String(32), nullable=True),
@@ -101,10 +100,6 @@ class ThreatCache:
             with self.engine.begin() as conn:
                 try:
                     conn.execute(sa.text("ALTER TABLE threat_items ADD COLUMN enriched_data TEXT"))
-                except Exception:
-                    pass
-                try:
-                    conn.execute(sa.text("ALTER TABLE threat_items ADD COLUMN raw_content TEXT"))
                 except Exception:
                     pass
         except Exception as e:
@@ -253,6 +248,36 @@ class ThreatCache:
                         item_dict["enriched_parsed"] = None
                 items.append(item_dict)
             return items
+
+    def get_history_total(
+        self,
+        japan_only: bool = False,
+        severity: str | None = None,
+        source_type: str | None = None,
+        search: str | None = None,
+    ) -> int:
+        """Count total threat items matching filters."""
+        query = sa.select(sa.func.count()).select_from(self.threat_items)
+
+        if japan_only:
+            query = query.where(self.threat_items.c.japan_relevance == "Direct")
+        if severity:
+            query = query.where(self.threat_items.c.severity == severity)
+        if source_type:
+            query = query.where(self.threat_items.c.source_type == source_type)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.where(
+                sa.or_(
+                    self.threat_items.c.title.ilike(search_pattern),
+                    self.threat_items.c.summary.ilike(search_pattern),
+                    self.threat_items.c.source_name.ilike(search_pattern),
+                    self.threat_items.c.enriched_data.ilike(search_pattern),
+                )
+            )
+
+        with self.engine.connect() as conn:
+            return conn.execute(query).scalar() or 0
 
     def _get_connection(self):
         """Backward compatibility helper for raw connection context."""
