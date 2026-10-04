@@ -100,6 +100,8 @@ func runWeb(ctx context.Context, store storage.Store) {
 	}
 
 	srv := api.NewServer(store)
+	srv.StartScheduler(ctx)
+
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	httpServer := &http.Server{
 		Addr:    addr,

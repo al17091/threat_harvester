@@ -95,6 +95,13 @@ interface SystemStatus {
     web_search?: { total: number; active: number };
     total_active?: number;
   };
+  pipeline?: {
+    is_running?: boolean;
+    last_run_at?: string | null;
+    next_run_at?: string | null;
+    scheduler_enabled?: boolean;
+    interval_hours?: number;
+  };
 }
 
 interface ConfigData {
@@ -145,20 +152,6 @@ export default function DashboardPage() {
   // Modals & Toast
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [showRawInModal, setShowRawInModal] = useState<boolean>(false);
-  const [expandedRawCardIds, setExpandedRawCardIds] = useState<Set<string>>(new Set());
-
-  const toggleRawCard = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpandedRawCardIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
 
   const openIncidentModal = (item: Incident) => {
     setSelectedIncident(item);
@@ -546,6 +539,13 @@ export default function DashboardPage() {
               />
               <span>{status?.tor_proxy?.online ? "Tor Active" : "Tor Offline"}</span>
             </span>
+
+            {status?.pipeline?.scheduler_enabled && (
+              <span className="px-2.5 py-1 rounded-full text-xs font-mono font-medium border bg-cyan-950/60 text-cyan-300 border-cyan-800 flex items-center">
+                <RefreshCw className="w-3 h-3 mr-1.5 animate-spin text-cyan-400" style={{ animationDuration: "8s" }} />
+                <span>Auto: {status.pipeline.interval_hours || 1}h</span>
+              </span>
+            )}
 
             <span className="flex items-center text-xs text-emerald-400">
               <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-ping" />
@@ -950,29 +950,9 @@ export default function DashboardPage() {
                     {item.enriched_parsed?.title_ja || item.title}
                   </h3>
 
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-2.5">
+                  <p className="text-xs text-slate-400 line-clamp-2 mb-3">
                     {item.enriched_parsed?.summary_ja || item.summary}
                   </p>
-
-                  {/* Collapsible Raw Source Preview on Card */}
-                  <div className="mb-3">
-                    <button
-                      type="button"
-                      onClick={(e) => toggleRawCard(item.id, e)}
-                      className="inline-flex items-center space-x-1 text-[11px] text-slate-400 hover:text-cyan-400 transition font-mono"
-                    >
-                      <FileCode className="w-3.5 h-3.5 text-cyan-500" />
-                      <span>{expandedRawCardIds.has(item.id) ? "原文を閉じる ▲" : "原文を表示 ▼"}</span>
-                    </button>
-                    {expandedRawCardIds.has(item.id) && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-2 p-2.5 rounded-lg bg-slate-950/90 border border-slate-800 font-mono text-[11px] text-slate-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto select-text leading-relaxed"
-                      >
-                        {item.raw_content || item.summary || "原文データなし"}
-                      </div>
-                    )}
-                  </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
                     {item.enriched_parsed?.victim_orgs && item.enriched_parsed.victim_orgs.length > 0 && (
@@ -1653,6 +1633,26 @@ export default function DashboardPage() {
                     }`}
                   >
                     {status?.sinks?.notion ? "Configured" : "Unconfigured"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-200">Auto-Harvest Scheduler</div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono">
+                      {status?.pipeline?.next_run_at
+                        ? `Next cycle: ${formatDate(status.pipeline.next_run_at)}`
+                        : `Interval: ${status?.pipeline?.interval_hours || 1} hour(s)`}
+                    </div>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                      status?.pipeline?.scheduler_enabled
+                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                        : "bg-slate-800 text-slate-400"
+                    }`}
+                  >
+                    {status?.pipeline?.scheduler_enabled ? "Active (Auto)" : "Inactive"}
                   </span>
                 </div>
               </div>

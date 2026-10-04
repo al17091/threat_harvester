@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -28,10 +29,12 @@ type Server struct {
 	pipeline *pipeline.Pipeline
 	router   *chi.Mux
 
-	pipeMu          sync.Mutex
-	isPipeRunning   bool
-	lastPipeRunAt   *string
-	lastPipeSummary interface{}
+	pipeMu           sync.Mutex
+	isPipeRunning    bool
+	lastPipeRunAt    *string
+	nextPipeRunAt    *string
+	schedulerEnabled bool
+	lastPipeSummary  interface{}
 
 	torMu        sync.Mutex
 	lastTorCheck time.Time
@@ -172,9 +175,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	s.pipeMu.Lock()
 	pipeState := map[string]interface{}{
-		"is_running":   s.isPipeRunning,
-		"last_run_at":  s.lastPipeRunAt,
-		"last_summary": s.lastPipeSummary,
+		"is_running":        s.isPipeRunning,
+		"last_run_at":       s.lastPipeRunAt,
+		"next_run_at":       s.nextPipeRunAt,
+		"scheduler_enabled": s.schedulerEnabled,
+		"interval_hours":    cfg.Pipeline.CheckIntervalHours,
+		"last_summary":      s.lastPipeSummary,
 	}
 	s.pipeMu.Unlock()
 
@@ -410,24 +416,26 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleTriggerPipeline(w http.ResponseWriter, r *http.Request) {
+// RunHarvestJob executes the full pipeline cycle safely under a mutex lock.
+func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 	s.pipeMu.Lock()
 	if s.isPipeRunning {
 		s.pipeMu.Unlock()
-		jsonResponse(w, http.StatusOK, map[string]string{
-			"status":  "already_running",
-			"message": "A harvest job is already in progress",
-		})
-		return
+		return false, fmt.Errorf("a harvest job is already in progress")
 	}
 	s.isPipeRunning = true
 	s.pipeMu.Unlock()
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
 
-		summary, err := s.pipeline.RunAll(ctx, 0, false)
+		log.Printf("[%s] Starting threat intelligence harvest cycle...", triggerSource)
+		cfg := config.GetSettings().GetConfig()
+		lookback := cfg.Pipeline.CheckIntervalHours
+		directOnly := cfg.Pipeline.NotifyDirectOnly
+
+		summary, err := s.pipeline.RunAll(ctx, lookback, directOnly)
 
 		s.pipeMu.Lock()
 		defer s.pipeMu.Unlock()
@@ -435,11 +443,66 @@ func (s *Server) handleTriggerPipeline(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC().Format(time.RFC3339)
 		s.lastPipeRunAt = &now
 		if err != nil {
+			log.Printf("[%s] Harvest job completed with error: %v", triggerSource, err)
 			s.lastPipeSummary = map[string]string{"error": err.Error()}
 		} else {
+			log.Printf("[%s] Harvest job completed successfully", triggerSource)
 			s.lastPipeSummary = summary
 		}
 	}()
+
+	return true, nil
+}
+
+// StartScheduler launches an in-process background ticker that runs harvest cycles periodically.
+func (s *Server) StartScheduler(ctx context.Context) {
+	cfg := config.GetSettings().GetConfig()
+	intervalHours := cfg.Pipeline.CheckIntervalHours
+	if intervalHours <= 0 {
+		intervalHours = 1
+	}
+
+	duration := time.Duration(intervalHours) * time.Hour
+
+	s.pipeMu.Lock()
+	s.schedulerEnabled = true
+	nextRun := time.Now().UTC().Add(duration).Format(time.RFC3339)
+	s.nextPipeRunAt = &nextRun
+	s.pipeMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(duration)
+		defer ticker.Stop()
+
+		log.Printf("[Scheduler] Background threat harvester active (Interval: %d hour(s)). Next cycle scheduled at %s", intervalHours, nextRun)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("[Scheduler] Background scheduler stopped")
+				return
+			case <-ticker.C:
+				log.Printf("[Scheduler] Ticker fired: initiating scheduled harvest cycle")
+				_, _ = s.RunHarvestJob("Scheduler")
+
+				s.pipeMu.Lock()
+				next := time.Now().UTC().Add(duration).Format(time.RFC3339)
+				s.nextPipeRunAt = &next
+				s.pipeMu.Unlock()
+			}
+		}
+	}()
+}
+
+func (s *Server) handleTriggerPipeline(w http.ResponseWriter, r *http.Request) {
+	started, err := s.RunHarvestJob("Manual-WebUI")
+	if !started {
+		jsonResponse(w, http.StatusOK, map[string]string{
+			"status":  "already_running",
+			"message": err.Error(),
+		})
+		return
+	}
 
 	jsonResponse(w, http.StatusOK, map[string]string{
 		"status":  "started",
