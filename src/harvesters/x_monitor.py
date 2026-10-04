@@ -80,6 +80,7 @@ class XMonitorHarvester(BaseHarvester):
                             if res.get("date_posted"):
                                 try:
                                     from dateutil import parser
+
                                     pub_date = parser.parse(res["date_posted"]).replace(tzinfo=timezone.utc)
                                 except Exception:
                                     pass

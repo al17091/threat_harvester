@@ -47,12 +47,7 @@ class ThreatCache:
             cursor.execute("SELECT 1 FROM threat_items WHERE id = ?", (item_id,))
             return cursor.fetchone() is not None
 
-    def mark_seen(
-        self,
-        item: ThreatItem,
-        enriched: EnrichedThreat | None = None,
-        notified: bool = False
-    ) -> None:
+    def mark_seen(self, item: ThreatItem, enriched: EnrichedThreat | None = None, notified: bool = False) -> None:
         """Record an item as seen/processed."""
         now_str = datetime.now(timezone.utc).isoformat()
         published_str = item.published_at.isoformat() if item.published_at else None
@@ -141,4 +136,3 @@ class ThreatCache:
             deleted = cursor.rowcount
             conn.commit()
             return deleted
-

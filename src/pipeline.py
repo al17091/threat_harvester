@@ -10,7 +10,8 @@ from src.harvesters.vendor_rss import VendorRSSHarvester
 from src.harvesters.web_search import WebSearchHarvester
 from src.harvesters.x_monitor import XMonitorHarvester
 from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
-from src.notifiers.discord import DiscordNotifier
+from src.notifiers import NotificationManager
+from src.reporters.notion_reporter import NotionReporter
 from src.storage.cache import ThreatCache
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,13 @@ class HarvesterPipeline:
         self,
         cache: ThreatCache | None = None,
         analyzer: GeminiThreatAnalyzer | None = None,
-        notifier: DiscordNotifier | None = None,
+        notifier: NotificationManager | None = None,
+        notion_reporter: NotionReporter | None = None,
     ):
         self.cache = cache or ThreatCache(settings.cache_db_path)
         self.analyzer = analyzer or GeminiThreatAnalyzer()
-        self.notifier = notifier or DiscordNotifier()
+        self.notifier = notifier or NotificationManager()
+        self.notion_reporter = notion_reporter or NotionReporter()
 
         # Registered harvesters
         self.harvesters = {
@@ -75,6 +78,7 @@ class HarvesterPipeline:
 
         enriched_list: list[EnrichedThreat] = []
         notified_count = 0
+        notion_reported_count = 0
 
         for item in new_items:
             try:
@@ -89,15 +93,30 @@ class HarvesterPipeline:
                 # 2. Any Critical incident (even indirect)
                 # 3. High severity indirect incident if not notify_direct_only
                 should_notify = False
-                if enriched.japan_relevance == JapanRelevance.DIRECT and enriched.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM) or enriched.severity == Severity.CRITICAL or not notify_direct_only and enriched.severity == Severity.HIGH and enriched.japan_relevance == JapanRelevance.INDIRECT:
+                if (
+                    enriched.japan_relevance == JapanRelevance.DIRECT
+                    and enriched.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM)
+                    or enriched.severity == Severity.CRITICAL
+                    or not notify_direct_only
+                    and enriched.severity == Severity.HIGH
+                    and enriched.japan_relevance == JapanRelevance.INDIRECT
+                ):
                     should_notify = True
 
                 notified = False
                 if should_notify:
-                    logger.info(f"Alerting on threat: [{enriched.severity.value}] [{enriched.japan_relevance.value}] {enriched.title_ja}")
-                    notified = self.notifier.notify(enriched)
+                    logger.info(
+                        f"Alerting on threat: [{enriched.severity.value}] [{enriched.japan_relevance.value}] {enriched.title_ja}"
+                    )
+                    notified = self.notifier.dispatch(enriched)
                     if notified:
                         notified_count += 1
+
+                    # Publish to Notion database if configured
+                    if self.notion_reporter.is_configured:
+                        res = self.notion_reporter.create_page(enriched)
+                        if res:
+                            notion_reported_count += 1
 
                 # Record in persistent cache
                 self.cache.mark_seen(item, enriched=enriched, notified=notified)
@@ -110,6 +129,8 @@ class HarvesterPipeline:
             "new_items": len(new_items),
             "analyzed": len(enriched_list),
             "notified": notified_count,
+            "notion_reported": notion_reported_count,
+            "notion_configured": self.notion_reporter.is_configured,
             "source_breakdown": source_counts,
         }
         logger.info(f"=== Harvesting cycle complete: {summary} ===")

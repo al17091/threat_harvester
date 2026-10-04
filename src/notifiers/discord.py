@@ -71,17 +71,17 @@ class DiscordNotifier:
         payload = {
             "username": "Threat Harvester (Japan CTI)",
             "content": content,
-            "embeds": [{
-                "title": f"{prefix} {threat.title_ja[:200]}",
-                "description": threat.summary_ja[:2000],
-                "url": threat.item.url,
-                "color": color,
-                "fields": fields,
-                "footer": {
-                    "text": f"Harvester ID: {threat.item_id[:8]} | Powered by Gemini & Tor CTI"
-                },
-                "timestamp": threat.analyzed_at.isoformat(),
-            }]
+            "embeds": [
+                {
+                    "title": f"{prefix} {threat.title_ja[:200]}",
+                    "description": threat.summary_ja[:2000],
+                    "url": threat.item.url,
+                    "color": color,
+                    "fields": fields,
+                    "footer": {"text": f"Harvester ID: {threat.item_id[:8]} | Powered by Gemini & Tor CTI"},
+                    "timestamp": threat.analyzed_at.isoformat(),
+                }
+            ],
         }
 
         try:

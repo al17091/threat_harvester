@@ -98,9 +98,14 @@ The **Threat Information Harvester** is an automated Cyber Threat Intelligence (
 │   ├── storage/                  # Deduplication & persistent state
 │   │   ├── __init__.py
 │   │   └── cache.py              # Cache/dedup store (SQLite/JSON)
-│   └── notifiers/                # Alert destinations
+│   ├── notifiers/                # Alert destinations
+│   │   ├── __init__.py           # NotificationManager dispatcher
+│   │   ├── discord.py            # Discord webhook notifier
+│   │   ├── slack.py              # Slack Incoming Webhook notifier
+│   │   └── generic_webhook.py    # Generic JSON Webhook notifier
+│   └── reporters/                # Knowledge base / reporting sinks
 │       ├── __init__.py
-│       └── discord.py            # Discord webhook notifier
+│       └── notion_reporter.py    # Notion Database CTI reporter
 └── charts/
     └── information-harvester/    # Helm chart for Kubernetes deployment
         ├── Chart.yaml

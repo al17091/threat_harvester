@@ -22,6 +22,10 @@ secrets:
   # Or provide values directly here (can be set via --set or secret values file)
   geminiApiKey: ""
   discordWebhookUrl: ""
+  slackWebhookUrl: ""
+  genericWebhookUrl: ""
+  notionApiKey: ""
+  notionDatabaseId: ""
 
 # General application configuration
 config:

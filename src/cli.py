@@ -12,7 +12,10 @@ from src.harvesters.telegram import TelegramHarvester
 from src.harvesters.vendor_rss import VendorRSSHarvester
 from src.harvesters.web_search import WebSearchHarvester
 from src.harvesters.x_monitor import XMonitorHarvester
+from src.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
+from src.notifiers import NotificationManager
 from src.pipeline import HarvesterPipeline
+from src.reporters.notion_reporter import NotionReporter
 from src.storage.cache import ThreatCache
 
 # Setup console logger
@@ -67,17 +70,42 @@ def status_command():
     status_data = [
         ["Gemini API Key", "Configured" if bool(settings.gemini_api_key) else "MISSING", "Required for AI Analysis"],
         ["Gemini Model", settings.gemini_model, ""],
-        ["Discord Webhook", "Configured" if bool(settings.discord_webhook_url) else "MISSING (Dry-run only)", "Alerts sink"],
+        [
+            "Discord Webhook",
+            "Configured" if bool(settings.discord_webhook_url) else "MISSING (Dry-run only)",
+            "Alerts sink",
+        ],
+        ["Slack Webhook", "Configured" if bool(settings.slack_webhook_url) else "OFF", "Alerts sink"],
+        ["Generic Webhook", "Configured" if bool(settings.generic_webhook_url) else "OFF", "Alerts sink"],
+        [
+            "Notion Reporter",
+            "Configured" if bool(settings.notion_api_key and settings.notion_database_id) else "OFF",
+            f"DB: {settings.notion_database_id[:8]}..." if settings.notion_database_id else "No DB",
+        ],
         ["Tor SOCKS5 Proxy", "ONLINE" if tor_h.test_connection() else "OFFLINE", settings.tor_proxy_url],
-        ["Gemini Web Search", "OK" if web_h.test_connection() else "NOT READY", f"{len(settings.web_search_queries)} queries"],
-        ["Vendor & CERT RSS", "OK" if vendor_h.test_connection() else "FAILED", f"{len(settings.vendor_feeds)} feeds configured"],
-        ["Telegram Harvester", "OK" if tg_h.test_connection() else "FAILED", f"{len(settings.telegram_channels)} channels"],
+        [
+            "Gemini Web Search",
+            "OK" if web_h.test_connection() else "NOT READY",
+            f"{len(settings.web_search_queries)} queries",
+        ],
+        [
+            "Vendor & CERT RSS",
+            "OK" if vendor_h.test_connection() else "FAILED",
+            f"{len(settings.vendor_feeds)} feeds configured",
+        ],
+        [
+            "Telegram Harvester",
+            "OK" if tg_h.test_connection() else "FAILED",
+            f"{len(settings.telegram_channels)} channels",
+        ],
         ["X (Twitter) Harvester", "OK" if x_h.test_connection() else "FAILED", "Grounded search ready"],
         ["Cache DB (SQLite)", f"{stats['total_items']} items", f"Path: {stats['db_path']}"],
     ]
 
     click.echo(tabulate(status_data, headers=["Component", "Status / Value", "Notes"], tablefmt="fancy_grid"))
-    click.echo(f"\nCache Stats: Total Seen={stats['total_items']} | Notified={stats['notified_items']} | Japan Direct={stats['japan_direct_items']}")
+    click.echo(
+        f"\nCache Stats: Total Seen={stats['total_items']} | Notified={stats['notified_items']} | Japan Direct={stats['japan_direct_items']}"
+    )
 
 
 @cli.command("test")
@@ -217,6 +245,83 @@ def show_command(item_id: str, db: str | None):
     click.echo("Summary / Content:")
     click.echo(data.get("summary", ""))
     click.echo("=" * 60 + "\n")
+
+
+@cli.command("test-notify")
+def test_notify_command():
+    """Send a mock Critical Japan-targeted threat alert to all configured Webhooks."""
+    click.echo("[*] Dispatching mock threat alert to configured Webhooks...")
+    item = ThreatItem.create(
+        source_type=SourceType.VENDOR_RSS,
+        source_name="JPCERT/CC (Test)",
+        title="[TEST ALERT] 国内重要インフラを標的としたゼロデイ脆弱性の悪用確認",
+        url="https://www.jpcert.or.jp",
+        summary="これは通知テスト用のモックデータです。国内組織への標的型サイバー攻撃に関する緊急警告。",
+    )
+    enriched = EnrichedThreat(
+        item_id=item.id,
+        item=item,
+        severity=Severity.CRITICAL,
+        japan_relevance=JapanRelevance.DIRECT,
+        title_ja="[テスト] 国内重要インフラを標的としたゼロデイ悪用注意喚起",
+        summary_ja="国内の重要通信網および製造拠点を標的とした未パッチのゼロデイ脆弱性の悪用が観測されました。直ちに該当サービスの停止またはアクセス制御を実施してください。",
+        impact_analysis_ja="国内大手通信キャリアおよび重要製造ラインへの広範な影響が懸念されます。",
+        victim_orgs=["国内重要インフラ事業者 (仮)", "テスト製造株式会社"],
+        threat_actors=["Volt Typhoon (仮)"],
+        attack_type="Zero-day",
+        recommended_actions_ja=[
+            "該当外部公開ポートの即時遮断",
+            "EDRによる不審なPowerShell/WMI実行の監査",
+            "最新パッチの緊急適用検証",
+        ],
+    )
+    manager = NotificationManager()
+    success = manager.dispatch(enriched)
+    if success:
+        click.echo("[+] Successfully dispatched test notification.")
+    else:
+        click.echo("[!] Failed to dispatch test notification. Check webhook URLs.", err=True)
+
+
+@cli.command("test-notion")
+def test_notion_command():
+    """Publish a mock Critical threat intelligence page to the configured Notion Database."""
+    click.echo("[*] Publishing mock threat intelligence page to Notion...")
+    reporter = NotionReporter()
+    if not reporter.is_configured:
+        click.echo("[!] Error: NOTION_API_KEY and NOTION_DATABASE_ID must be set in environment.", err=True)
+        sys.exit(1)
+
+    item = ThreatItem.create(
+        source_type=SourceType.DARKWEB_ONION,
+        source_name="LockBit DLS (Test)",
+        title="[TEST CTI] LockBit published data of Japan Org",
+        url="https://example.com/test-lockbit",
+        summary="テスト用ダークウェブリークサイト掲載インシデントデータ。",
+    )
+    enriched = EnrichedThreat(
+        item_id=item.id,
+        item=item,
+        severity=Severity.HIGH,
+        japan_relevance=JapanRelevance.DIRECT,
+        title_ja="[テスト] ランサムウェアグループによる国内組織データ漏洩告知",
+        summary_ja="LockBitリークサイト上に国内組織の内部文書および顧客情報とされるアーカイブが公開されました。",
+        impact_analysis_ja="個人情報漏洩および取引先情報流出による事業継続リスク。",
+        victim_orgs=["テスト情報システム株式会社"],
+        threat_actors=["LockBit 3.0"],
+        attack_type="Ransomware",
+        recommended_actions_ja=[
+            "漏洩データの同一性確認と影響範囲の特定",
+            "個人情報保護委員会への速報対応",
+            "二重恐喝への連絡遮断とフォレンジック調査の着手",
+        ],
+    )
+    res = reporter.create_page(enriched)
+    if res:
+        click.echo(f"[+] Successfully created page in Notion! Page ID: {res.get('id')}")
+        click.echo(f"[+] Notion Page URL: {res.get('url')}")
+    else:
+        click.echo("[!] Failed to create page in Notion. Check API key and database permissions.", err=True)
 
 
 if __name__ == "__main__":

@@ -13,10 +13,14 @@ logger = logging.getLogger(__name__)
 
 # US Timezones mapping for global feeds
 TZ_INFOS = {
-    "EST": -18000, "EDT": -14400,
-    "CST": -21600, "CDT": -18000,
-    "MST": -25200, "MDT": -21600,
-    "PST": -28800, "PDT": -25200,
+    "EST": -18000,
+    "EDT": -14400,
+    "CST": -21600,
+    "CDT": -18000,
+    "MST": -25200,
+    "MDT": -21600,
+    "PST": -28800,
+    "PDT": -25200,
     "JST": 32400,
 }
 
@@ -37,6 +41,7 @@ class VendorRSSHarvester(BaseHarvester):
         if not date_str and hasattr(entry, "published_parsed") and entry.published_parsed:
             try:
                 import time
+
                 return datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
             except Exception:
                 pass
@@ -55,9 +60,7 @@ class VendorRSSHarvester(BaseHarvester):
 
     def harvest(self, since: datetime | None = None) -> list[ThreatItem]:
         items: list[ThreatItem] = []
-        headers = {
-            "User-Agent": "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)"
-        }
+        headers = {"User-Agent": "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)"}
 
         for feed_cfg in self.feeds:
             try:

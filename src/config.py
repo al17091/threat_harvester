@@ -13,7 +13,15 @@ class Settings(BaseModel):
     # API & Keys
     gemini_api_key: str = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
     gemini_model: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+
+    # Sinks & Webhooks
     discord_webhook_url: str = Field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_URL", ""))
+    slack_webhook_url: str = Field(default_factory=lambda: os.getenv("SLACK_WEBHOOK_URL", ""))
+    generic_webhook_url: str = Field(default_factory=lambda: os.getenv("GENERIC_WEBHOOK_URL", ""))
+
+    # Notion Knowledge Base / Reporting
+    notion_api_key: str = Field(default_factory=lambda: os.getenv("NOTION_API_KEY", ""))
+    notion_database_id: str = Field(default_factory=lambda: os.getenv("NOTION_DATABASE_ID", ""))
 
     # Networking & Proxy
     tor_proxy_url: str = Field(default_factory=lambda: os.getenv("TOR_PROXY_URL", "socks5h://127.0.0.1:9050"))
@@ -28,7 +36,11 @@ class Settings(BaseModel):
         default_factory=lambda: [
             # Japanese CERT & Security Sources
             FeedConfig(name="JPCERT/CC 注意喚起", url="https://www.jpcert.or.jp/rss/jpcert.rdf", category="jp_cert"),
-            FeedConfig(name="IPA 重要なセキュリティ情報", url="https://www.ipa.go.jp/security/rss/alert.rdf", category="jp_cert"),
+            FeedConfig(
+                name="IPA 重要なセキュリティ情報",
+                url="https://www.ipa.go.jp/security/rss/alert.rdf",
+                category="jp_cert",
+            ),
             FeedConfig(name="ScanNetSecurity", url="https://scan.netsecurity.ne.jp/rss/index.rdf", category="jp_news"),
             FeedConfig(name="Security Next", url="https://www.security-next.com/feed", category="jp_news"),
             # Major Global Sources

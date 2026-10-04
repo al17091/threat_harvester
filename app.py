@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Main entrypoint for Kubernetes CronJob execution."""
+
 import logging
 import os
 import sys

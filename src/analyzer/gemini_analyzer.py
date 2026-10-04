@@ -55,7 +55,7 @@ class GeminiThreatAnalyzer:
         ソース種別: {item.source_type.value}
         情報源: {item.source_name}
         タイトル: {item.title}
-        URL: {item.url or 'N/A'}
+        URL: {item.url or "N/A"}
         本文/要約: {item.summary[:1500]}
         付加情報: {json.dumps(item.metadata, ensure_ascii=False)}
 
@@ -85,8 +85,16 @@ class GeminiThreatAnalyzer:
             data = json.loads(response.text)
 
             # Map enums safely
-            severity = Severity(data.get("severity", Severity.UNKNOWN.value)) if data.get("severity") in [e.value for e in Severity] else Severity.UNKNOWN
-            japan_rel = JapanRelevance(data.get("japan_relevance", JapanRelevance.UNKNOWN.value)) if data.get("japan_relevance") in [e.value for e in JapanRelevance] else JapanRelevance.UNKNOWN
+            severity = (
+                Severity(data.get("severity", Severity.UNKNOWN.value))
+                if data.get("severity") in [e.value for e in Severity]
+                else Severity.UNKNOWN
+            )
+            japan_rel = (
+                JapanRelevance(data.get("japan_relevance", JapanRelevance.UNKNOWN.value))
+                if data.get("japan_relevance") in [e.value for e in JapanRelevance]
+                else JapanRelevance.UNKNOWN
+            )
 
             return EnrichedThreat(
                 item_id=item.id,

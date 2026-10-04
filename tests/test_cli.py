@@ -58,4 +58,3 @@ def test_cli_history_and_show(tmp_path, monkeypatch):
     res_show = runner.invoke(cli, ["show", item.id[:8]])
     assert res_show.exit_code == 0
     assert "Detailed alert summary" in res_show.output
-

@@ -80,6 +80,7 @@ class WebSearchHarvester(BaseHarvester):
                             if res.get("published_date"):
                                 try:
                                     from dateutil import parser
+
                                     pub_date = parser.parse(res["published_date"]).replace(tzinfo=timezone.utc)
                                 except Exception:
                                     pass
@@ -95,7 +96,9 @@ class WebSearchHarvester(BaseHarvester):
                             )
                             items.append(item)
                 except json.JSONDecodeError as json_err:
-                    logger.warning(f"Failed to parse Gemini Web Search JSON output: {json_err} (raw: {response.text[:200]})")
+                    logger.warning(
+                        f"Failed to parse Gemini Web Search JSON output: {json_err} (raw: {response.text[:200]})"
+                    )
 
             except Exception as e:
                 logger.error(f"Error executing Gemini Grounded Search for '{query}': {e}")

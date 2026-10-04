@@ -26,10 +26,12 @@ class DarkwebOnionHarvester(BaseHarvester):
             "http": self.tor_proxy_url,
             "https": self.tor_proxy_url,
         }
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        })
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+        )
         return session
 
     def test_connection(self) -> bool:
@@ -104,7 +106,11 @@ class DarkwebOnionHarvester(BaseHarvester):
                                 country = post.get("country", "")
 
                                 # Prioritize Japan or collect general ransomware victim postings
-                                is_japan = (country.upper() == "JP") or ("JAPAN" in victim_name.upper()) or ("JAPAN" in description.upper())
+                                is_japan = (
+                                    (country.upper() == "JP")
+                                    or ("JAPAN" in victim_name.upper())
+                                    or ("JAPAN" in description.upper())
+                                )
                                 title = f"[{group_name} DLS] Victim: {victim_name} ({country or 'Global'})"
 
                                 item = ThreatItem.create(
@@ -113,7 +119,12 @@ class DarkwebOnionHarvester(BaseHarvester):
                                     title=title,
                                     url=post.get("permalink") or post.get("website"),
                                     summary=f"Group: {group_name}\nVictim: {victim_name}\nCountry: {country}\nDetails: {description}",
-                                    metadata={"victim": victim_name, "group": group_name, "country": country, "is_japan": is_japan},
+                                    metadata={
+                                        "victim": victim_name,
+                                        "group": group_name,
+                                        "country": country,
+                                        "is_japan": is_japan,
+                                    },
                                 )
                                 items.append(item)
 

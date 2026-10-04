@@ -78,7 +78,23 @@ harvester search "日本国内 ランサムウェア 被害"
 
 # 6. Tor SOCKS5経由での onion URL / Web 接続テスト
 harvester test-onion "http://check.torproject.org"
+
+# 7. 収集済みインシデントの確認 (SQLiteキャッシュ)
+harvester history                 # 直近の収集一覧テーブル表示
+harvester history --japan-only    # 日本直接標的のみ絞り込み
+harvester show <ID>               # 詳細・要約・影響・推奨対策を表示
+
+# 8. 通知・レポート機能の疎通テスト
+harvester test-notify             # 設定済みWebhook (Discord/Slack/Generic) にテスト通知
+harvester test-notion             # Notionデータベースにテストページ起票
 ```
+
+### レポート・通知先の連携設定
+環境変数または Helm の `values.yaml` で連携先を設定できます：
+- **Discord**: `DISCORD_WEBHOOK_URL`
+- **Slack**: `SLACK_WEBHOOK_URL`
+- **Generic JSON Webhook**: `GENERIC_WEBHOOK_URL` (任意の監視ツールや自動化ワークフローにPOST)
+- **Notion データベース**: `NOTION_API_KEY` および `NOTION_DATABASE_ID` (CTI ナレッジベースとして自動起票)
 
 ---
 
