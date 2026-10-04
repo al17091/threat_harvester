@@ -512,49 +512,12 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* System Health Indicators */}
-          <div className="hidden md:flex items-center space-x-3">
-            <span
-              className={`px-2.5 py-1 rounded-full text-xs font-mono font-medium border ${
-                status?.database?.backend === "postgresql"
-                  ? "bg-purple-950/60 text-purple-300 border-purple-800"
-                  : "bg-slate-800 text-slate-300 border-slate-700"
-              }`}
-            >
-              <span className="mr-1">DB:</span>
-              <span>{status?.database?.backend === "postgresql" ? "PostgreSQL (CNPG)" : "SQLite (Local)"}</span>
-            </span>
-
-            <span
-              className={`px-2.5 py-1 rounded-full text-xs font-mono font-medium border ${
-                status?.tor_proxy?.online
-                  ? "bg-emerald-950/60 text-emerald-300 border-emerald-800"
-                  : "bg-amber-950/60 text-amber-400 border-amber-800"
-              }`}
-            >
-              <span
-                className={`inline-block w-2 h-2 rounded-full mr-1 ${
-                  status?.tor_proxy?.online ? "bg-emerald-400 animate-pulse" : "bg-amber-400"
-                }`}
-              />
-              <span>{status?.tor_proxy?.online ? "Tor Active" : "Tor Offline"}</span>
-            </span>
-
-            {status?.pipeline?.scheduler_enabled && (
-              <span className="px-2.5 py-1 rounded-full text-xs font-mono font-medium border bg-cyan-950/60 text-cyan-300 border-cyan-800 flex items-center">
-                <RefreshCw className="w-3 h-3 mr-1.5 animate-spin text-cyan-400" style={{ animationDuration: "8s" }} />
-                <span>Auto: {status.pipeline.interval_hours || 1}h</span>
-              </span>
-            )}
-
-            <span className="flex items-center text-xs text-emerald-400">
+          {/* Right Section: Status & Action Buttons */}
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <span className="hidden sm:inline-flex items-center text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-800/60 px-2.5 py-1 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-ping" />
               Operational
             </span>
-          </div>
-
-          {/* Header Action Buttons */}
-          <div className="flex items-center space-x-2">
             <button
               onClick={() => setTerminalOpen(!terminalOpen)}
               className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium border transition cursor-pointer ${
@@ -1578,8 +1541,10 @@ export default function DashboardPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-semibold text-slate-200">Database Engine</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
+                    <div className="text-sm font-semibold text-slate-200">
+                      Database Engine ({status?.database?.backend === "postgresql" ? "PostgreSQL" : "SQLite"})
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-sm">
                       {status?.database?.database_url || status?.database?.db_path}
                     </div>
                   </div>
@@ -1590,16 +1555,21 @@ export default function DashboardPage() {
 
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-semibold text-slate-200">Tor SOCKS5 Proxy</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{status?.tor_proxy?.url}</div>
+                    <div className="text-sm font-semibold text-slate-200">Tor SOCKS5 Onion Proxy</div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{status?.tor_proxy?.url}</div>
                   </div>
                   <span
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center ${
                       status?.tor_proxy?.online
                         ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                         : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
                     }`}
                   >
+                    <span
+                      className={`w-2 h-2 rounded-full mr-1.5 ${
+                        status?.tor_proxy?.online ? "bg-emerald-400 animate-pulse" : "bg-rose-400"
+                      }`}
+                    />
                     {status?.tor_proxy?.online ? "ONLINE" : "OFFLINE"}
                   </span>
                 </div>
@@ -1607,7 +1577,7 @@ export default function DashboardPage() {
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold text-slate-200">Gemini AI Engine</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{status?.ai?.model}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{status?.ai?.model}</div>
                   </div>
                   <span
                     className={`px-2.5 py-1 rounded text-xs font-semibold ${
@@ -1638,20 +1608,23 @@ export default function DashboardPage() {
 
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-semibold text-slate-200">Auto-Harvest Scheduler</div>
+                    <div className="text-sm font-semibold text-slate-200">Auto-Harvest Periodic Scheduler</div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono">
                       {status?.pipeline?.next_run_at
-                        ? `Next cycle: ${formatDate(status.pipeline.next_run_at)}`
+                        ? `Next run: ${formatDate(status.pipeline.next_run_at)} (Interval: ${status?.pipeline?.interval_hours || 1}h)`
                         : `Interval: ${status?.pipeline?.interval_hours || 1} hour(s)`}
                     </div>
                   </div>
                   <span
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
+                    className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center ${
                       status?.pipeline?.scheduler_enabled
                         ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                         : "bg-slate-800 text-slate-400"
                     }`}
                   >
+                    {status?.pipeline?.scheduler_enabled && (
+                      <span className="w-2 h-2 rounded-full mr-1.5 bg-emerald-400 animate-pulse" />
+                    )}
                     {status?.pipeline?.scheduler_enabled ? "Active (Auto)" : "Inactive"}
                   </span>
                 </div>
