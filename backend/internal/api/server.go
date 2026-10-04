@@ -307,6 +307,7 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 			errorResponse(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		_ = mgr.Save("")
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source added"})
 	case "toggle":
 		id := req.Identifier
@@ -329,6 +330,7 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 			errorResponse(w, http.StatusNotFound, "Source not found")
 			return
 		}
+		_ = mgr.Save("")
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source status updated"})
 	case "delete":
 		id := req.Identifier
@@ -351,6 +353,7 @@ func (s *Server) handleManageSources(w http.ResponseWriter, r *http.Request) {
 			errorResponse(w, http.StatusNotFound, "Source not found")
 			return
 		}
+		_ = mgr.Save("")
 		jsonResponse(w, http.StatusOK, map[string]string{"status": "ok", "message": "Source deleted"})
 	default:
 		errorResponse(w, http.StatusBadRequest, fmt.Sprintf("Invalid action: %s", req.Action))
