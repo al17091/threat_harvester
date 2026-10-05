@@ -58,3 +58,5 @@ out/
 bin/information-harvester
 *.exe
 *.test
+
+config.yaml
