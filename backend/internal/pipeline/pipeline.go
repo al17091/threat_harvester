@@ -128,62 +128,81 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	notifiedCount := 0
 	notionReportedCount := 0
 
-	for idx, item := range newItems {
-		log.Printf("[Pipeline] [%d/%d] Analyzing threat with Gemini: %s (%s)", idx+1, len(newItems), item.Title, item.SourceName)
-		enriched, err := p.analyzer.Analyze(ctx, item)
-		if err != nil || enriched == nil {
-			log.Printf("[Pipeline] Error analyzing '%s': %v", item.Title, err)
-			continue
+	batchSize := 5
+	for i := 0; i < len(newItems); i += batchSize {
+		end := i + batchSize
+		if end > len(newItems) {
+			end = len(newItems)
 		}
-		analyzedCount++
-		log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
-			idx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
+		chunk := newItems[i:end]
+		log.Printf("[Pipeline] [%d-%d/%d] Analyzing threat batch with Gemini (%d items)...",
+			i+1, end, len(newItems), len(chunk))
 
-		shouldNotify := false
-		// High-value alerting criteria:
-		// 1. Direct relevance to Japan with Critical or High severity
-		// 2. If notifyDirectOnly is false: Indirect relevance with Critical severity (global severe supply chain impact)
-		if enriched.JapanRelevance == models.JapanRelevanceDirect &&
-			(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
-			shouldNotify = true
-		} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
-			enriched.Severity == models.SeverityCritical {
-			shouldNotify = true
+		enrichedBatch, err := p.analyzer.AnalyzeBatch(ctx, chunk)
+		if err != nil {
+			log.Printf("[Pipeline] Error during batch analysis: %v", err)
 		}
 
-		// Suppress notifications for older historical incidents (> 7 days old)
-		if shouldNotify && item.PublishedAt != nil && time.Since(*item.PublishedAt) > 7*24*time.Hour {
-			log.Printf("[Pipeline] Suppressing notification for older incident (published %s): %s",
-				item.PublishedAt.Format("2006-01-02"), enriched.TitleJa)
-			shouldNotify = false
-		}
+		for itemIdx, item := range chunk {
+			var enriched *models.EnrichedThreat
+			if itemIdx < len(enrichedBatch) && enrichedBatch[itemIdx] != nil {
+				enriched = enrichedBatch[itemIdx]
+			}
+			if enriched == nil {
+				log.Printf("[Pipeline] Missing enrichment for item: %s", item.Title)
+				continue
+			}
 
-		// Suppress duplicate alerts for same victim organization or CVE within 48 hours
-		if shouldNotify {
-			isRecent, err := p.store.IsRecentlyNotified(ctx, enriched.VictimOrgs, enriched.TitleJa, 48)
-			if err == nil && isRecent {
-				log.Printf("[Pipeline] Suppressing alert due to 48h cooldown for victim/CVE: %s", enriched.TitleJa)
+			analyzedCount++
+			log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
+				i+itemIdx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
+
+			shouldNotify := false
+			// High-value alerting criteria:
+			// 1. Direct relevance to Japan with Critical or High severity
+			// 2. If notifyDirectOnly is false: Indirect relevance with Critical severity (global severe supply chain impact)
+			if enriched.JapanRelevance == models.JapanRelevanceDirect &&
+				(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
+				shouldNotify = true
+			} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
+				enriched.Severity == models.SeverityCritical {
+				shouldNotify = true
+			}
+
+			// Suppress notifications for older historical incidents (> 7 days old)
+			if shouldNotify && item.PublishedAt != nil && time.Since(*item.PublishedAt) > 7*24*time.Hour {
+				log.Printf("[Pipeline] Suppressing notification for older incident (published %s): %s",
+					item.PublishedAt.Format("2006-01-02"), enriched.TitleJa)
 				shouldNotify = false
 			}
-		}
 
-		notified := false
-		if shouldNotify {
-			log.Printf("[Pipeline] Alerting on threat: [%s] [%s] %s", enriched.Severity, enriched.JapanRelevance, enriched.TitleJa)
-			notified = p.notifier.Dispatch(ctx, enriched)
-			if notified {
-				notifiedCount++
-			}
-
-			if p.notionReporter.IsConfigured() {
-				if _, err := p.notionReporter.CreateIncidentPage(ctx, enriched); err == nil {
-					notionReportedCount++
+			// Suppress duplicate alerts for same victim organization or CVE within 48 hours
+			if shouldNotify {
+				isRecent, err := p.store.IsRecentlyNotified(ctx, enriched.VictimOrgs, enriched.TitleJa, 48)
+				if err == nil && isRecent {
+					log.Printf("[Pipeline] Suppressing alert due to 48h cooldown for victim/CVE: %s", enriched.TitleJa)
+					shouldNotify = false
 				}
 			}
-		}
 
-		if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {
-			log.Printf("[Pipeline] Failed to mark seen in store: %v", err)
+			notified := false
+			if shouldNotify {
+				log.Printf("[Pipeline] Alerting on threat: [%s] [%s] %s", enriched.Severity, enriched.JapanRelevance, enriched.TitleJa)
+				notified = p.notifier.Dispatch(ctx, enriched)
+				if notified {
+					notifiedCount++
+				}
+
+				if p.notionReporter.IsConfigured() {
+					if _, err := p.notionReporter.CreateIncidentPage(ctx, enriched); err == nil {
+						notionReportedCount++
+					}
+				}
+			}
+
+			if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {
+				log.Printf("[Pipeline] Failed to mark seen in store: %v", err)
+			}
 		}
 	}
 

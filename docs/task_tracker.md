@@ -77,6 +77,10 @@ Status tracking for the **Threat Information Harvester** project. This file is r
   - Established 4 compliance tiers: `Commercial Ready`, `Commercial via Official API`, `Non-Commercial: ToS Scraping`, and `Non-Commercial: Dark Web`.
   - Added preset profiles (`commercial_only`, `official_api_ready`, `all`, `custom`) and tier-level killswitches.
   - Implemented dynamic filtering in Go CTI engine, REST API, and full GUI management in Next.js SOC Dashboard.
+- [x] **Gemini API Request Optimization & Cost Reduction**:
+  - Implemented batch threat analysis (`AnalyzeBatch`) in chunks of 5, reducing enrichment API calls by up to 80%.
+  - Added 12-hour TTL in-memory caching for natural language directives in `GenerateSearchQueries`, eliminating repetitive hourly query generation calls.
+  - Upgraded model configuration to lighter `gemini-3.5-flash-lite`.
 
 ### Phase 6: Cluster Deployment & Live Verification (Next Steps)
 - [ ] Run `docker compose up -d` to verify local multi-container stack.

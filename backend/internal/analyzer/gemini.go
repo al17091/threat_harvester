@@ -9,14 +9,23 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dapt/information_harvester/backend/internal/config"
 	"github.com/dapt/information_harvester/backend/internal/models"
 )
 
+type queryCacheEntry struct {
+	queries  []string
+	cachedAt time.Time
+}
+
 type GeminiThreatAnalyzer struct {
-	client *http.Client
+	client     *http.Client
+	cacheMu    sync.RWMutex
+	queryCache map[string]queryCacheEntry
+	cacheTTL   time.Duration
 }
 
 func NewGeminiThreatAnalyzer() *GeminiThreatAnalyzer {
@@ -24,6 +33,8 @@ func NewGeminiThreatAnalyzer() *GeminiThreatAnalyzer {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		queryCache: make(map[string]queryCacheEntry),
+		cacheTTL:   12 * time.Hour,
 	}
 }
 
@@ -55,6 +66,7 @@ type geminiResponse struct {
 }
 
 type analysisOutput struct {
+	Index                int      `json:"index,omitempty"`
 	Severity             string   `json:"severity"`
 	JapanRelevance       string   `json:"japan_relevance"`
 	TitleJa              string   `json:"title_ja"`
@@ -64,6 +76,53 @@ type analysisOutput struct {
 	ThreatActors         []string `json:"threat_actors"`
 	AttackType           string   `json:"attack_type"`
 	RecommendedActionsJa []string `json:"recommended_actions_ja"`
+}
+
+func cleanJSONFences(raw string) string {
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	return strings.TrimSpace(raw)
+}
+
+func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.EnrichedThreat {
+	severity := models.Severity(out.Severity)
+	switch severity {
+	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow:
+	default:
+		severity = models.SeverityUnknown
+	}
+
+	japanRel := models.JapanRelevance(out.JapanRelevance)
+	switch japanRel {
+	case models.JapanRelevanceDirect, models.JapanRelevanceIndirect, models.JapanRelevanceNone:
+	default:
+		japanRel = models.JapanRelevanceUnknown
+	}
+
+	titleJa := out.TitleJa
+	if titleJa == "" {
+		titleJa = item.Title
+	}
+	summaryJa := out.SummaryJa
+	if summaryJa == "" {
+		summaryJa = item.Summary
+	}
+
+	return &models.EnrichedThreat{
+		ItemID:               item.ID,
+		Item:                 item,
+		Severity:             severity,
+		JapanRelevance:       japanRel,
+		TitleJa:              titleJa,
+		SummaryJa:            summaryJa,
+		ImpactAnalysisJa:     out.ImpactAnalysisJa,
+		VictimOrgs:           out.VictimOrgs,
+		ThreatActors:         out.ThreatActors,
+		AttackType:           out.AttackType,
+		RecommendedActionsJa: out.RecommendedActionsJa,
+		AnalyzedAt:           time.Now().UTC(),
+	}
 }
 
 func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatItem) (*models.EnrichedThreat, error) {
@@ -176,54 +235,200 @@ URL: %s
 		return nil, fmt.Errorf("empty gemini candidates returned")
 	}
 
-	rawJSONText := geminiResp.Candidates[0].Content.Parts[0].Text
-	rawJSONText = strings.TrimPrefix(rawJSONText, "```json")
-	rawJSONText = strings.TrimPrefix(rawJSONText, "```")
-	rawJSONText = strings.TrimSuffix(rawJSONText, "```")
-	rawJSONText = strings.TrimSpace(rawJSONText)
+	rawJSONText := cleanJSONFences(geminiResp.Candidates[0].Content.Parts[0].Text)
 
 	var out analysisOutput
 	if err := json.Unmarshal([]byte(rawJSONText), &out); err != nil {
 		return nil, fmt.Errorf("failed to parse structured intelligence JSON: %w (raw: %s)", err, rawJSONText)
 	}
 
-	severity := models.Severity(out.Severity)
-	switch severity {
-	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow:
-	default:
-		severity = models.SeverityUnknown
+	return buildEnrichedThreat(item, out), nil
+}
+
+// AnalyzeBatch analyzes multiple threat items together in a single structured Gemini API request.
+func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.ThreatItem) ([]*models.EnrichedThreat, error) {
+	if len(items) == 0 {
+		return nil, nil
 	}
 
-	japanRel := models.JapanRelevance(out.JapanRelevance)
-	switch japanRel {
-	case models.JapanRelevanceDirect, models.JapanRelevanceIndirect, models.JapanRelevanceNone:
-	default:
-		japanRel = models.JapanRelevanceUnknown
+	cfg := config.GetSettings().GetConfig()
+	apiKey := cfg.AI.GeminiAPIKey
+	model := cfg.AI.GeminiModel
+	if model == "" {
+		model = "gemini-2.5-flash"
 	}
 
-	titleJa := out.TitleJa
-	if titleJa == "" {
-		titleJa = item.Title
-	}
-	summaryJa := out.SummaryJa
-	if summaryJa == "" {
-		summaryJa = item.Summary
+	if apiKey == "" {
+		log.Printf("[Analyzer] Gemini API key not configured. Returning basic enrichment for %d items", len(items))
+		results := make([]*models.EnrichedThreat, len(items))
+		for i, it := range items {
+			enriched, _ := a.Analyze(ctx, it)
+			results[i] = enriched
+		}
+		return results, nil
 	}
 
-	return &models.EnrichedThreat{
-		ItemID:               item.ID,
-		Item:                 item,
-		Severity:             severity,
-		JapanRelevance:       japanRel,
-		TitleJa:              titleJa,
-		SummaryJa:            summaryJa,
-		ImpactAnalysisJa:     out.ImpactAnalysisJa,
-		VictimOrgs:           out.VictimOrgs,
-		ThreatActors:         out.ThreatActors,
-		AttackType:           out.AttackType,
-		RecommendedActionsJa: out.RecommendedActionsJa,
-		AnalyzedAt:           time.Now().UTC(),
-	}, nil
+	if len(items) == 1 {
+		enriched, err := a.Analyze(ctx, items[0])
+		if err != nil {
+			return nil, err
+		}
+		return []*models.EnrichedThreat{enriched}, nil
+	}
+
+	type batchInputItem struct {
+		Index      int    `json:"index"`
+		SourceType string `json:"source_type"`
+		SourceName string `json:"source_name"`
+		Title      string `json:"title"`
+		URL        string `json:"url"`
+		Summary    string `json:"summary"`
+	}
+
+	inputList := make([]batchInputItem, len(items))
+	for i, it := range items {
+		inputList[i] = batchInputItem{
+			Index:      i,
+			SourceType: string(it.SourceType),
+			SourceName: it.SourceName,
+			Title:      it.Title,
+			URL:        it.URL,
+			Summary:    models.TruncateRunes(it.Summary, 600),
+		}
+	}
+	itemsJSON, err := json.Marshal(inputList)
+	if err != nil {
+		return a.fallbackSequential(ctx, items)
+	}
+
+	prompt := fmt.Sprintf(`あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
+以下の複数の脅威情報（計 %d 件）を個別に分析し、各インシデントについて「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+
+# 評価基準
+1. japan_relevance (日本への関連性):
+   - "Direct": 被害対象が日本企業、日本の官公庁・自治体、国内組織、または日本特有のサプライチェーン。
+   - "Indirect": 世界規模の大規模攻撃（日本でも普及している製品・OSの悪用中ゼロデイ、グローバルクラウド障害等）。
+   - "None": 日本国内への直接的・間接的な関連性がほぼ見られない事象。
+
+2. severity (重要度):
+   - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
+   - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
+   - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
+   - "Low": 製品宣伝、マイナーなバグ修正、コラム。
+
+# 対象インシデント一覧 (JSON)
+%s
+
+# 出力形式 (必ず入力の各 "index" に対応する JSON 配列のみを出力してください)
+[
+  {
+    "index": 0,
+    "severity": "Critical" | "High" | "Medium" | "Low",
+    "japan_relevance": "Direct" | "Indirect" | "None",
+    "title_ja": "日本語での的確で簡潔なインシデント名",
+    "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
+    "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
+    "victim_orgs": ["被害組織名（判明している場合）"],
+    "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
+    "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
+    "recommended_actions_ja": ["推奨される初動対応・防御策"]
+  }
+]
+`, len(items), string(itemsJSON))
+
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{
+				Parts: []geminiPart{
+					{Text: prompt},
+				},
+			},
+		},
+		GenerationConfig: &geminiGenConfig{
+			ResponseMimeType: "application/json",
+		},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return a.fallbackSequential(ctx, items)
+	}
+
+	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return a.fallbackSequential(ctx, items)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		log.Printf("[Analyzer] Gemini batch request failed (%v), falling back to sequential", err)
+		return a.fallbackSequential(ctx, items)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[Analyzer] Gemini batch returned status %d (%s), falling back to sequential", resp.StatusCode, string(respBody))
+		return a.fallbackSequential(ctx, items)
+	}
+
+	var geminiResp geminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil || len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		log.Printf("[Analyzer] Failed to decode batch candidates, falling back to sequential")
+		return a.fallbackSequential(ctx, items)
+	}
+
+	rawJSONText := cleanJSONFences(geminiResp.Candidates[0].Content.Parts[0].Text)
+	var outputs []analysisOutput
+	if err := json.Unmarshal([]byte(rawJSONText), &outputs); err != nil {
+		log.Printf("[Analyzer] Failed to parse batch JSON (%v), falling back to sequential. Raw: %s", err, rawJSONText)
+		return a.fallbackSequential(ctx, items)
+	}
+
+	outMap := make(map[int]analysisOutput)
+	for idx, out := range outputs {
+		if out.Index >= 0 && out.Index < len(items) {
+			outMap[out.Index] = out
+		} else if idx < len(items) {
+			outMap[idx] = out
+		}
+	}
+
+	results := make([]*models.EnrichedThreat, len(items))
+	for i, it := range items {
+		if out, ok := outMap[i]; ok {
+			results[i] = buildEnrichedThreat(it, out)
+		} else {
+			enriched, err := a.Analyze(ctx, it)
+			if err != nil {
+				enriched, _ = a.Analyze(ctx, it)
+			}
+			results[i] = enriched
+		}
+	}
+
+	return results, nil
+}
+
+func (a *GeminiThreatAnalyzer) fallbackSequential(ctx context.Context, items []models.ThreatItem) ([]*models.EnrichedThreat, error) {
+	results := make([]*models.EnrichedThreat, len(items))
+	for i, item := range items {
+		enriched, err := a.Analyze(ctx, item)
+		if err != nil {
+			log.Printf("[Analyzer] Sequential fallback error on item %s: %v", item.Title, err)
+		}
+		results[i] = enriched
+	}
+	return results, nil
+}
+
+// ClearQueryCache empties the in-memory cache of generated search queries.
+func (a *GeminiThreatAnalyzer) ClearQueryCache() {
+	a.cacheMu.Lock()
+	defer a.cacheMu.Unlock()
+	a.queryCache = make(map[string]queryCacheEntry)
 }
 
 // GenerateSearchQueries dynamically expands a natural language threat monitoring directive into focused search queries.
@@ -232,6 +437,26 @@ func (a *GeminiThreatAnalyzer) GenerateSearchQueries(ctx context.Context, direct
 	if directive == "" {
 		return nil, fmt.Errorf("directive cannot be empty")
 	}
+
+	if count <= 0 {
+		count = 3
+	}
+	if count > 5 {
+		count = 5
+	}
+
+	// Check cache
+	cacheKey := fmt.Sprintf("%s:%s:%d", targetType, directive, count)
+	a.cacheMu.RLock()
+	if entry, ok := a.queryCache[cacheKey]; ok {
+		if time.Since(entry.cachedAt) < a.cacheTTL && len(entry.queries) > 0 {
+			a.cacheMu.RUnlock()
+			log.Printf("[Analyzer] Reusing cached search queries for [%s] '%s' (cached %s ago, count: %d)",
+				targetType, models.TruncateRunes(directive, 25), time.Since(entry.cachedAt).Round(time.Minute), len(entry.queries))
+			return entry.queries, nil
+		}
+	}
+	a.cacheMu.RUnlock()
 
 	cfg := config.GetSettings().GetConfig()
 	apiKey := cfg.AI.GeminiAPIKey
@@ -242,13 +467,6 @@ func (a *GeminiThreatAnalyzer) GenerateSearchQueries(ctx context.Context, direct
 	if apiKey == "" {
 		log.Printf("[Analyzer] Gemini API key not configured. Returning directive as literal query.")
 		return []string{directive}, nil
-	}
-
-	if count <= 0 {
-		count = 3
-	}
-	if count > 5 {
-		count = 5
 	}
 
 	currentDate := time.Now().UTC().Format("2006-01-02")
@@ -328,11 +546,7 @@ Example:
 		return []string{directive}, nil
 	}
 
-	rawJSONText := geminiResp.Candidates[0].Content.Parts[0].Text
-	rawJSONText = strings.TrimPrefix(rawJSONText, "```json")
-	rawJSONText = strings.TrimPrefix(rawJSONText, "```")
-	rawJSONText = strings.TrimSuffix(rawJSONText, "```")
-	rawJSONText = strings.TrimSpace(rawJSONText)
+	rawJSONText := cleanJSONFences(geminiResp.Candidates[0].Content.Parts[0].Text)
 
 	var queries []string
 	if err := json.Unmarshal([]byte(rawJSONText), &queries); err != nil {
@@ -350,5 +564,14 @@ Example:
 	if len(cleanQueries) == 0 {
 		return []string{directive}, nil
 	}
+
+	// Cache successful generated queries
+	a.cacheMu.Lock()
+	a.queryCache[cacheKey] = queryCacheEntry{
+		queries:  cleanQueries,
+		cachedAt: time.Now().UTC(),
+	}
+	a.cacheMu.Unlock()
+
 	return cleanQueries, nil
 }
