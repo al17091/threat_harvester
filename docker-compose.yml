@@ -27,7 +27,7 @@ services:
       - DATABASE_URL=postgres://postgres:postgres@db:5432/information_harvester
       - TOR_PROXY_URL=${TOR_PROXY_URL:-socks5h://host.docker.internal:9050}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_MODEL=${GEMINI_MODEL:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
       - GENERIC_WEBHOOK_URL=${GENERIC_WEBHOOK_URL:-}
