@@ -97,7 +97,25 @@ sources:
     - channel: "cybersecurity_news_hub"
       enabled: true
 
-  darkweb_onion: []
+  darkweb_onion:
+    - name: "Tor横断探索: 日本関連組織ランサムウェア・データ侵害"
+      url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+      type: "search"
+      directive: "日本国内の企業や組織を標的としたランサムウェアリークサイト（DLS）の暴露情報やデータ侵害"
+      query: "japan ransomware leak breach"
+      enabled: true
+    - name: "Tor横断探索: 日本関連データ漏洩・侵害データベース"
+      url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+      type: "search"
+      directive: "日本国内組織のアカウント情報、データベースダンプ、機密情報のダークウェブ流出・販売"
+      query: "japan database leak credentials"
+      enabled: true
+    - name: "Tor横断探索: 未修正ゼロデイ・悪用PoC・初期アクセス販売"
+      url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+      type: "search"
+      directive: "ゼロデイ脆弱性の悪用PoC、エクスプロイトコード、VPNや境界機器の初期アクセス販売"
+      query: "0day exploit poc vulnerability broker"
+      enabled: true
 
   ransomware_tracker:
     - name: "Ransomlook Tracker"

@@ -131,8 +131,10 @@ type TelegramSourceConfig struct {
 
 type DarkwebSourceConfig struct {
 	Name           string `yaml:"name" json:"name"`
-	URL            string `yaml:"url" json:"url"`
-	Type           string `yaml:"type" json:"type"` // "api", "rss", or "onion"
+	URL            string `yaml:"url,omitempty" json:"url,omitempty"`
+	Type           string `yaml:"type" json:"type"` // "search", "html", "api", "rss", or "onion"
+	Query          string `yaml:"query,omitempty" json:"query,omitempty"`
+	Directive      string `yaml:"directive,omitempty" json:"directive,omitempty"`
 	ComplianceTier string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
 	Enabled        bool   `yaml:"enabled" json:"enabled"`
 }
@@ -493,24 +495,47 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 		})
 	case "darkweb_onion":
 		name, _ := data["name"].(string)
-		url, _ := data["url"].(string)
+		u, _ := data["url"].(string)
 		t, _ := data["type"].(string)
+		query, _ := data["query"].(string)
+		directive, _ := data["directive"].(string)
 		if t == "" {
-			t = "onion"
+			if query != "" || directive != "" {
+				t = "search"
+			} else {
+				t = "onion"
+			}
 		}
-		if name == "" || url == "" {
-			return fmt.Errorf("name and url are required")
+		if name == "" {
+			if directive != "" {
+				name = directive
+			} else if query != "" {
+				name = query
+			} else {
+				return fmt.Errorf("name is required for darkweb source")
+			}
 		}
-		if !strings.Contains(url, ".onion") {
-			return fmt.Errorf("darkweb sources must use a .onion address")
+		if t == "search" {
+			if u == "" {
+				u = "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+			}
+		} else {
+			if u == "" {
+				return fmt.Errorf("url is required for darkweb source")
+			}
+			if !strings.Contains(u, ".onion") {
+				return fmt.Errorf("darkweb sources must use a .onion address")
+			}
 		}
 		if tier == "" {
 			tier = TierDarkwebAccess
 		}
 		s.Config.Sources.DarkwebOnion = append(s.Config.Sources.DarkwebOnion, DarkwebSourceConfig{
 			Name:           name,
-			URL:            url,
+			URL:            u,
 			Type:           t,
+			Query:          query,
+			Directive:      directive,
 			ComplianceTier: tier,
 			Enabled:        true,
 		})
@@ -632,14 +657,20 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 				if name, ok := data["name"].(string); ok && strings.TrimSpace(name) != "" {
 					s.Config.Sources.DarkwebOnion[i].Name = strings.TrimSpace(name)
 				}
+				if t, ok := data["type"].(string); ok && strings.TrimSpace(t) != "" {
+					s.Config.Sources.DarkwebOnion[i].Type = strings.TrimSpace(t)
+				}
+				if q, ok := data["query"].(string); ok {
+					s.Config.Sources.DarkwebOnion[i].Query = strings.TrimSpace(q)
+				}
+				if d, ok := data["directive"].(string); ok {
+					s.Config.Sources.DarkwebOnion[i].Directive = strings.TrimSpace(d)
+				}
 				if u, ok := data["url"].(string); ok && strings.TrimSpace(u) != "" {
-					if !strings.Contains(u, ".onion") {
+					if s.Config.Sources.DarkwebOnion[i].Type != "search" && !strings.Contains(u, ".onion") {
 						return fmt.Errorf("darkweb sources must use a .onion address")
 					}
 					s.Config.Sources.DarkwebOnion[i].URL = strings.TrimSpace(u)
-				}
-				if t, ok := data["type"].(string); ok && strings.TrimSpace(t) != "" {
-					s.Config.Sources.DarkwebOnion[i].Type = strings.TrimSpace(t)
 				}
 				if tier != "" {
 					s.Config.Sources.DarkwebOnion[i].ComplianceTier = tier

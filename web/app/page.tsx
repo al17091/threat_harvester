@@ -170,7 +170,7 @@ interface ConfigData {
   sources?: {
     vendor_rss?: Array<{ name: string; url: string; category?: string; compliance_tier?: string; enabled: boolean }>;
     telegram?: Array<{ channel: string; compliance_tier?: string; enabled: boolean }>;
-    darkweb_onion?: Array<{ name: string; url: string; type?: string; compliance_tier?: string; enabled: boolean }>;
+    darkweb_onion?: Array<{ name: string; url: string; type?: string; directive?: string; query?: string; compliance_tier?: string; enabled: boolean }>;
     ransomware_tracker?: Array<{ name: string; url: string; type?: string; compliance_tier?: string; enabled: boolean }>;
     x_monitor?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
     web_search?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
@@ -614,11 +614,19 @@ export default function DashboardPage() {
     if (type === "vendor_rss") data = { name: addModal.form.name, url: addModal.form.url, enabled: true };
     if (type === "telegram") data = { channel: addModal.form.channel, enabled: true };
     if (type === "darkweb_onion") {
-      if (!addModal.form.url.includes(".onion")) {
+      const isSearch = addModal.form.type === "search";
+      if (!isSearch && !addModal.form.url.includes(".onion")) {
         showToast("Dark Web sources must use a .onion address", "error");
         return;
       }
-      data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type || "onion", enabled: true };
+      data = {
+        name: addModal.form.name,
+        url: addModal.form.url || (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : ""),
+        type: addModal.form.type || (addModal.form.mode === "directive" || addModal.form.query ? "search" : "onion"),
+        directive: addModal.form.mode === "directive" ? addModal.form.directive : "",
+        query: addModal.form.mode === "query" ? addModal.form.query : addModal.form.query,
+        enabled: true,
+      };
     }
     if (type === "ransomware_tracker") {
       data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type || "api", enabled: true };
@@ -663,11 +671,18 @@ export default function DashboardPage() {
     } else if (type === "telegram") {
       data = { channel: editModal.form.channel };
     } else if (type === "darkweb_onion") {
-      if (!editModal.form.url.includes(".onion")) {
+      const isSearch = editModal.form.type === "search";
+      if (!isSearch && !editModal.form.url.includes(".onion")) {
         showToast("Dark Web sources must use a .onion address", "error");
         return;
       }
-      data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type || "onion" };
+      data = {
+        name: editModal.form.name,
+        url: editModal.form.url || (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : ""),
+        type: editModal.form.type || (editModal.form.mode === "directive" || editModal.form.query ? "search" : "onion"),
+        directive: editModal.form.mode === "directive" ? editModal.form.directive : "",
+        query: editModal.form.mode === "query" ? editModal.form.query : editModal.form.query,
+      };
     } else if (type === "ransomware_tracker") {
       data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type || "api" };
     } else if (type === "x_monitor" || type === "web_search") {
@@ -1794,7 +1809,7 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "darkweb_onion",
-                        form: { name: "", url: "", channel: "", query: "", type: "onion", compliance_tier: "darkweb_access" },
+                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "search", compliance_tier: "darkweb_access", mode: "directive" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -1804,28 +1819,53 @@ export default function DashboardPage() {
                 </div>
 
                 <div className="divide-y divide-slate-800/80">
-                  {config?.sources?.darkweb_onion?.map((dw) => {
+                  {config?.sources?.darkweb_onion?.map((dw, dwIdx) => {
                     const tier = getSourceComplianceTier("darkweb_onion", dw);
                     const active = isTierActive(tier);
+                    const dwId = dw.name || dw.url;
+                    const isSearch = dw.type === "search";
                     return (
-                      <div key={dw.url} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
-                        <div>
+                      <div key={`${dw.name}-${dw.url}-${dwIdx}`} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
+                        <div className="flex-1 min-w-0 pr-4">
                           <div className="flex items-center space-x-2">
                             <span className="font-medium text-sm text-slate-200">{dw.name}</span>
-                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-purple-950 text-purple-300 font-mono uppercase">
-                              {dw.type}
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono uppercase ${
+                              isSearch
+                                ? "bg-cyan-950/80 text-cyan-300 border border-cyan-800/80"
+                                : "bg-purple-950 text-purple-300 border border-purple-800/60"
+                            }`}>
+                              {dw.type || "onion"}
                             </span>
                             {renderComplianceBadge(tier, active)}
                           </div>
-                          <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{dw.url}</div>
+                          {isSearch ? (
+                            <div className="mt-1 space-y-0.5">
+                              {dw.directive && (
+                                <div className="text-xs text-slate-300 flex items-start space-x-1.5">
+                                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0 mt-0.5" />
+                                  <span className="line-clamp-2">{dw.directive}</span>
+                                </div>
+                              )}
+                              {dw.query && (
+                                <div className="text-xs text-slate-400 font-mono truncate">
+                                  <span className="text-cyan-500 font-semibold">Query:</span> {dw.query}
+                                </div>
+                              )}
+                              <div className="text-[11px] text-slate-500 font-mono truncate">
+                                Engine: {dw.url}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{dw.url}</div>
+                          )}
                         </div>
 
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-3 shrink-0">
                           <label className="relative inline-flex items-center cursor-pointer">
                             <input
                               type="checkbox"
                               checked={dw.enabled}
-                              onChange={(e) => handleToggleSource("darkweb_onion", dw.url, e.target.checked)}
+                              onChange={(e) => handleToggleSource("darkweb_onion", dwId, e.target.checked)}
                               className="sr-only peer"
                             />
                             <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
@@ -1835,15 +1875,17 @@ export default function DashboardPage() {
                               setEditModal({
                                 visible: true,
                                 type: "darkweb_onion",
-                                originalId: dw.url,
+                                originalId: dwId,
                                 form: {
                                   name: dw.name,
                                   url: dw.url,
                                   category: "darkweb",
                                   channel: "",
-                                  query: "",
+                                  directive: dw.directive || "",
+                                  query: dw.query || "",
                                   type: dw.type || "onion",
                                   compliance_tier: dw.compliance_tier || tier,
+                                  mode: dw.directive ? "directive" : (dw.query ? "query" : "directive"),
                                 },
                               })
                             }
@@ -1853,7 +1895,7 @@ export default function DashboardPage() {
                             <Pencil className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDeleteSource("darkweb_onion", dw.url)}
+                            onClick={() => handleDeleteSource("darkweb_onion", dwId)}
                             className="p-1 text-slate-500 hover:text-rose-400 transition"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -2798,35 +2840,169 @@ export default function DashboardPage() {
               )}
 
               {addModal.type === "darkweb_onion" && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
-                  <input
-                    type="text"
-                    value={addModal.form.name}
-                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
-                    placeholder="e.g. LockBit 3.0 Leak Site"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
-                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
-                    Tor Onion URL (.onion strictly required)
-                  </label>
-                  <input
-                    type="text"
-                    value={addModal.form.url}
-                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
-                    placeholder="http://exampleleakdomain2345.onion/rss"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
-                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Format Type</label>
-                  <select
-                    value={addModal.form.type}
-                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  >
-                    <option value="onion">onion (Tor site)</option>
-                    <option value="rss">rss</option>
-                    <option value="api">api</option>
-                  </select>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">形式 / 探索種別 (Format Type)</label>
+                    <select
+                      value={addModal.form.type}
+                      onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                    >
+                      <option value="search">Tor横断探索 (Ahmia Search Engine)</option>
+                      <option value="onion">onion (Tor site HTML)</option>
+                      <option value="html">html (Tor HTML スクレイピング)</option>
+                      <option value="rss">rss (Tor RSS Feed)</option>
+                      <option value="api">api (Tor JSON API)</option>
+                    </select>
+                  </div>
+
+                  {addModal.form.type === "search" ? (
+                    <div className="space-y-3">
+                      {/* Mode Selector */}
+                      <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setAddModal({ ...addModal, form: { ...addModal.form, mode: "directive" } })}
+                          className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                            addModal.form.mode === "directive"
+                              ? "bg-cyan-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>AI注視指示 (自然言語)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddModal({ ...addModal, form: { ...addModal.form, mode: "query" } })}
+                          className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                            addModal.form.mode === "query"
+                              ? "bg-cyan-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          <Terminal className="w-3.5 h-3.5" />
+                          <span>固定クエリ</span>
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1">
+                          探索テーマ名 (管理用・任意)
+                        </label>
+                        <input
+                          type="text"
+                          value={addModal.form.name}
+                          onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
+                          placeholder="例: 日本関連ランサムウェアリークサイト探索"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600"
+                        />
+                      </div>
+
+                      {addModal.form.mode === "directive" ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-semibold text-slate-400">
+                              AIへの注視指示・探索方針 (文章で入力)
+                            </label>
+                            <span className="text-[11px] text-cyan-400 font-mono">Gemini Dark Web Hunting</span>
+                          </div>
+                          <textarea
+                            rows={3}
+                            value={addModal.form.directive || ""}
+                            onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, directive: e.target.value } })}
+                            placeholder="例: 日本国内の企業・組織を標的としたランサムウェアリークサイトの暴露情報やデータベース流出"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
+                          />
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewAIQueries(addModal.form.directive || "", "darkweb_search")}
+                              disabled={generatingQueries || !addModal.form.directive?.trim()}
+                              className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition disabled:opacity-50"
+                            >
+                              {generatingQueries ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>AIキーワード生成中...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span>AI検索ワード生成テスト</span>
+                                </>
+                              )}
+                            </button>
+                            <span className="text-[11px] text-slate-500">
+                              巡回時にも自動生成されます
+                            </span>
+                          </div>
+
+                          {previewQueries.length > 0 && (
+                            <div className="mt-2.5 p-2.5 rounded-lg bg-slate-950 border border-cyan-900/60 space-y-1.5">
+                              <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">
+                                AIが生成したTor探索キーワード例 ({previewQueries.length}件):
+                              </div>
+                              {previewQueries.map((pq, i) => (
+                                <div key={i} className="text-xs font-mono text-slate-300 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
+                                  <span className="text-cyan-500 text-[10px]">#{i + 1}</span>
+                                  <span className="truncate">{pq}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 mb-1">
+                            Tor検索キーワード (英語推奨・半角スペース区切り)
+                          </label>
+                          <input
+                            type="text"
+                            value={addModal.form.query || ""}
+                            onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, query: e.target.value } })}
+                            placeholder="例: japan ransomware leak breach"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1">
+                          Tor検索エンジン Onion URL (空欄の場合は公式Ahmia Onion)
+                        </label>
+                        <input
+                          type="text"
+                          value={addModal.form.url}
+                          onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
+                          placeholder="http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
+                      <input
+                        type="text"
+                        value={addModal.form.name}
+                        onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
+                        placeholder="e.g. LockBit 3.0 Leak Site"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                      />
+                      <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
+                        Tor Onion URL (.onion strictly required)
+                      </label>
+                      <input
+                        type="text"
+                        value={addModal.form.url}
+                        onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
+                        placeholder="http://exampleleakdomain2345.onion"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3079,35 +3255,169 @@ export default function DashboardPage() {
               )}
 
               {editModal.type === "darkweb_onion" && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
-                  <input
-                    type="text"
-                    value={editModal.form.name}
-                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
-                    placeholder="e.g. LockBit 3.0 Leak Site"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
-                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
-                    Tor Onion URL (.onion strictly required)
-                  </label>
-                  <input
-                    type="text"
-                    value={editModal.form.url}
-                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
-                    placeholder="http://exampleleakdomain2345.onion/rss"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  />
-                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Format Type</label>
-                  <select
-                    value={editModal.form.type}
-                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
-                  >
-                    <option value="onion">onion (Tor site)</option>
-                    <option value="rss">rss</option>
-                    <option value="api">api</option>
-                  </select>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">形式 / 探索種別 (Format Type)</label>
+                    <select
+                      value={editModal.form.type}
+                      onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                    >
+                      <option value="search">Tor横断探索 (Ahmia Search Engine)</option>
+                      <option value="onion">onion (Tor site HTML)</option>
+                      <option value="html">html (Tor HTML スクレイピング)</option>
+                      <option value="rss">rss (Tor RSS Feed)</option>
+                      <option value="api">api (Tor JSON API)</option>
+                    </select>
+                  </div>
+
+                  {editModal.form.type === "search" ? (
+                    <div className="space-y-3">
+                      {/* Mode Selector */}
+                      <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setEditModal({ ...editModal, form: { ...editModal.form, mode: "directive" } })}
+                          className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                            editModal.form.mode === "directive"
+                              ? "bg-cyan-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>AI注視指示 (自然言語)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditModal({ ...editModal, form: { ...editModal.form, mode: "query" } })}
+                          className={`flex-1 py-1.5 rounded-md flex items-center justify-center space-x-1.5 transition ${
+                            editModal.form.mode === "query"
+                              ? "bg-cyan-600 text-white shadow-sm"
+                              : "text-slate-400 hover:text-slate-200"
+                          }`}
+                        >
+                          <Terminal className="w-3.5 h-3.5" />
+                          <span>固定クエリ</span>
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1">
+                          探索テーマ名 (管理用・任意)
+                        </label>
+                        <input
+                          type="text"
+                          value={editModal.form.name}
+                          onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                          placeholder="例: 日本関連ランサムウェアリークサイト探索"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600"
+                        />
+                      </div>
+
+                      {editModal.form.mode === "directive" ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-semibold text-slate-400">
+                              AIへの注視指示・探索方針 (文章で入力)
+                            </label>
+                            <span className="text-[11px] text-cyan-400 font-mono">Gemini Dark Web Hunting</span>
+                          </div>
+                          <textarea
+                            rows={3}
+                            value={editModal.form.directive || ""}
+                            onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, directive: e.target.value } })}
+                            placeholder="例: 日本国内の企業・組織を標的としたランサムウェアリークサイトの暴露情報やデータベース流出"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
+                          />
+
+                          <div className="mt-2 flex items-center justify-between">
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewAIQueries(editModal.form.directive || "", "darkweb_search")}
+                              disabled={generatingQueries || !editModal.form.directive?.trim()}
+                              className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs border border-slate-700 transition disabled:opacity-50"
+                            >
+                              {generatingQueries ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>AIキーワード生成中...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                                  <span>AI検索ワード生成テスト</span>
+                                </>
+                              )}
+                            </button>
+                            <span className="text-[11px] text-slate-500">
+                              巡回時にも自動生成されます
+                            </span>
+                          </div>
+
+                          {previewQueries.length > 0 && (
+                            <div className="mt-2.5 p-2.5 rounded-lg bg-slate-950 border border-cyan-900/60 space-y-1.5">
+                              <div className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">
+                                AIが生成したTor探索キーワード例 ({previewQueries.length}件):
+                              </div>
+                              {previewQueries.map((pq, i) => (
+                                <div key={i} className="text-xs font-mono text-slate-300 bg-slate-900/80 px-2 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
+                                  <span className="text-cyan-500 text-[10px]">#{i + 1}</span>
+                                  <span className="truncate">{pq}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-400 mb-1">
+                            Tor検索キーワード (英語推奨・半角スペース区切り)
+                          </label>
+                          <input
+                            type="text"
+                            value={editModal.form.query || ""}
+                            onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, query: e.target.value } })}
+                            placeholder="例: japan ransomware leak breach"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1">
+                          Tor検索エンジン Onion URL (空欄の場合は公式Ahmia Onion)
+                        </label>
+                        <input
+                          type="text"
+                          value={editModal.form.url}
+                          onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
+                          placeholder="http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
+                      <input
+                        type="text"
+                        value={editModal.form.name}
+                        onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                        placeholder="e.g. LockBit 3.0 Leak Site"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                      />
+                      <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
+                        Tor Onion URL (.onion strictly required)
+                      </label>
+                      <input
+                        type="text"
+                        value={editModal.form.url}
+                        onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
+                        placeholder="http://exampleleakdomain2345.onion"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

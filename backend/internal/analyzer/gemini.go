@@ -545,6 +545,13 @@ func (a *GeminiThreatAnalyzer) GenerateSearchQueries(ctx context.Context, direct
 - Include X/Twitter operators where appropriate (e.g. "site:x.com" or "site:twitter.com").
 - You can include reputable researcher handles (e.g. "from:piyokango", "from:jpcert", "from:FalconFeedsio", "from:ransomfeed", "from:DarkTracer_Int") or combine with Japanese breach terms.
 - Focus on breaking leak announcements, initial access disclosures, and ransomware victims.`
+	} else if targetType == "darkweb_search" || targetType == "darkweb_onion" {
+		targetDesc = "Tor Dark Web (.onion) search engine (Ahmia) to discover ransomware leak posts, darkweb forums, and breach dumps"
+		guidance = `
+- Output English-focused search terms optimized for Tor hidden services search indices (Ahmia).
+- Include darkweb CTI terms (e.g. "ransomware", "leak", "breach", "database", "dump", "victim", "access", "0day").
+- If the directive focuses on Japan, include "japan" or specific targeted organizations.
+- Keep queries concise and keyword-dense (2 to 4 keywords per query, e.g. "japan ransomware leak", "japanese company breach database").`
 	}
 
 	prompt := fmt.Sprintf(`Today's date is %s.
