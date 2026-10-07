@@ -90,9 +90,17 @@ func cleanJSONFences(raw string) string {
 func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.EnrichedThreat {
 	severity := models.Severity(out.Severity)
 	switch severity {
-	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow:
+	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow, models.SeverityInfo:
 	default:
 		severity = models.SeverityUnknown
+	}
+
+	attackType := out.AttackType
+	if models.IsServiceReleaseOrNonThreat(item, nil) {
+		severity = models.SeverityInfo
+		if attackType == "" || attackType == "Vulnerability" {
+			attackType = "Service Release"
+		}
 	}
 
 	japanRel := models.JapanRelevance(out.JapanRelevance)
@@ -150,7 +158,7 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		ImpactAnalysisJa:     out.ImpactAnalysisJa,
 		VictimOrgs:           out.VictimOrgs,
 		ThreatActors:         out.ThreatActors,
-		AttackType:           out.AttackType,
+		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
 		AffectedProducts:     affectedProducts,
 		RecommendedActionsJa: out.RecommendedActionsJa,
@@ -175,16 +183,23 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 		if rawProd != "" {
 			prods = append(prods, rawProd)
 		}
+		sev := models.SeverityUnknown
+		attackType := ""
+		if models.IsServiceReleaseOrNonThreat(item, nil) {
+			sev = models.SeverityInfo
+			attackType = "Service Release"
+		}
 		return &models.EnrichedThreat{
 			ItemID:               item.ID,
 			Item:                 item,
-			Severity:             models.SeverityUnknown,
+			Severity:             sev,
 			JapanRelevance:       models.JapanRelevanceUnknown,
 			TitleJa:              item.Title,
 			SummaryJa:            summaryJa,
 			ImpactAnalysisJa:     "Gemini APIキーが未設定のため未分析です。",
 			VictimOrgs:           nil,
 			ThreatActors:         nil,
+			AttackType:           attackType,
 			CVEs:                 cves,
 			AffectedProducts:     prods,
 			RecommendedActionsJa: nil,
@@ -207,7 +222,8 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
    - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
    - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
    - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
-   - "Low": 製品宣伝、マイナーなバグ修正、コラム。
+   - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
+   - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
 
 # 対象インシデント情報
 ソース種別: %s
@@ -219,14 +235,14 @@ URL: %s
 
 # 出力形式 (必ず以下のJSONフォーマットのみを出力してください)
 {
-    "severity": "Critical" | "High" | "Medium" | "Low",
+    "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
     "japan_relevance": "Direct" | "Indirect" | "None",
     "title_ja": "日本語での的確で簡潔なインシデント名",
     "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["被害組織名（判明している場合）"],
     "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
-    "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
+    "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
     "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
     "recommended_actions_ja": ["推奨される初動対応・防御策"]
@@ -357,7 +373,8 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
    - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
    - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
    - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
-   - "Low": 製品宣伝、マイナーなバグ修正、コラム。
+   - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
+   - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
 
 # 対象インシデント一覧 (JSON)
 %s
@@ -366,14 +383,14 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 [
   {
     "index": 0,
-    "severity": "Critical" | "High" | "Medium" | "Low",
+    "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
     "japan_relevance": "Direct" | "Indirect" | "None",
     "title_ja": "日本語での的確で簡潔なインシデント名",
     "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["被害組織名（判明している場合）"],
     "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
-    "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
+    "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
     "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
     "recommended_actions_ja": ["推奨される初動対応・防御策"]

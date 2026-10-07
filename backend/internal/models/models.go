@@ -29,6 +29,7 @@ const (
 	SeverityHigh     Severity = "High"
 	SeverityMedium   Severity = "Medium"
 	SeverityLow      Severity = "Low"
+	SeverityInfo     Severity = "Info"
 	SeverityUnknown  Severity = "Unknown"
 )
 

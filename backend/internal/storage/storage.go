@@ -238,6 +238,23 @@ func (s *SQLStore) initSchema() error {
 	_, _ = s.db.Exec("UPDATE threat_items SET source_type = 'ransomware_tracker' WHERE source_type = 'darkweb_onion' AND (url NOT LIKE '%.onion%' OR source_name LIKE 'Ransomlook%')")
 	_, _ = s.db.Exec("UPDATE incidents SET sources_detail = REPLACE(sources_detail, '\"source_type\":\"darkweb_onion\"', '\"source_type\":\"ransomware_tracker\"') WHERE sources_detail LIKE '%Ransomlook Tracker%'")
 
+	// Migrate service releases / non-threat announcements to Info severity and detach from incidents
+	serviceReleaseSQL := `
+		UPDATE threat_items 
+		SET severity = 'Info', incident_id = NULL 
+		WHERE (severity IS NULL OR severity IN ('Low', 'Medium', 'Unknown')) AND (
+			title LIKE '%新機能%' OR title LIKE '%提供開始%' OR title LIKE '%提供を開始%' OR 
+			title LIKE '%新サービス%' OR title LIKE '%業務提携%' OR title LIKE '%セミナー%' OR 
+			title LIKE '%出展%' OR title LIKE '%Anthropic asks Claude%' OR title LIKE '%RemoteThreat Bets%' OR 
+			title LIKE '%協業を開始%' OR title LIKE '%パートナーシップ%' OR title LIKE '%サービスリリース%' OR 
+			title LIKE '%HENNGE%' OR title LIKE '%ChatGPT%広告%' OR title LIKE '%アクセスランキング%' OR 
+			title LIKE '%雑談%' OR title LIKE '%減量%' OR title LIKE '%セキュリティ脅威なし%'
+		)
+	`
+	_, _ = s.db.Exec(serviceReleaseSQL)
+	_, _ = s.db.Exec("DELETE FROM incidents WHERE severity = 'Info' OR attack_type = 'Service Release'")
+	_, _ = s.db.Exec("DELETE FROM incidents WHERE id NOT IN (SELECT DISTINCT incident_id FROM threat_items WHERE incident_id IS NOT NULL)")
+
 	return nil
 }
 
@@ -443,7 +460,7 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			japan_relevance = excluded.japan_relevance,
 			notified_at = excluded.notified_at,
 			enriched_data = excluded.enriched_data,
-			incident_id = COALESCE(NULLIF(excluded.incident_id, ''), threat_items.incident_id),
+			incident_id = CASE WHEN excluded.severity = 'Info' THEN NULL ELSE COALESCE(NULLIF(excluded.incident_id, ''), threat_items.incident_id) END,
 			content_hash = COALESCE(NULLIF(excluded.content_hash, ''), threat_items.content_hash)
 		`
 	} else {
@@ -461,7 +478,7 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			japan_relevance = EXCLUDED.japan_relevance,
 			notified_at = EXCLUDED.notified_at,
 			enriched_data = EXCLUDED.enriched_data,
-			incident_id = COALESCE(NULLIF(EXCLUDED.incident_id, ''), threat_items.incident_id),
+			incident_id = CASE WHEN EXCLUDED.severity = 'Info' THEN NULL ELSE COALESCE(NULLIF(EXCLUDED.incident_id, ''), threat_items.incident_id) END,
 			content_hash = COALESCE(NULLIF(EXCLUDED.content_hash, ''), threat_items.content_hash)
 		`
 	}

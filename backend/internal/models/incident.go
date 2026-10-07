@@ -168,16 +168,97 @@ func ExtractVictimOrg(item ThreatItem, enriched *EnrichedThreat) (string, string
 func SeverityScore(s Severity) int {
 	switch s {
 	case SeverityCritical:
-		return 4
+		return 5
 	case SeverityHigh:
-		return 3
+		return 4
 	case SeverityMedium:
-		return 2
+		return 3
 	case SeverityLow:
+		return 2
+	case SeverityInfo:
 		return 1
 	default:
 		return 0
 	}
+}
+
+// IsServiceReleaseOrNonThreat detects service releases, PR announcements, marketing, or general non-threat content.
+func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool {
+	if enriched != nil {
+		if enriched.Severity == SeverityInfo {
+			return true
+		}
+		if strings.EqualFold(enriched.AttackType, "Service Release") ||
+			strings.EqualFold(enriched.AttackType, "PR") ||
+			strings.EqualFold(enriched.AttackType, "Marketing") ||
+			strings.EqualFold(enriched.AttackType, "Product Release") ||
+			strings.EqualFold(enriched.AttackType, "None") {
+			return true
+		}
+	}
+
+	combined := item.Title + " " + item.Summary
+	if enriched != nil {
+		combined += " " + enriched.TitleJa + " " + enriched.SummaryJa + " " + enriched.ImpactAnalysisJa
+	}
+	lower := strings.ToLower(combined)
+
+	// Explicit non-threat markers that override threat indicators (e.g. social chit-chat / no-threat notices)
+	explicitNonThreat := []string{
+		"セキュリティ脅威なし", "脅威なし", "雑談投稿", "雑談", "個人的な投稿", "減量に関する投稿",
+		"サイバー攻撃による侵害ではなく", "攻撃による侵害ではなく", "サイバー攻撃による被害ではなく",
+		"公式なデータ収集方針", "自発的な共有", "オプトイン",
+	}
+	for _, ent := range explicitNonThreat {
+		if strings.Contains(lower, ent) {
+			return true
+		}
+	}
+
+	// If it contains verified CVEs or threat actors, it's a threat
+	cves := ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
+	if len(cves) > 0 {
+		return false
+	}
+	if enriched != nil && len(enriched.CVEs) > 0 {
+		return false
+	}
+	if enriched != nil && len(enriched.ThreatActors) > 0 {
+		return false
+	}
+
+	// Explicit threat indicators in the raw report - if any exist, do not classify as non-threat
+	rawLower := strings.ToLower(item.Title + " " + item.Summary)
+	threatIndicators := []string{
+		"ゼロデイ", "0-day", "zero-day", "ランサムウェア", "ransomware", "不正アクセス",
+		"情報漏洩", "データ漏洩", "情報流出", "マルウェア", "malware", "侵入検知",
+		"脆弱性", "vulnerability", "cve-", "dls掲載", "身代金", "攻撃グループ",
+		"暗号化された", "サイバー攻撃", "標的型攻撃", "フィッシング", "phishing",
+		"認証回避", "任意コード実行", "rce", "バックドア", "backdoor",
+	}
+	for _, ti := range threatIndicators {
+		if strings.Contains(rawLower, ti) {
+			return false
+		}
+	}
+
+	// Service release / PR / marketing / column / chit-chat keywords
+	releaseKeywords := []string{
+		"提供開始", "新機能", "機能提供", "機能追加", "サービス開始", "サービスリリース",
+		"バージョンアップ", "製品リリース", "新サービス", "業務提携", "協業を開始",
+		"パートナーシップ", "出展", "セミナー開催", "イベント開催", "スポンサー",
+		"新仕様", "仕様を導入", "機能を展開", "広告を表示", "ビジュアル広告",
+		"アクセスランキング", "ランキング記事", "セッション紹介", "経団連に入会", "政策提言",
+		"asks claude users", "share voice data", "bets security teams",
+		"startup looks to", "press release", "プレスリリース",
+	}
+	for _, rk := range releaseKeywords {
+		if strings.Contains(lower, rk) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // HigherSeverity returns the higher of two severities.

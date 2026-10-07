@@ -59,6 +59,12 @@ func (s *SQLStore) FindOrCreateIncident(
 	if enriched != nil {
 		attackType = enriched.AttackType
 	}
+
+	// Non-threat content, service releases, PR announcements, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
+	if (enriched != nil && enriched.Severity == models.SeverityInfo) || models.IsServiceReleaseOrNonThreat(item, enriched) {
+		return nil, nil
+	}
+
 	isVuln := len(cves) > 0 || normProduct != "" || strings.EqualFold(attackType, "Vulnerability") || strings.EqualFold(attackType, "Zero-day")
 
 	// Detail record for this source report
@@ -799,6 +805,15 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 			log.Printf("[Clustering] Failed to cluster item %s: %v", row.item.ID, err)
 			continue
 		}
+		if inc == nil {
+			// Item is non-threat, service release, or Info severity: mark as Info and clear incident_id
+			updateInfoQ := "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = ? WHERE id = ?"
+			if !s.isSQLite {
+				updateInfoQ = "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = $1 WHERE id = $2"
+			}
+			_, _ = s.db.ExecContext(ctx, updateInfoQ, row.item.ContentHash, row.item.ID)
+			continue
+		}
 
 		// Update threat_items row with incident_id and content_hash
 		updateQ := "UPDATE threat_items SET incident_id = ?, content_hash = ? WHERE id = ?"
@@ -808,6 +823,10 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 		_, _ = s.db.ExecContext(ctx, updateQ, inc.ID, row.item.ContentHash, row.item.ID)
 		clusteredCount++
 	}
+
+	// Clean up any empty/orphan incidents or Info severity incidents left behind after re-clustering
+	cleanupQ := "DELETE FROM incidents WHERE severity = 'Info' OR attack_type = 'Service Release' OR id NOT IN (SELECT DISTINCT incident_id FROM threat_items WHERE incident_id IS NOT NULL)"
+	_, _ = s.db.ExecContext(ctx, cleanupQ)
 
 	var incCount int
 	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM incidents").Scan(&incCount)

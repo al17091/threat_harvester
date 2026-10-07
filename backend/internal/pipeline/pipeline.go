@@ -154,20 +154,27 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				continue
 			}
 
+			if models.IsServiceReleaseOrNonThreat(item, enriched) {
+				enriched.Severity = models.SeverityInfo
+			}
+
 			analyzedCount++
 			log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
 				i+itemIdx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
 
 			shouldNotify := false
 			// High-value alerting criteria:
-			// 1. Direct relevance to Japan with Critical or High severity
-			// 2. If notifyDirectOnly is false: Indirect relevance with Critical severity (global severe supply chain impact)
-			if enriched.JapanRelevance == models.JapanRelevanceDirect &&
-				(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
-				shouldNotify = true
-			} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
-				enriched.Severity == models.SeverityCritical {
-				shouldNotify = true
+			// 1. Suppress all alerts for Info severity / non-threat items
+			// 2. Direct relevance to Japan with Critical or High severity
+			// 3. If notifyDirectOnly is false: Indirect relevance with Critical severity (global severe supply chain impact)
+			if enriched.Severity != models.SeverityInfo {
+				if enriched.JapanRelevance == models.JapanRelevanceDirect &&
+					(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
+					shouldNotify = true
+				} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
+					enriched.Severity == models.SeverityCritical {
+					shouldNotify = true
+				}
 			}
 
 			// Suppress notifications for older historical incidents (> 7 days old)
@@ -202,6 +209,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			}
 
 			// Cluster into STIX 2.1 parent incident (30-day dynamic sliding window)
+			// Non-threat items or Info severity items return nil, nil and will not create parent incidents.
 			incident, err := p.store.FindOrCreateIncident(ctx, item, enriched, 30)
 			if err != nil {
 				log.Printf("[Pipeline] Error clustering incident for item %s: %v", item.Title, err)
@@ -209,6 +217,8 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				item.IncidentID = incident.ID
 				log.Printf("[Pipeline] Clustered item into parent incident: %s (Total reports: %d, Victim: %s)",
 					incident.ID, incident.ReportCount, incident.VictimOrg)
+			} else {
+				item.IncidentID = ""
 			}
 
 			if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {

@@ -323,3 +323,75 @@ func TestVulnerabilityProductClustering(t *testing.T) {
 	}
 }
 
+func TestServiceReleaseAndInfoIncidentExclusion(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub := time.Now()
+
+	// 1. Service release announcement
+	itemRelease := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"SecurityVendor",
+		"HENNGE、新機能「HENNGE Mesh Network」の提供開始を発表",
+		"https://example.com/hennge-mesh",
+		"セキュリティ新機能の提供を開始",
+		"",
+		&pub,
+		nil,
+	)
+	enrichedRelease := &models.EnrichedThreat{
+		Severity:       models.SeverityLow,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Service Release",
+		VictimOrgs:     []string{"HENNGE"},
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, itemRelease, enrichedRelease, 30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inc1 != nil {
+		t.Fatalf("expected nil incident for service release, got %v", inc1)
+	}
+
+	// 2. Info severity item
+	itemInfo := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"NewsFeed",
+		"AI技術に関する国際カンファレンスが東京で開催決定",
+		"https://example.com/ai-conf",
+		"国内セキュリティカンファレンスの開催告知",
+		"",
+		&pub,
+		nil,
+	)
+	enrichedInfo := &models.EnrichedThreat{
+		Severity:       models.SeverityInfo,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "None",
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, itemInfo, enrichedInfo, 30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inc2 != nil {
+		t.Fatalf("expected nil incident for SeverityInfo, got %v", inc2)
+	}
+
+	// Verify incidents table remains empty
+	var count int
+	sqlStore := store.(*SQLStore)
+	_ = sqlStore.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM incidents").Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 incidents in database, got %d", count)
+	}
+}
+
+
+

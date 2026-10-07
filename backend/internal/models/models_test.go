@@ -244,4 +244,52 @@ func TestExtractAffectedProduct(t *testing.T) {
 	}
 }
 
+func TestIsServiceReleaseOrNonThreat(t *testing.T) {
+	// Service release / PR announcements
+	itemPR := ThreatItem{
+		Title:   "HENNGE、新機能「HENNGE Mesh Network」の提供開始を発表",
+		Summary: "SaaSセキュリティ新機能の提供を開始",
+	}
+	if !IsServiceReleaseOrNonThreat(itemPR, nil) {
+		t.Errorf("expected HENNGE service release to be identified as non-threat")
+	}
+
+	itemClaude := ThreatItem{
+		Title:   "Anthropic asks Claude users to share voice data for AI model training",
+		Summary: "Anthropic is expanding its data collection options",
+	}
+	if !IsServiceReleaseOrNonThreat(itemClaude, nil) {
+		t.Errorf("expected Anthropic voice data prompt to be identified as non-threat")
+	}
+
+	// Legitimate threat with CVE
+	itemVuln := ThreatItem{
+		Title:   "Fortinet FortiMailにおける新機能の提供開始に伴う深刻なゼロデイ脆弱性（CVE-2026-104286）",
+		Summary: "認証回避および任意コード実行の恐れ",
+	}
+	if IsServiceReleaseOrNonThreat(itemVuln, nil) {
+		t.Errorf("expected item with CVE to NOT be identified as non-threat")
+	}
+
+	// Threat with ransomware indicator
+	itemRansom := ThreatItem{
+		Title:   "大手製造業A社、ランサムウェア被害により基幹システム停止を発表",
+		Summary: "身代金要求およびデータ暗号化が確認された",
+	}
+	if IsServiceReleaseOrNonThreat(itemRansom, nil) {
+		t.Errorf("expected ransomware item to NOT be identified as non-threat")
+	}
+
+	// Severity Info enriched threat
+	itemInfo := ThreatItem{
+		Title: "Tech conference 2026 announced",
+	}
+	enrichedInfo := &EnrichedThreat{
+		Severity: SeverityInfo,
+	}
+	if !IsServiceReleaseOrNonThreat(itemInfo, enrichedInfo) {
+		t.Errorf("expected item with SeverityInfo to be identified as non-threat")
+	}
+}
+
 

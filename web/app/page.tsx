@@ -1020,6 +1020,7 @@ export default function DashboardPage() {
                   <option value="High">High</option>
                   <option value="Medium">Medium</option>
                   <option value="Low">Low</option>
+                  <option value="Info">Info</option>
                 </select>
 
                 <select
@@ -1150,6 +1151,8 @@ export default function DashboardPage() {
                             ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
                             : item.severity === "Low"
                             ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                            : item.severity === "Info"
+                            ? "bg-slate-800 text-slate-300 border border-slate-700"
                             : "bg-slate-800 text-slate-400"
                         }`}
                       >
@@ -1174,12 +1177,6 @@ export default function DashboardPage() {
                           {item.report_count} ソース集約
                         </span>
                       ) : null}
-
-                      {item.id.startsWith("incident--") && (
-                        <span className="hidden sm:inline-flex px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
-                          STIX
-                        </span>
-                      )}
 
                       <span className="text-xs text-slate-400 font-mono truncate max-w-[150px] sm:max-w-xs">{item.source_name}</span>
                     </div>
@@ -2419,7 +2416,11 @@ export default function DashboardPage() {
                         ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                         : selectedIncident.severity === "Medium"
                         ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
-                        : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                        : selectedIncident.severity === "Low"
+                        ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                        : selectedIncident.severity === "Info"
+                        ? "bg-slate-800 text-slate-300 border border-slate-700"
+                        : "bg-slate-800 text-slate-400"
                     }`}
                   >
                     {selectedIncident.severity || "Unknown"}
@@ -2589,7 +2590,7 @@ export default function DashboardPage() {
                   </h4>
                   {selectedIncident.id.startsWith("incident--") && (
                     <span className="text-[10px] font-mono text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                      STIX ID: {selectedIncident.id}
+                      {selectedIncident.id}
                     </span>
                   )}
                 </div>
