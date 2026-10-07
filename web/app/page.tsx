@@ -37,6 +37,7 @@ import {
   Sparkles,
   Scale,
   ShieldCheck,
+  Skull,
 } from "lucide-react";
 import { TerminalConsole } from "./components/TerminalConsole";
 
@@ -129,6 +130,7 @@ interface SystemStatus {
     vendor_rss?: { total: number; active: number };
     telegram?: { total: number; active: number };
     darkweb_onion?: { total: number; active: number };
+    ransomware_tracker?: { total: number; active: number };
     x_monitor?: { total: number; active: number };
     web_search?: { total: number; active: number };
     total_active?: number;
@@ -165,6 +167,7 @@ interface ConfigData {
     vendor_rss?: Array<{ name: string; url: string; category?: string; compliance_tier?: string; enabled: boolean }>;
     telegram?: Array<{ channel: string; compliance_tier?: string; enabled: boolean }>;
     darkweb_onion?: Array<{ name: string; url: string; type?: string; compliance_tier?: string; enabled: boolean }>;
+    ransomware_tracker?: Array<{ name: string; url: string; type?: string; compliance_tier?: string; enabled: boolean }>;
     x_monitor?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
     web_search?: Array<{ name?: string; directive?: string; query: string; compliance_tier?: string; enabled: boolean }>;
   };
@@ -509,8 +512,9 @@ export default function DashboardPage() {
     if (item.compliance_tier) return item.compliance_tier;
     if (sourceType === "vendor_rss") return "commercial_ready";
     if (sourceType === "telegram") return "tos_restricted";
-    if (sourceType === "darkweb_onion") {
-      return item.type === "api" ? "commercial_via_official_api" : "darkweb_access";
+    if (sourceType === "darkweb_onion") return "darkweb_access";
+    if (sourceType === "ransomware_tracker") {
+      return item.type === "api" ? "commercial_via_official_api" : "commercial_ready";
     }
     if (sourceType === "x_monitor" || sourceType === "web_search") return "commercial_via_official_api";
     return "commercial_ready";
@@ -605,7 +609,16 @@ export default function DashboardPage() {
     let data: any = {};
     if (type === "vendor_rss") data = { name: addModal.form.name, url: addModal.form.url, enabled: true };
     if (type === "telegram") data = { channel: addModal.form.channel, enabled: true };
-    if (type === "darkweb_onion") data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type, enabled: true };
+    if (type === "darkweb_onion") {
+      if (!addModal.form.url.includes(".onion")) {
+        showToast("Dark Web sources must use a .onion address", "error");
+        return;
+      }
+      data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type || "onion", enabled: true };
+    }
+    if (type === "ransomware_tracker") {
+      data = { name: addModal.form.name, url: addModal.form.url, type: addModal.form.type || "api", enabled: true };
+    }
     if (type === "x_monitor" || type === "web_search") {
       data = {
         name: addModal.form.name,
@@ -646,7 +659,13 @@ export default function DashboardPage() {
     } else if (type === "telegram") {
       data = { channel: editModal.form.channel };
     } else if (type === "darkweb_onion") {
-      data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type };
+      if (!editModal.form.url.includes(".onion")) {
+        showToast("Dark Web sources must use a .onion address", "error");
+        return;
+      }
+      data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type || "onion" };
+    } else if (type === "ransomware_tracker") {
+      data = { name: editModal.form.name, url: editModal.form.url, type: editModal.form.type || "api" };
     } else if (type === "x_monitor" || type === "web_search") {
       data = {
         name: editModal.form.name,
@@ -1015,7 +1034,8 @@ export default function DashboardPage() {
                 >
                   <option value="">Source: All</option>
                   <option value="vendor_rss">Vendor & CERT RSS</option>
-                  <option value="darkweb_onion">Dark Web & Ransomware</option>
+                  <option value="ransomware_tracker">Ransomware Trackers & DLS</option>
+                  <option value="darkweb_onion">Dark Web (.onion only)</option>
                   <option value="telegram">Telegram</option>
                   <option value="x_monitor">X (Twitter)</option>
                   <option value="web_search">Web Search</option>
@@ -1634,12 +1654,109 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 2. Dark Web Targets */}
+              {/* 2. Ransomware Trackers & DLS Feeds */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
-                    <EyeOff className="w-5 h-5 text-rose-400" />
-                    <h3 className="font-bold text-white text-base">Dark Web & Ransomware Leaks</h3>
+                    <Skull className="w-5 h-5 text-rose-400" />
+                    <div>
+                      <h3 className="font-bold text-white text-base">Ransomware Trackers & DLS Feeds</h3>
+                      <p className="text-[11px] text-slate-400">Clearnet APIs and aggregators monitoring ransomware leak sites (e.g., Ransomlook, RansomFeed)</p>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400 font-mono">
+                      {config?.sources?.ransomware_tracker?.length ?? 0}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() =>
+                      setAddModal({
+                        visible: true,
+                        type: "ransomware_tracker",
+                        form: { name: "", url: "", channel: "", query: "", type: "api", compliance_tier: "commercial_via_official_api" },
+                      })
+                    }
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
+                  >
+                    + Add Tracker
+                  </button>
+                </div>
+
+                <div className="divide-y divide-slate-800/80">
+                  {config?.sources?.ransomware_tracker?.map((rw) => {
+                    const tier = getSourceComplianceTier("ransomware_tracker", rw);
+                    const active = isTierActive(tier);
+                    return (
+                      <div key={rw.url} className={`py-3 flex items-center justify-between transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium text-sm text-slate-200">{rw.name}</span>
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-950 text-rose-300 font-mono uppercase">
+                              {rw.type}
+                            </span>
+                            {renderComplianceBadge(tier, active)}
+                          </div>
+                          <div className="text-xs text-slate-500 font-mono truncate max-w-md mt-0.5">{rw.url}</div>
+                        </div>
+
+                        <div className="flex items-center space-x-3">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={rw.enabled}
+                              onChange={(e) => handleToggleSource("ransomware_tracker", rw.url, e.target.checked)}
+                              className="sr-only peer"
+                            />
+                            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600" />
+                          </label>
+                          <button
+                            onClick={() =>
+                              setEditModal({
+                                visible: true,
+                                type: "ransomware_tracker",
+                                originalId: rw.url,
+                                form: {
+                                  name: rw.name,
+                                  url: rw.url,
+                                  category: "ransomware",
+                                  channel: "",
+                                  query: "",
+                                  type: rw.type || "api",
+                                  compliance_tier: rw.compliance_tier || tier,
+                                },
+                              })
+                            }
+                            className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                            title="Edit Tracker"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteSource("ransomware_tracker", rw.url)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {(!config?.sources?.ransomware_tracker || config.sources.ransomware_tracker.length === 0) && (
+                    <div className="py-6 text-center text-xs text-slate-500 font-mono">
+                      No ransomware trackers configured. Click "+ Add Tracker" to register one.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 3. Dark Web Targets (.onion strictly) */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <EyeOff className="w-5 h-5 text-purple-400" />
+                    <div>
+                      <h3 className="font-bold text-white text-base">Dark Web Hidden Services (.onion only)</h3>
+                      <p className="text-[11px] text-slate-400">Direct Tor SOCKS5 crawler reaching .onion leak sites only. Research use only.</p>
+                    </div>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400 font-mono">
                       {config?.sources?.darkweb_onion?.length ?? 0}
                     </span>
@@ -1649,12 +1766,12 @@ export default function DashboardPage() {
                       setAddModal({
                         visible: true,
                         type: "darkweb_onion",
-                        form: { name: "", url: "", channel: "", query: "", type: "rss", compliance_tier: "darkweb_access" },
+                        form: { name: "", url: "", channel: "", query: "", type: "onion", compliance_tier: "darkweb_access" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
                   >
-                    + Add Target
+                    + Add Onion Target
                   </button>
                 </div>
 
@@ -1697,7 +1814,7 @@ export default function DashboardPage() {
                                   category: "darkweb",
                                   channel: "",
                                   query: "",
-                                  type: dw.type || "rss",
+                                  type: dw.type || "onion",
                                   compliance_tier: dw.compliance_tier || tier,
                                 },
                               })
@@ -1717,10 +1834,15 @@ export default function DashboardPage() {
                       </div>
                     );
                   })}
+                  {(!config?.sources?.darkweb_onion || config.sources.darkweb_onion.length === 0) && (
+                    <div className="py-6 text-center text-xs text-slate-500 font-mono">
+                      No .onion hidden services configured yet. Click "+ Add Onion Target" to register Tor leak sites.
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* 3. Telegram */}
+              {/* 4. Telegram */}
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
@@ -2419,7 +2541,15 @@ export default function DashboardPage() {
                       >
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center space-x-2 mb-1">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-cyan-300 border border-slate-700">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border ${
+                              src.source_type === "ransomware_tracker"
+                                ? "bg-rose-950/80 text-rose-300 border-rose-800/80"
+                                : src.source_type === "darkweb_onion"
+                                ? "bg-purple-950/80 text-purple-300 border-purple-800/80"
+                                : src.source_type === "vendor_rss"
+                                ? "bg-amber-950/80 text-amber-300 border-amber-800/80"
+                                : "bg-slate-800 text-cyan-300 border-slate-700"
+                            }`}>
                               {src.source_type}
                             </span>
                             <span className="text-xs font-medium text-slate-300 truncate">
@@ -2572,24 +2702,56 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {addModal.type === "darkweb_onion" && (
+              {addModal.type === "ransomware_tracker" && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Target Name</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Tracker / Aggregator Name</label>
                   <input
                     type="text"
                     value={addModal.form.name}
                     onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
-                    placeholder="e.g. RansomFeed RSS"
+                    placeholder="e.g. Ransomlook Tracker"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   />
                   <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
-                    URL (http/https/.onion)
+                    Endpoint URL (API endpoint or RSS feed)
                   </label>
                   <input
                     type="text"
                     value={addModal.form.url}
                     onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
-                    placeholder="http://...onion"
+                    placeholder="https://www.ransomlook.io/api/recent"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Data Format</label>
+                  <select
+                    value={addModal.form.type}
+                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  >
+                    <option value="api">api (JSON)</option>
+                    <option value="rss">rss (XML Feed)</option>
+                  </select>
+                </div>
+              )}
+
+              {addModal.type === "darkweb_onion" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
+                  <input
+                    type="text"
+                    value={addModal.form.name}
+                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, name: e.target.value } })}
+                    placeholder="e.g. LockBit 3.0 Leak Site"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
+                    Tor Onion URL (.onion strictly required)
+                  </label>
+                  <input
+                    type="text"
+                    value={addModal.form.url}
+                    onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
+                    placeholder="http://exampleleakdomain2345.onion/rss"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   />
                   <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Format Type</label>
@@ -2598,9 +2760,9 @@ export default function DashboardPage() {
                     onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   >
+                    <option value="onion">onion (Tor site)</option>
                     <option value="rss">rss</option>
                     <option value="api">api</option>
-                    <option value="onion">onion</option>
                   </select>
                 </div>
               )}
@@ -2821,24 +2983,56 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {editModal.type === "darkweb_onion" && (
+              {editModal.type === "ransomware_tracker" && (
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Target Name</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Tracker / Aggregator Name</label>
                   <input
                     type="text"
                     value={editModal.form.name}
                     onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
-                    placeholder="e.g. RansomFeed RSS"
+                    placeholder="e.g. Ransomlook Tracker"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   />
                   <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
-                    URL (http/https/.onion)
+                    Endpoint URL (API endpoint or RSS feed)
                   </label>
                   <input
                     type="text"
                     value={editModal.form.url}
                     onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
-                    placeholder="http://...onion"
+                    placeholder="https://www.ransomlook.io/api/recent"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Data Format</label>
+                  <select
+                    value={editModal.form.type}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  >
+                    <option value="api">api (JSON)</option>
+                    <option value="rss">rss (XML Feed)</option>
+                  </select>
+                </div>
+              )}
+
+              {editModal.type === "darkweb_onion" && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Hidden Service Name</label>
+                  <input
+                    type="text"
+                    value={editModal.form.name}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, name: e.target.value } })}
+                    placeholder="e.g. LockBit 3.0 Leak Site"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+                  />
+                  <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">
+                    Tor Onion URL (.onion strictly required)
+                  </label>
+                  <input
+                    type="text"
+                    value={editModal.form.url}
+                    onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
+                    placeholder="http://exampleleakdomain2345.onion/rss"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   />
                   <label className="block text-xs font-semibold text-slate-400 mt-3 mb-1">Format Type</label>
@@ -2847,9 +3041,9 @@ export default function DashboardPage() {
                     onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                   >
+                    <option value="onion">onion (Tor site)</option>
                     <option value="rss">rss</option>
                     <option value="api">api</option>
-                    <option value="onion">onion</option>
                   </select>
                 </div>
               )}

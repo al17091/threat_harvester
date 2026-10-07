@@ -227,6 +227,10 @@ func (s *SQLStore) initSchema() error {
 	// Backfill existing records if raw_content is NULL
 	_, _ = s.db.Exec("UPDATE threat_items SET raw_content = summary WHERE raw_content IS NULL AND summary IS NOT NULL")
 
+	// Migrate historical clearnet ransomware tracker items away from darkweb_onion
+	_, _ = s.db.Exec("UPDATE threat_items SET source_type = 'ransomware_tracker' WHERE source_type = 'darkweb_onion' AND (url NOT LIKE '%.onion%' OR source_name LIKE 'Ransomlook%')")
+	_, _ = s.db.Exec("UPDATE incidents SET sources_detail = REPLACE(sources_detail, '\"source_type\":\"darkweb_onion\"', '\"source_type\":\"ransomware_tracker\"') WHERE sources_detail LIKE '%Ransomlook Tracker%'")
+
 	return nil
 }
 

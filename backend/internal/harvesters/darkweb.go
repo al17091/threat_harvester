@@ -99,31 +99,27 @@ func (h *DarkwebOnionHarvester) TestConnection(ctx context.Context) bool {
 func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) ([]models.ThreatItem, error) {
 	cfg := config.GetSettings().GetConfig()
 	torClient := h.getTorClient(cfg.Network.TorProxyURL)
-	directClient := &http.Client{Timeout: 25 * time.Second}
 
 	var items []models.ThreatItem
 
 	for _, target := range cfg.Sources.DarkwebOnion {
 		tier := target.ComplianceTier
 		if tier == "" {
-			if target.Type == "api" {
-				tier = config.TierCommercialViaOfficialAPI
-			} else {
-				tier = config.TierDarkwebAccess
-			}
+			tier = config.TierDarkwebAccess
 		}
 		if !target.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
 		}
 
-		log.Printf("[DarkWeb] Checking target: %s (%s)", target.Name, target.URL)
-		isOnion := strings.Contains(target.URL, ".onion")
-		client := directClient
-		if isOnion {
-			client = torClient
+		if !strings.Contains(target.URL, ".onion") {
+			log.Printf("[DarkWeb] Skipping non-onion target %s (%s): darkweb_onion strictly requires .onion domain", target.Name, target.URL)
+			continue
 		}
 
-		if target.Type == "rss" {
+		log.Printf("[DarkWeb] Checking onion target: %s (%s)", target.Name, target.URL)
+		client := torClient
+
+		if target.Type == "rss" || target.Type == "onion" || target.Type == "" {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 			if err != nil {
 				continue
@@ -132,13 +128,7 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 
 			resp, err := client.Do(req)
 			if err != nil {
-				// Fallback to tor client if direct failed on clearnet
-				if !isOnion {
-					resp, err = torClient.Do(req)
-				}
-			}
-			if err != nil {
-				log.Printf("[DarkWeb] Failed to fetch RSS %s: %v", target.Name, err)
+				log.Printf("[DarkWeb] Failed to fetch onion RSS %s: %v", target.Name, err)
 				continue
 			}
 
@@ -178,13 +168,13 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 					summary,
 					entry.Content,
 					pubDate,
-					map[string]interface{}{"is_onion": isOnion, "type": "rss"},
+					map[string]interface{}{"is_onion": true, "type": "rss"},
 				)
 				items = append(items, item)
 			}
 
 		} else if target.Type == "api" {
-			// JSON API (e.g. Ransomlook API)
+			// JSON API on .onion
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
 			if err != nil {
 				continue
@@ -192,9 +182,6 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 			req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
 
 			resp, err := client.Do(req)
-			if err != nil && !isOnion {
-				resp, err = torClient.Do(req)
-			}
 			if err != nil {
 				log.Printf("[DarkWeb] Failed to fetch API %s: %v", target.Name, err)
 				continue

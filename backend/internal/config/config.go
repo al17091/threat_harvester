@@ -100,10 +100,12 @@ func GetDefaultTierForSource(sourceType string, subType string) string {
 	case "telegram":
 		return TierToSRestricted
 	case "darkweb_onion":
+		return TierDarkwebAccess
+	case "ransomware_tracker":
 		if subType == "api" {
 			return TierCommercialViaOfficialAPI
 		}
-		return TierDarkwebAccess
+		return TierCommercialReady
 	case "x_monitor":
 		return TierCommercialViaOfficialAPI
 	case "web_search":
@@ -135,6 +137,14 @@ type DarkwebSourceConfig struct {
 	Enabled        bool   `yaml:"enabled" json:"enabled"`
 }
 
+type RansomwareSourceConfig struct {
+	Name           string `yaml:"name" json:"name"`
+	URL            string `yaml:"url" json:"url"`
+	Type           string `yaml:"type" json:"type"` // "api", "rss"
+	ComplianceTier string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
+	Enabled        bool   `yaml:"enabled" json:"enabled"`
+}
+
 type QuerySourceConfig struct {
 	Name           string `yaml:"name,omitempty" json:"name,omitempty"`
 	Directive      string `yaml:"directive,omitempty" json:"directive,omitempty"`
@@ -144,11 +154,12 @@ type QuerySourceConfig struct {
 }
 
 type SourcesConfig struct {
-	VendorRSS    []FeedSourceConfig     `yaml:"vendor_rss" json:"vendor_rss"`
-	Telegram     []TelegramSourceConfig `yaml:"telegram" json:"telegram"`
-	DarkwebOnion []DarkwebSourceConfig  `yaml:"darkweb_onion" json:"darkweb_onion"`
-	XMonitor     []QuerySourceConfig    `yaml:"x_monitor" json:"x_monitor"`
-	WebSearch    []QuerySourceConfig    `yaml:"web_search" json:"web_search"`
+	VendorRSS         []FeedSourceConfig       `yaml:"vendor_rss" json:"vendor_rss"`
+	Telegram          []TelegramSourceConfig   `yaml:"telegram" json:"telegram"`
+	DarkwebOnion      []DarkwebSourceConfig    `yaml:"darkweb_onion" json:"darkweb_onion"`
+	RansomwareTracker []RansomwareSourceConfig `yaml:"ransomware_tracker" json:"ransomware_tracker"`
+	XMonitor          []QuerySourceConfig      `yaml:"x_monitor" json:"x_monitor"`
+	WebSearch         []QuerySourceConfig      `yaml:"web_search" json:"web_search"`
 }
 
 type DatabaseConfig struct {
@@ -255,9 +266,10 @@ func DefaultConfig() AppConfig {
 				{Channel: "ransomfeed", ComplianceTier: TierToSRestricted, Enabled: true},
 				{Channel: "cybersecurity_news_hub", ComplianceTier: TierToSRestricted, Enabled: true},
 			},
-			DarkwebOnion: []DarkwebSourceConfig{
+			DarkwebOnion: []DarkwebSourceConfig{},
+			RansomwareTracker: []RansomwareSourceConfig{
 				{Name: "Ransomlook Tracker", URL: "https://www.ransomlook.io/api/recent", Type: "api", ComplianceTier: TierCommercialViaOfficialAPI, Enabled: true},
-				{Name: "RansomFeed Aggregator", URL: "https://ransomfeed.it/news.rss", Type: "rss", ComplianceTier: TierDarkwebAccess, Enabled: true},
+				{Name: "RansomFeed Aggregator", URL: "https://ransomfeed.it/news.rss", Type: "rss", ComplianceTier: TierCommercialReady, Enabled: true},
 			},
 			XMonitor: []QuerySourceConfig{
 				{Query: "cyber attack Japan victim site:x.com OR site:twitter.com", ComplianceTier: TierCommercialViaOfficialAPI, Enabled: true},
@@ -484,7 +496,30 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 		url, _ := data["url"].(string)
 		t, _ := data["type"].(string)
 		if t == "" {
-			t = "rss"
+			t = "onion"
+		}
+		if name == "" || url == "" {
+			return fmt.Errorf("name and url are required")
+		}
+		if !strings.Contains(url, ".onion") {
+			return fmt.Errorf("darkweb sources must use a .onion address")
+		}
+		if tier == "" {
+			tier = TierDarkwebAccess
+		}
+		s.Config.Sources.DarkwebOnion = append(s.Config.Sources.DarkwebOnion, DarkwebSourceConfig{
+			Name:           name,
+			URL:            url,
+			Type:           t,
+			ComplianceTier: tier,
+			Enabled:        true,
+		})
+	case "ransomware_tracker":
+		name, _ := data["name"].(string)
+		url, _ := data["url"].(string)
+		t, _ := data["type"].(string)
+		if t == "" {
+			t = "api"
 		}
 		if name == "" || url == "" {
 			return fmt.Errorf("name and url are required")
@@ -493,10 +528,10 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 			if t == "api" {
 				tier = TierCommercialViaOfficialAPI
 			} else {
-				tier = TierDarkwebAccess
+				tier = TierCommercialReady
 			}
 		}
-		s.Config.Sources.DarkwebOnion = append(s.Config.Sources.DarkwebOnion, DarkwebSourceConfig{
+		s.Config.Sources.RansomwareTracker = append(s.Config.Sources.RansomwareTracker, RansomwareSourceConfig{
 			Name:           name,
 			URL:            url,
 			Type:           t,
@@ -598,6 +633,9 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 					s.Config.Sources.DarkwebOnion[i].Name = strings.TrimSpace(name)
 				}
 				if u, ok := data["url"].(string); ok && strings.TrimSpace(u) != "" {
+					if !strings.Contains(u, ".onion") {
+						return fmt.Errorf("darkweb sources must use a .onion address")
+					}
 					s.Config.Sources.DarkwebOnion[i].URL = strings.TrimSpace(u)
 				}
 				if t, ok := data["type"].(string); ok && strings.TrimSpace(t) != "" {
@@ -613,6 +651,29 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 			}
 		}
 		return fmt.Errorf("darkweb_onion source not found: %s", identifier)
+
+	case "ransomware_tracker":
+		for i := range s.Config.Sources.RansomwareTracker {
+			if s.Config.Sources.RansomwareTracker[i].URL == identifier || s.Config.Sources.RansomwareTracker[i].Name == identifier {
+				if name, ok := data["name"].(string); ok && strings.TrimSpace(name) != "" {
+					s.Config.Sources.RansomwareTracker[i].Name = strings.TrimSpace(name)
+				}
+				if u, ok := data["url"].(string); ok && strings.TrimSpace(u) != "" {
+					s.Config.Sources.RansomwareTracker[i].URL = strings.TrimSpace(u)
+				}
+				if t, ok := data["type"].(string); ok && strings.TrimSpace(t) != "" {
+					s.Config.Sources.RansomwareTracker[i].Type = strings.TrimSpace(t)
+				}
+				if tier != "" {
+					s.Config.Sources.RansomwareTracker[i].ComplianceTier = tier
+				}
+				if en, ok := data["enabled"].(bool); ok {
+					s.Config.Sources.RansomwareTracker[i].Enabled = en
+				}
+				return nil
+			}
+		}
+		return fmt.Errorf("ransomware_tracker source not found: %s", identifier)
 
 	case "x_monitor":
 		for i := range s.Config.Sources.XMonitor {
@@ -698,6 +759,13 @@ func (s *SettingsManager) ToggleSource(sourceType, identifier string, enabled bo
 				return true
 			}
 		}
+	case "ransomware_tracker":
+		for i := range s.Config.Sources.RansomwareTracker {
+			if s.Config.Sources.RansomwareTracker[i].URL == identifier || s.Config.Sources.RansomwareTracker[i].Name == identifier {
+				s.Config.Sources.RansomwareTracker[i].Enabled = enabled
+				return true
+			}
+		}
 	case "x_monitor":
 		for i := range s.Config.Sources.XMonitor {
 			if matchQuerySource(&s.Config.Sources.XMonitor[i], identifier) {
@@ -751,6 +819,16 @@ func (s *SettingsManager) DeleteSource(sourceType, identifier string) bool {
 			}
 		}
 		s.Config.Sources.DarkwebOnion = filtered
+		return len(filtered) < orig
+	case "ransomware_tracker":
+		orig := len(s.Config.Sources.RansomwareTracker)
+		filtered := make([]RansomwareSourceConfig, 0, orig)
+		for _, r := range s.Config.Sources.RansomwareTracker {
+			if r.URL != identifier && r.Name != identifier {
+				filtered = append(filtered, r)
+			}
+		}
+		s.Config.Sources.RansomwareTracker = filtered
 		return len(filtered) < orig
 	case "x_monitor":
 		orig := len(s.Config.Sources.XMonitor)
@@ -866,6 +944,13 @@ func (s *SettingsManager) GetComplianceSummary() map[string]interface{} {
 			tier = GetDefaultTierForSource("darkweb_onion", dw.Type)
 		}
 		checkItem("darkweb_onion", dw.Enabled, tier)
+	}
+	for _, rw := range s.Config.Sources.RansomwareTracker {
+		tier := rw.ComplianceTier
+		if tier == "" {
+			tier = GetDefaultTierForSource("ransomware_tracker", rw.Type)
+		}
+		checkItem("ransomware_tracker", rw.Enabled, tier)
 	}
 	for _, x := range s.Config.Sources.XMonitor {
 		checkItem("x_monitor", x.Enabled, x.ComplianceTier)

@@ -97,7 +97,9 @@ sources:
     - channel: "cybersecurity_news_hub"
       enabled: true
 
-  darkweb_onion:
+  darkweb_onion: []
+
+  ransomware_tracker:
     - name: "Ransomlook Tracker"
       url: "https://www.ransomlook.io/api/recent"
       type: "api"

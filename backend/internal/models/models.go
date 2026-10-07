@@ -14,11 +14,12 @@ import (
 type SourceType string
 
 const (
-	SourceTypeVendorRSS    SourceType = "vendor_rss"
-	SourceTypeWebSearch    SourceType = "web_search"
-	SourceTypeDarkwebOnion SourceType = "darkweb_onion"
-	SourceTypeTelegram     SourceType = "telegram"
-	SourceTypeXMonitor     SourceType = "x_monitor"
+	SourceTypeVendorRSS         SourceType = "vendor_rss"
+	SourceTypeWebSearch         SourceType = "web_search"
+	SourceTypeDarkwebOnion      SourceType = "darkweb_onion"
+	SourceTypeRansomwareTracker SourceType = "ransomware_tracker"
+	SourceTypeTelegram          SourceType = "telegram"
+	SourceTypeXMonitor          SourceType = "x_monitor"
 )
 
 type Severity string

@@ -426,6 +426,16 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 		}
 		args = append(args, f.Severity)
 	}
+	if f.SourceType != "" {
+		srcPattern := fmt.Sprintf(`%%"source_type":"%s"%%`, f.SourceType)
+		if s.isSQLite {
+			conditions = append(conditions, "sources_detail LIKE ?")
+		} else {
+			conditions = append(conditions, fmt.Sprintf("sources_detail LIKE $%d", argIdx))
+			argIdx++
+		}
+		args = append(args, srcPattern)
+	}
 	if f.Search != "" {
 		pattern := "%" + f.Search + "%"
 		if s.isSQLite {

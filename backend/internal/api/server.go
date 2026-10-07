@@ -172,6 +172,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	totalRansom := len(cfg.Sources.RansomwareTracker)
+	activeRansom := 0
+	for _, r := range cfg.Sources.RansomwareTracker {
+		tier := r.ComplianceTier
+		if tier == "" {
+			tier = config.GetDefaultTierForSource("ransomware_tracker", r.Type)
+		}
+		if mgr.IsSourceActive("ransomware_tracker", r.Enabled, tier) {
+			activeRansom++
+		}
+	}
+
 	totalX := len(cfg.Sources.XMonitor)
 	activeX := 0
 	for _, q := range cfg.Sources.XMonitor {
@@ -219,12 +231,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"notion":          cfg.Sinks.Notion.Enabled && cfg.Sinks.Notion.APIKey != "" && cfg.Sinks.Notion.DatabaseID != "",
 		},
 		"sources": map[string]interface{}{
-			"vendor_rss":    map[string]int{"total": totalRSS, "active": activeRSS},
-			"telegram":      map[string]int{"total": totalTG, "active": activeTG},
-			"darkweb_onion": map[string]int{"total": totalDW, "active": activeDW},
-			"x_monitor":     map[string]int{"total": totalX, "active": activeX},
-			"web_search":    map[string]int{"total": totalWeb, "active": activeWeb},
-			"total_active":  activeRSS + activeTG + activeDW + activeX + activeWeb,
+			"vendor_rss":         map[string]int{"total": totalRSS, "active": activeRSS},
+			"telegram":           map[string]int{"total": totalTG, "active": activeTG},
+			"darkweb_onion":      map[string]int{"total": totalDW, "active": activeDW},
+			"ransomware_tracker": map[string]int{"total": totalRansom, "active": activeRansom},
+			"x_monitor":          map[string]int{"total": totalX, "active": activeX},
+			"web_search":         map[string]int{"total": totalWeb, "active": activeWeb},
+			"total_active":       activeRSS + activeTG + activeDW + activeRansom + activeX + activeWeb,
 		},
 		"pipeline": pipeState,
 	}

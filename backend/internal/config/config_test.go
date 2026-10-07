@@ -116,3 +116,47 @@ func TestComplianceControl(t *testing.T) {
 	_ = mgr.SetComplianceMode(ComplianceModeAll)
 }
 
+func TestDarkwebAndRansomwareTrackerConfig(t *testing.T) {
+	mgr := GetSettings()
+
+	// Non-onion darkweb must fail
+	err := mgr.AddSource("darkweb_onion", map[string]interface{}{
+		"name": "Invalid Clearnet Darkweb",
+		"url":  "https://clearnet.example.com/feed.xml",
+	})
+	if err == nil {
+		t.Fatal("expected error when adding non-onion darkweb source")
+	}
+
+	// Valid onion darkweb must succeed
+	onionURL := "http://exampledarkwebhidden5xyz.onion/posts.rss"
+	err = mgr.AddSource("darkweb_onion", map[string]interface{}{
+		"name": "Valid Onion Site",
+		"url":  onionURL,
+	})
+	if err != nil {
+		t.Fatalf("expected adding onion darkweb source to succeed, got: %v", err)
+	}
+	defer mgr.DeleteSource("darkweb_onion", onionURL)
+
+	// Ransomware tracker clearnet must succeed
+	rwURL := "https://api.ransomtracker.test/recent"
+	err = mgr.AddSource("ransomware_tracker", map[string]interface{}{
+		"name": "Ransomware Test Tracker",
+		"url":  rwURL,
+		"type": "api",
+	})
+	if err != nil {
+		t.Fatalf("expected adding ransomware_tracker to succeed, got: %v", err)
+	}
+
+	// Verify toggle and delete for ransomware_tracker
+	if !mgr.ToggleSource("ransomware_tracker", rwURL, false) {
+		t.Fatal("expected ToggleSource on ransomware_tracker to succeed")
+	}
+	if !mgr.DeleteSource("ransomware_tracker", rwURL) {
+		t.Fatal("expected DeleteSource on ransomware_tracker to succeed")
+	}
+}
+
+

@@ -42,6 +42,7 @@ func NewPipeline(store storage.Store) *Pipeline {
 		harvesterList: []harvesters.Harvester{
 			harvesters.NewVendorRSSHarvester(),
 			harvesters.NewDarkwebOnionHarvester(),
+			harvesters.NewRansomwareTrackerHarvester(),
 			harvesters.NewTelegramHarvester(),
 			harvesters.NewWebSearchHarvester(),
 			harvesters.NewXMonitorHarvester(),
