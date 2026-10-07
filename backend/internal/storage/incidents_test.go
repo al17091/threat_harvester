@@ -178,3 +178,148 @@ func TestGenericVictimOrgIsolation(t *testing.T) {
 		t.Fatalf("generic victim names must NOT be clustered together! got identical ID %s", inc1.ID)
 	}
 }
+
+func TestVulnerabilityCVEClustering(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub1 := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	pub2 := pub1.Add(5 * 24 * time.Hour)
+
+	// Report 1: NetScaler advisory mentioning two CVEs
+	item1 := models.NewThreatItem(
+		models.SourceTypeXMonitor,
+		"X Monitor",
+		"Active Exploitation of NetScaler ADC and Gateway Vulnerabilities (CVE-2026-88771, CVE-2026-88772)",
+		"https://x.com/sec/status/123",
+		"Alert regarding active attacks on NetScaler ADC and Gateway",
+		"",
+		&pub1,
+		nil,
+	)
+	enriched1 := &models.EnrichedThreat{
+		Severity:       models.SeverityCritical,
+		JapanRelevance: models.JapanRelevanceIndirect,
+		AttackType:     "Vulnerability",
+		VictimOrgs:     []string{"Unknown"},
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, item1, enriched1, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster item 1: %v", err)
+	}
+	if inc1.ReportCount != 1 {
+		t.Errorf("expected report count 1, got %d", inc1.ReportCount)
+	}
+	if len(inc1.CVEs) != 2 {
+		t.Fatalf("expected 2 CVEs extracted, got %v", inc1.CVEs)
+	}
+
+	// Report 2: JPCERT advisory mentioning CVE-2026-88771 with generic victim
+	item2 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"JPCERT",
+		"IPAおよびJPCERT/CCがNetScaler ADC/Gatewayの悪用中脆弱性（CVE-2026-88771等）に注意喚起",
+		"https://jpcert.or.jp/at/2026/netscaler.html",
+		"NetScalerに関する注意喚起情報",
+		"",
+		&pub2,
+		nil,
+	)
+	enriched2 := &models.EnrichedThreat{
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Vulnerability",
+		VictimOrgs:     []string{"国内組織全般"},
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, item2, enriched2, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster item 2: %v", err)
+	}
+
+	// Must cluster into the SAME incident due to matching CVE-2026-88771
+	if inc2.ID != inc1.ID {
+		t.Fatalf("expected item 2 to cluster into inc 1 by matching CVE, got distinct IDs: %s vs %s", inc2.ID, inc1.ID)
+	}
+	if inc2.ReportCount != 2 {
+		t.Errorf("expected report count 2, got %d", inc2.ReportCount)
+	}
+	if len(inc2.SourceURLs) != 2 {
+		t.Errorf("expected 2 source URLs preserved, got %v", inc2.SourceURLs)
+	}
+	if inc2.AffectedProduct == "" {
+		t.Errorf("expected AffectedProduct to be set, got empty")
+	}
+}
+
+func TestVulnerabilityProductClustering(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub1 := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	pub2 := pub1.Add(3 * 24 * time.Hour)
+
+	// Report 1: Zero-day alert for FortiMail without CVE
+	item1 := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"WebSearch",
+		"Fortinet FortiMailの深刻なゼロデイ脆弱性の悪用が確認される",
+		"https://example.com/fortimail-0day",
+		"FortiMailアプライアンスに対する攻撃",
+		"",
+		&pub1,
+		nil,
+	)
+	enriched1 := &models.EnrichedThreat{
+		Severity:       models.SeverityCritical,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Zero-day",
+		VictimOrgs:     []string{"Unknown"},
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, item1, enriched1, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster item 1: %v", err)
+	}
+
+	// Report 2: JPCERT alert on same product without CVE
+	item2 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"VendorRSS",
+		"JPCERTがFortiMailアプライアンスのゼロデイ攻撃に緊急警戒情報",
+		"https://jpcert.or.jp/fortimail",
+		"FortiMail脆弱性への対応策",
+		"",
+		&pub2,
+		nil,
+	)
+	enriched2 := &models.EnrichedThreat{
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Zero-day",
+		VictimOrgs:     []string{"国内FortiMail利用組織"},
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, item2, enriched2, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster item 2: %v", err)
+	}
+
+	// Must cluster into the same incident based on same product ("fortimail")
+	if inc2.ID != inc1.ID {
+		t.Fatalf("expected items about same product to cluster together, got %s vs %s", inc2.ID, inc1.ID)
+	}
+	if inc2.ReportCount != 2 {
+		t.Errorf("expected report count 2, got %d", inc2.ReportCount)
+	}
+}
+

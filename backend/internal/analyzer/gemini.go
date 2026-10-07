@@ -75,6 +75,8 @@ type analysisOutput struct {
 	VictimOrgs           []string `json:"victim_orgs"`
 	ThreatActors         []string `json:"threat_actors"`
 	AttackType           string   `json:"attack_type"`
+	CVEs                 []string `json:"cves,omitempty"`
+	AffectedProducts     []string `json:"affected_products,omitempty"`
 	RecommendedActionsJa []string `json:"recommended_actions_ja"`
 }
 
@@ -109,6 +111,35 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		summaryJa = item.Summary
 	}
 
+	// Deterministic CVE extraction merged with LLM output
+	cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
+	if len(out.CVEs) > 0 {
+		cves = append(cves, models.ExtractCVEs(out.CVEs...)...)
+	}
+	seenCVE := make(map[string]bool)
+	var uniqueCVEs []string
+	for _, c := range cves {
+		if !seenCVE[c] {
+			seenCVE[c] = true
+			uniqueCVEs = append(uniqueCVEs, c)
+		}
+	}
+
+	// Affected products from LLM merged with heuristic detection
+	var affectedProducts []string
+	for _, p := range out.AffectedProducts {
+		norm := models.NormalizeProduct(p)
+		if norm != "" {
+			affectedProducts = append(affectedProducts, strings.TrimSpace(p))
+		}
+	}
+	if len(affectedProducts) == 0 {
+		rawProd, _ := models.ExtractAffectedProduct(item, nil)
+		if rawProd != "" {
+			affectedProducts = append(affectedProducts, rawProd)
+		}
+	}
+
 	return &models.EnrichedThreat{
 		ItemID:               item.ID,
 		Item:                 item,
@@ -120,6 +151,8 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		VictimOrgs:           out.VictimOrgs,
 		ThreatActors:         out.ThreatActors,
 		AttackType:           out.AttackType,
+		CVEs:                 uniqueCVEs,
+		AffectedProducts:     affectedProducts,
 		RecommendedActionsJa: out.RecommendedActionsJa,
 		AnalyzedAt:           time.Now().UTC(),
 	}
@@ -136,6 +169,12 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 	if apiKey == "" {
 		log.Printf("[Analyzer] Gemini API key not configured. Returning basic enrichment for %s", item.Title)
 		summaryJa := models.TruncateRunes(item.Summary, 200)
+		cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
+		rawProd, _ := models.ExtractAffectedProduct(item, nil)
+		var prods []string
+		if rawProd != "" {
+			prods = append(prods, rawProd)
+		}
 		return &models.EnrichedThreat{
 			ItemID:               item.ID,
 			Item:                 item,
@@ -146,6 +185,8 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 			ImpactAnalysisJa:     "Gemini APIキーが未設定のため未分析です。",
 			VictimOrgs:           nil,
 			ThreatActors:         nil,
+			CVEs:                 cves,
+			AffectedProducts:     prods,
 			RecommendedActionsJa: nil,
 			AnalyzedAt:           time.Now().UTC(),
 		}, nil
@@ -186,6 +227,8 @@ URL: %s
     "victim_orgs": ["被害組織名（判明している場合）"],
     "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
+    "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
+    "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
     "recommended_actions_ja": ["推奨される初動対応・防御策"]
 }
 `, item.SourceType, item.SourceName, item.Title, item.URL, item.Summary, string(metaJSON))
@@ -331,6 +374,8 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
     "victim_orgs": ["被害組織名（判明している場合）"],
     "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
+    "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
+    "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
     "recommended_actions_ja": ["推奨される初動対応・防御策"]
   }
 ]

@@ -177,3 +177,71 @@ func TestSeverityAndRelevanceRanking(t *testing.T) {
 	}
 }
 
+func TestExtractCVEs(t *testing.T) {
+	texts := []string{
+		"Active Exploitation of NetScaler ADC (CVE-2026-88771, CVE-2026-88772)",
+		"See details at https://cve.mitre.org/cgi-bin/cvename.cgi?name=cve-2026-88771",
+		"Duplicate mentions: cve-2026-88771 and CVE-2026-88772",
+		"Another alert: CVE-2024-23113 in FortiOS",
+	}
+
+	cves := ExtractCVEs(texts...)
+	expected := []string{"CVE-2024-23113", "CVE-2026-88771", "CVE-2026-88772"}
+
+	if len(cves) != len(expected) {
+		t.Fatalf("expected %d CVEs, got %d: %v", len(expected), len(cves), cves)
+	}
+	for i, exp := range expected {
+		if cves[i] != exp {
+			t.Errorf("expected cve[%d] to be %s, got %s", i, exp, cves[i])
+		}
+	}
+}
+
+func TestNormalizeProduct(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"Citrix NetScaler ADC", "netscaler"},
+		{"NetScaler Gateway 13.1", "netscaler"},
+		{"フォーティネット「FortiMail」", "fortimail"},
+		{"Fortinet FortiOS SSO", "fortios"},
+		{"WordPress Core 6.7", "wordpress"},
+		{"Movable Type 7", "movable type"},
+		{"MikroTik RouterOS", "mikrotik routeros"},
+		{"Ivanti Connect Secure", "ivanti"},
+		{"Langflow", "langflow"},
+		{"Apache Tomcat", "apache tomcat"},
+		{"Palo Alto Networks PAN-OS", "pan-os"},
+	}
+
+	for _, c := range cases {
+		out := NormalizeProduct(c.input)
+		if out != c.expected {
+			t.Errorf("NormalizeProduct(%q) = %q, expected %q", c.input, out, c.expected)
+		}
+	}
+}
+
+func TestExtractAffectedProduct(t *testing.T) {
+	item1 := ThreatItem{
+		Title:   "IPAおよびJPCERT/CCがNetScaler ADC/Gatewayの悪用中脆弱性（CVE-2026-88771等）に注意喚起",
+		Summary: "Citrix NetScalerにおける認証回避脆弱性",
+	}
+	raw, norm := ExtractAffectedProduct(item1, nil)
+	if norm != "netscaler" {
+		t.Fatalf("expected norm to be netscaler, got %s (raw: %s)", norm, raw)
+	}
+
+	item2 := ThreatItem{
+		Title:   "FortiMailの深刻なゼロデイ脆弱性（CVE-2026-104286）の悪用",
+		Summary: "Fortinet FortiMailアプライアンスに対する攻撃",
+	}
+	raw2, norm2 := ExtractAffectedProduct(item2, nil)
+	if norm2 != "fortimail" {
+		t.Fatalf("expected norm to be fortimail, got %s (raw: %s)", norm2, raw2)
+	}
+}
+
+

@@ -187,6 +187,8 @@ func (s *SQLStore) initSchema() error {
 		id VARCHAR(64) PRIMARY KEY,
 		victim_org VARCHAR(255) NOT NULL,
 		normalized_victim_org VARCHAR(255),
+		cves TEXT,
+		affected_product VARCHAR(255),
 		title VARCHAR(512) NOT NULL,
 		summary_ja TEXT,
 		impact_analysis_ja TEXT,
@@ -216,13 +218,18 @@ func (s *SQLStore) initSchema() error {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN raw_content TEXT")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN incident_id VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN content_hash VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN cves TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN affected_product VARCHAR(255)")
 	} else {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS raw_content TEXT")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS incident_id VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS cves TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS affected_product VARCHAR(255)")
 	}
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_incident ON threat_items(incident_id)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_content_hash ON threat_items(content_hash)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_incidents_affected_product ON incidents(affected_product)")
 
 	// Backfill existing records if raw_content is NULL
 	_, _ = s.db.Exec("UPDATE threat_items SET raw_content = summary WHERE raw_content IS NULL AND summary IS NOT NULL")

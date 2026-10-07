@@ -12,8 +12,19 @@ import (
 	"github.com/dapt/information_harvester/backend/internal/models"
 )
 
+// isWithinWindow checks if itemTime falls within sliding window of the incident.
+func isWithinWindow(inc *models.Incident, itemTime time.Time, windowDuration time.Duration) bool {
+	if !itemTime.Before(inc.LastSeenAt) {
+		return itemTime.Sub(inc.LastSeenAt) <= windowDuration
+	}
+	if itemTime.Before(inc.FirstSeenAt) {
+		return inc.FirstSeenAt.Sub(itemTime) <= windowDuration
+	}
+	return true
+}
+
 // FindOrCreateIncident matches an incoming report to an existing clustered incident
-// using a dynamic sliding window (default 30 days) on normalized victim organization,
+// using matching CVEs, same affected products, or victim organizations within a sliding window,
 // or creates a new STIX 2.1 compliant parent incident.
 func (s *SQLStore) FindOrCreateIncident(
 	ctx context.Context,
@@ -35,6 +46,21 @@ func (s *SQLStore) FindOrCreateIncident(
 
 	rawVictim, normVictim := models.ExtractVictimOrg(item, enriched)
 
+	// Extract CVEs from raw texts + enriched metadata
+	cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
+	if enriched != nil && len(enriched.CVEs) > 0 {
+		cves = models.ExtractCVEs(append(cves, enriched.CVEs...)...)
+	}
+
+	// Extract Affected Product
+	rawProduct, normProduct := models.ExtractAffectedProduct(item, enriched)
+
+	attackType := ""
+	if enriched != nil {
+		attackType = enriched.AttackType
+	}
+	isVuln := len(cves) > 0 || normProduct != "" || strings.EqualFold(attackType, "Vulnerability") || strings.EqualFold(attackType, "Zero-day")
+
 	// Detail record for this source report
 	detail := models.SourceDetail{
 		Type:        item.SourceType,
@@ -45,78 +71,138 @@ func (s *SQLStore) FindOrCreateIncident(
 		HarvestedAt: item.HarvestedAt,
 	}
 
-	// 1. Generic or unspecified victim org: do not cluster across reports. Create dedicated incident.
-	if normVictim == "" || models.IsGenericVictimOrg(rawVictim) {
-		inc := s.buildNewIncident(item, enriched, rawVictim, "", itemTime, detail)
-		if err := s.insertIncident(ctx, inc); err != nil {
-			return nil, err
+	var matched *models.Incident
+
+	// TRACK 1: Vulnerability & CVE Clustering
+	if isVuln && (len(cves) > 0 || normProduct != "") {
+		// 1-A. Try matching by identical CVEs
+		if len(cves) > 0 {
+			var cveConds []string
+			var cveArgs []interface{}
+			for _, c := range cves {
+				cPattern := "%" + c + "%"
+				if s.isSQLite {
+					cveConds = append(cveConds, "(cves LIKE ? OR title LIKE ?)")
+				} else {
+					cveConds = append(cveConds, fmt.Sprintf("(cves LIKE $%d OR title ILIKE $%d)", len(cveArgs)+1, len(cveArgs)+2))
+				}
+				cveArgs = append(cveArgs, cPattern, cPattern)
+			}
+
+			cveQuery := `
+				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				FROM incidents
+				WHERE ` + strings.Join(cveConds, " OR ") + `
+				ORDER BY last_seen_at DESC
+				LIMIT 10
+			`
+			rows, err := s.db.QueryContext(ctx, cveQuery, cveArgs...)
+			if err == nil {
+				for rows.Next() {
+					inc, err := scanIncident(rows)
+					if err != nil {
+						continue
+					}
+					cveWindow := windowDuration
+					if cveWindow < 60*24*time.Hour {
+						cveWindow = 60 * 24 * time.Hour
+					}
+					if isWithinWindow(inc, itemTime, cveWindow) {
+						matched = inc
+						break
+					}
+				}
+				_ = rows.Close()
+			}
 		}
-		return inc, nil
+
+		// 1-B. If no CVE match found, try matching by same affected product
+		if matched == nil && normProduct != "" {
+			prodPattern := "%" + normProduct + "%"
+			prodQuery := `
+				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				FROM incidents
+				WHERE ((affected_product IS NOT NULL AND affected_product != '' AND LOWER(affected_product) LIKE ?) OR LOWER(title) LIKE ?)
+				ORDER BY last_seen_at DESC
+				LIMIT 10
+			`
+			if !s.isSQLite {
+				prodQuery = `
+					SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+					       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+					       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+					FROM incidents
+					WHERE ((affected_product IS NOT NULL AND affected_product != '' AND affected_product ILIKE $1) OR title ILIKE $2)
+					ORDER BY last_seen_at DESC
+					LIMIT 10
+				`
+			}
+
+			rows, err := s.db.QueryContext(ctx, prodQuery, prodPattern, prodPattern)
+			if err == nil {
+				for rows.Next() {
+					inc, err := scanIncident(rows)
+					if err != nil {
+						continue
+					}
+					if isWithinWindow(inc, itemTime, windowDuration) {
+						incNorm := models.NormalizeProduct(inc.AffectedProduct)
+						if incNorm == normProduct || strings.Contains(strings.ToLower(inc.Title), normProduct) {
+							matched = inc
+							break
+						}
+					}
+				}
+				_ = rows.Close()
+			}
+		}
 	}
 
-	// 2. Specific victim org: check existing incidents for match within sliding window
-	query := `
-		SELECT id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
-		       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
-		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-		FROM incidents
-		WHERE normalized_victim_org = ?
-		ORDER BY last_seen_at DESC
-		LIMIT 5
-	`
-	if !s.isSQLite {
-		query = `
-			SELECT id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+	// TRACK 2: Specific Victim Org Clustering (Targeted Cyberattacks, Ransomware, Data Breaches)
+	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) {
+		query := `
+			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 			       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 			FROM incidents
-			WHERE normalized_victim_org = $1
+			WHERE normalized_victim_org = ?
 			ORDER BY last_seen_at DESC
 			LIMIT 5
 		`
-	}
-
-	rows, err := s.db.QueryContext(ctx, query, normVictim)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query incidents for victim: %w", err)
-	}
-	defer rows.Close()
-
-	var matched *models.Incident
-
-	for rows.Next() {
-		inc, err := scanIncident(rows)
-		if err != nil {
-			continue
+		if !s.isSQLite {
+			query = `
+				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				FROM incidents
+				WHERE normalized_victim_org = $1
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
 		}
 
-		// Sliding window check:
-		// If itemTime is within 30 days of last_seen_at (after or before), or falls between first_seen and last_seen
-		isWithinWindow := false
-		if !itemTime.Before(inc.LastSeenAt) {
-			diff := itemTime.Sub(inc.LastSeenAt)
-			if diff <= windowDuration {
-				isWithinWindow = true
+		rows, err := s.db.QueryContext(ctx, query, normVictim)
+		if err == nil {
+			for rows.Next() {
+				inc, err := scanIncident(rows)
+				if err != nil {
+					continue
+				}
+				if isWithinWindow(inc, itemTime, windowDuration) {
+					matched = inc
+					break
+				}
 			}
-		} else if itemTime.Before(inc.FirstSeenAt) {
-			diff := inc.FirstSeenAt.Sub(itemTime)
-			if diff <= windowDuration {
-				isWithinWindow = true
-			}
-		} else {
-			// Between first_seen and last_seen
-			isWithinWindow = true
-		}
-
-		if isWithinWindow {
-			matched = inc
-			break
+			_ = rows.Close()
 		}
 	}
-	_ = rows.Close()
 
+	// If matched, merge details & save
 	if matched != nil {
-		// Attach report to existing incident & extend sliding window
 		if itemTime.After(matched.LastSeenAt) {
 			matched.LastSeenAt = itemTime
 		}
@@ -124,6 +210,11 @@ func (s *SQLStore) FindOrCreateIncident(
 			matched.FirstSeenAt = itemTime
 		}
 		matched.ReportCount++
+
+		matched.CVEs = mergeUniqueStrings(matched.CVEs, cves)
+		if matched.AffectedProduct == "" && rawProduct != "" {
+			matched.AffectedProduct = rawProduct
+		}
 
 		if enriched != nil {
 			matched.Severity = models.HigherSeverity(matched.Severity, enriched.Severity)
@@ -138,6 +229,10 @@ func (s *SQLStore) FindOrCreateIncident(
 			if matched.ImpactAnalysisJa == "" && enriched.ImpactAnalysisJa != "" {
 				matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
 			}
+		}
+
+		if matched.AttackType == "" && isVuln {
+			matched.AttackType = "Vulnerability"
 		}
 
 		if matched.PrimaryURL == "" && item.URL != "" {
@@ -155,8 +250,11 @@ func (s *SQLStore) FindOrCreateIncident(
 		return matched, nil
 	}
 
-	// 3. No match found within sliding window: create new incident
-	inc := s.buildNewIncident(item, enriched, rawVictim, normVictim, itemTime, detail)
+	// TRACK 3: No match found within sliding window -> create new incident
+	inc := s.buildNewIncident(item, enriched, rawVictim, normVictim, cves, rawProduct, itemTime, detail)
+	if inc.AttackType == "" && isVuln {
+		inc.AttackType = "Vulnerability"
+	}
 	if err := s.insertIncident(ctx, inc); err != nil {
 		return nil, err
 	}
@@ -167,6 +265,8 @@ func (s *SQLStore) buildNewIncident(
 	item models.ThreatItem,
 	enriched *models.EnrichedThreat,
 	rawVictim, normVictim string,
+	cves []string,
+	rawProduct string,
 	itemTime time.Time,
 	detail models.SourceDetail,
 ) *models.Incident {
@@ -193,6 +293,10 @@ func (s *SQLStore) buildNewIncident(
 		threatActors = enriched.ThreatActors
 	}
 
+	if attackType == "" && (len(cves) > 0 || rawProduct != "") {
+		attackType = "Vulnerability"
+	}
+
 	vOrg := rawVictim
 	if vOrg == "" {
 		vOrg = "Unknown"
@@ -208,6 +312,8 @@ func (s *SQLStore) buildNewIncident(
 		ID:                  id,
 		VictimOrg:           vOrg,
 		NormalizedVictimOrg: normVictim,
+		CVEs:                cves,
+		AffectedProduct:     rawProduct,
 		Title:               title,
 		SummaryJa:           summaryJa,
 		ImpactAnalysisJa:    impactJa,
@@ -227,6 +333,7 @@ func (s *SQLStore) buildNewIncident(
 }
 
 func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) error {
+	cvesJSON, _ := json.Marshal(inc.CVEs)
 	srcURLsJSON, _ := json.Marshal(inc.SourceURLs)
 	srcDetailJSON, _ := json.Marshal(inc.SourcesDetail)
 	actorsJSON, _ := json.Marshal(inc.ThreatActors)
@@ -240,18 +347,18 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 	if s.isSQLite {
 		query = `
 			INSERT INTO incidents (
-				id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 				severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 	} else {
 		query = `
 			INSERT INTO incidents (
-				id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 				severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		`
 	}
 
@@ -259,6 +366,8 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 		inc.ID,
 		inc.VictimOrg,
 		inc.NormalizedVictimOrg,
+		string(cvesJSON),
+		inc.AffectedProduct,
 		inc.Title,
 		inc.SummaryJa,
 		inc.ImpactAnalysisJa,
@@ -279,6 +388,7 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 }
 
 func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) error {
+	cvesJSON, _ := json.Marshal(inc.CVEs)
 	srcURLsJSON, _ := json.Marshal(inc.SourceURLs)
 	srcDetailJSON, _ := json.Marshal(inc.SourcesDetail)
 	actorsJSON, _ := json.Marshal(inc.ThreatActors)
@@ -291,6 +401,8 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 	if s.isSQLite {
 		query = `
 			UPDATE incidents SET
+				cves = ?,
+				affected_product = ?,
 				title = ?,
 				summary_ja = ?,
 				impact_analysis_ja = ?,
@@ -310,25 +422,29 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 	} else {
 		query = `
 			UPDATE incidents SET
-				title = $1,
-				summary_ja = $2,
-				impact_analysis_ja = $3,
-				severity = $4,
-				japan_relevance = $5,
-				attack_type = $6,
-				primary_url = $7,
-				source_urls = $8,
-				sources_detail = $9,
-				first_seen_at = $10,
-				last_seen_at = $11,
-				report_count = $12,
-				threat_actors = $13,
-				updated_at = $14
-			WHERE id = $15
+				cves = $1,
+				affected_product = $2,
+				title = $3,
+				summary_ja = $4,
+				impact_analysis_ja = $5,
+				severity = $6,
+				japan_relevance = $7,
+				attack_type = $8,
+				primary_url = $9,
+				source_urls = $10,
+				sources_detail = $11,
+				first_seen_at = $12,
+				last_seen_at = $13,
+				report_count = $14,
+				threat_actors = $15,
+				updated_at = $16
+			WHERE id = $17
 		`
 	}
 
 	_, err := s.db.ExecContext(ctx, query,
+		string(cvesJSON),
+		inc.AffectedProduct,
 		inc.Title,
 		inc.SummaryJa,
 		inc.ImpactAnalysisJa,
@@ -352,14 +468,15 @@ func scanIncident(scanner interface {
 	Scan(dest ...interface{}) error
 }) (*models.Incident, error) {
 	var (
-		id, victimOrg, normVictim, title, firstSeen, lastSeen, created, updated string
-		sumJa, impJa, attackType, primURL, srcURLs, srcDetail, actors           sql.NullString
-		sev, jrel                                                               string
-		reportCount                                                             int
+		id, victimOrg, title, firstSeen, lastSeen, created, updated string
+		normVictim, cvesRaw, affProduct                              sql.NullString
+		sumJa, impJa, attackType, primURL, srcURLs, srcDetail, actors sql.NullString
+		sev, jrel                                                    string
+		reportCount                                                  int
 	)
 
 	err := scanner.Scan(
-		&id, &victimOrg, &normVictim, &title, &sumJa, &impJa,
+		&id, &victimOrg, &normVictim, &cvesRaw, &affProduct, &title, &sumJa, &impJa,
 		&sev, &jrel, &attackType, &primURL, &srcURLs, &srcDetail,
 		&firstSeen, &lastSeen, &reportCount, &actors, &created, &updated,
 	)
@@ -371,6 +488,11 @@ func scanIncident(scanner interface {
 	lastT, _ := time.Parse(time.RFC3339, lastSeen)
 	createdT, _ := time.Parse(time.RFC3339, created)
 	updatedT, _ := time.Parse(time.RFC3339, updated)
+
+	var cves []string
+	if cvesRaw.Valid && cvesRaw.String != "" {
+		_ = json.Unmarshal([]byte(cvesRaw.String), &cves)
+	}
 
 	var sourceURLs []string
 	if srcURLs.Valid && srcURLs.String != "" {
@@ -390,7 +512,9 @@ func scanIncident(scanner interface {
 	return &models.Incident{
 		ID:                  id,
 		VictimOrg:           victimOrg,
-		NormalizedVictimOrg: normVictim,
+		NormalizedVictimOrg: normVictim.String,
+		CVEs:                cves,
+		AffectedProduct:     affProduct.String,
 		Title:               title,
 		SummaryJa:           sumJa.String,
 		ImpactAnalysisJa:    impJa.String,
@@ -439,13 +563,13 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 	if f.Search != "" {
 		pattern := "%" + f.Search + "%"
 		if s.isSQLite {
-			conditions = append(conditions, "(title LIKE ? OR victim_org LIKE ? OR summary_ja LIKE ? OR impact_analysis_ja LIKE ? OR threat_actors LIKE ?)")
-			args = append(args, pattern, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, "(title LIKE ? OR victim_org LIKE ? OR summary_ja LIKE ? OR impact_analysis_ja LIKE ? OR threat_actors LIKE ? OR cves LIKE ? OR affected_product LIKE ?)")
+			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 		} else {
-			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR victim_org ILIKE $%d OR summary_ja ILIKE $%d OR impact_analysis_ja ILIKE $%d OR threat_actors ILIKE $%d)",
-				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4))
-			argIdx += 5
-			args = append(args, pattern, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR victim_org ILIKE $%d OR summary_ja ILIKE $%d OR impact_analysis_ja ILIKE $%d OR threat_actors ILIKE $%d OR cves ILIKE $%d OR affected_product ILIKE $%d)",
+				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4, argIdx+5, argIdx+6))
+			argIdx += 7
+			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 		}
 	}
 
@@ -460,7 +584,7 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 func (s *SQLStore) GetIncidents(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
 	whereClause, args := s.buildIncidentsConditions(f)
 	query := `
-		SELECT id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 		       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 		FROM incidents
@@ -508,7 +632,7 @@ func (s *SQLStore) GetIncidentsTotal(ctx context.Context, f HistoryFilter) (int,
 // GetIncident retrieves a single incident by ID along with all attached child reports.
 func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error) {
 	query := `
-		SELECT id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 		       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 		FROM incidents
@@ -519,7 +643,7 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 	args := []interface{}{incidentID, prefix}
 	if !s.isSQLite {
 		query = `
-			SELECT id, victim_org, normalized_victim_org, title, summary_ja, impact_analysis_ja,
+			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 			       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
 			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 			FROM incidents
@@ -603,6 +727,11 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 	}
 
 	log.Printf("[Clustering] Starting BackfillIncidents (sliding window: %d days)...", windowDays)
+
+	// Clean reset to re-cluster from scratch and prevent duplicate fragmentation
+	_, _ = s.db.ExecContext(ctx, "DELETE FROM incidents")
+	_, _ = s.db.ExecContext(ctx, "UPDATE threat_items SET incident_id = NULL")
+
 	query := `
 		SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, enriched_data
 		FROM threat_items
@@ -697,10 +826,17 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		victimOrgs = []string{inc.VictimOrg}
 	}
 
+	var affProds []string
+	if inc.AffectedProduct != "" {
+		affProds = []string{inc.AffectedProduct}
+	}
+
 	return map[string]interface{}{
 		"id":                    inc.ID,
 		"victim_org":            inc.VictimOrg,
 		"normalized_victim_org": inc.NormalizedVictimOrg,
+		"cves":                  inc.CVEs,
+		"affected_product":      inc.AffectedProduct,
 		"title":                 inc.Title,
 		"summary":               inc.SummaryJa,
 		"summary_ja":            inc.SummaryJa,
@@ -727,6 +863,8 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 			"victim_orgs":        victimOrgs,
 			"threat_actors":      inc.ThreatActors,
 			"attack_type":        inc.AttackType,
+			"cves":               inc.CVEs,
+			"affected_products":  affProds,
 		},
 	}
 }

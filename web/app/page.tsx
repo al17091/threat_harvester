@@ -71,6 +71,8 @@ interface Incident {
   }>;
   victim_org?: string;
   normalized_victim_org?: string;
+  cves?: string[];
+  affected_product?: string;
   report_count?: number;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -92,6 +94,8 @@ interface Incident {
     victim_orgs?: string[];
     threat_actors?: string[];
     attack_type?: string;
+    cves?: string[];
+    affected_products?: string[];
     recommended_actions_ja?: string[];
   } | null;
 }
@@ -1233,6 +1237,33 @@ export default function DashboardPage() {
                             {actor}
                           </span>
                         ))}
+                      </div>
+                    )}
+
+                    {(item.affected_product || (item.enriched_parsed?.affected_products && item.enriched_parsed.affected_products.length > 0)) && (
+                      <div className="flex items-center space-x-1 ml-1">
+                        <span className="text-slate-500">Product:</span>
+                        <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/80 font-mono text-[11px]">
+                          {item.affected_product || item.enriched_parsed?.affected_products?.[0]}
+                        </span>
+                      </div>
+                    )}
+
+                    {item.cves && item.cves.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 ml-1">
+                        {item.cves.slice(0, 3).map((cve) => (
+                          <span
+                            key={cve}
+                            className="px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-800/80 font-mono text-[11px] font-semibold"
+                          >
+                            {cve}
+                          </span>
+                        ))}
+                        {item.cves.length > 3 && (
+                          <span className="text-[10px] text-amber-500 font-mono">
+                            +{item.cves.length - 3}
+                          </span>
+                        )}
                       </div>
                     )}
 
@@ -2491,7 +2522,7 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
                   <span className="text-xs text-slate-500 font-semibold block mb-1">Target Sectors / Victims</span>
                   <div className="flex flex-wrap gap-1">
@@ -2514,6 +2545,37 @@ export default function DashboardPage() {
                         {a}
                       </span>
                     )) ?? <span className="text-xs text-slate-600">None identified</span>}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">Vulnerabilities (CVE)</span>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedIncident.cves && selectedIncident.cves.length > 0 ? (
+                      selectedIncident.cves.map((cve) => (
+                        <span
+                          key={cve}
+                          className="px-2 py-0.5 rounded text-xs bg-amber-950/70 text-amber-300 border border-amber-800/80 font-mono font-medium"
+                        >
+                          {cve}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-600">None specified</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">Affected Product</span>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedIncident.affected_product || selectedIncident.enriched_parsed?.affected_products?.[0] ? (
+                      <span className="px-2 py-0.5 rounded text-xs bg-emerald-950/70 text-emerald-300 border border-emerald-800/80 font-mono">
+                        {selectedIncident.affected_product || selectedIncident.enriched_parsed?.affected_products?.[0]}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-600">None specified</span>
+                    )}
                   </div>
                 </div>
               </div>

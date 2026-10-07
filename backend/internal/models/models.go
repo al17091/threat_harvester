@@ -252,6 +252,8 @@ type EnrichedThreat struct {
 	VictimOrgs           []string       `json:"victim_orgs"`
 	ThreatActors         []string       `json:"threat_actors"`
 	AttackType           string         `json:"attack_type,omitempty"`
+	CVEs                 []string       `json:"cves,omitempty"`
+	AffectedProducts     []string       `json:"affected_products,omitempty"`
 	RecommendedActionsJa []string       `json:"recommended_actions_ja"`
 	AnalyzedAt           time.Time      `json:"analyzed_at"`
 }

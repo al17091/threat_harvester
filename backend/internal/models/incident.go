@@ -2,6 +2,8 @@ package models
 
 import (
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -24,6 +26,8 @@ type Incident struct {
 	ID                  string         `json:"id"`
 	VictimOrg           string         `json:"victim_org"`
 	NormalizedVictimOrg string         `json:"normalized_victim_org"`
+	CVEs                []string       `json:"cves,omitempty"`
+	AffectedProduct     string         `json:"affected_product,omitempty"`
 	Title               string         `json:"title"`
 	SummaryJa           string         `json:"summary_ja"`
 	ImpactAnalysisJa    string         `json:"impact_analysis_ja"`
@@ -205,3 +209,179 @@ func HigherRelevance(a, b JapanRelevance) JapanRelevance {
 	}
 	return a
 }
+
+var cveRegex = regexp.MustCompile(`(?i)\bCVE-\d{4}-\d{4,7}\b`)
+
+// ExtractCVEs parses any text inputs and extracts all standardized, unique CVE IDs (e.g. CVE-2026-88771).
+func ExtractCVEs(texts ...string) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, text := range texts {
+		if text == "" {
+			continue
+		}
+		matches := cveRegex.FindAllString(text, -1)
+		for _, m := range matches {
+			norm := strings.ToUpper(strings.TrimSpace(m))
+			if norm != "" && !seen[norm] {
+				seen[norm] = true
+				result = append(result, norm)
+			}
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+// NormalizeProduct normalizes software and product names for vulnerability clustering.
+func NormalizeProduct(prod string) string {
+	trimmed := strings.TrimSpace(prod)
+	if trimmed == "" {
+		return ""
+	}
+
+	// Remove common Japanese/English enclosing quotes and brackets
+	replacer := strings.NewReplacer(
+		"「", "", "」", "",
+		"『", "", "』", "",
+		"【", "", "】", "",
+		"（", " ", "）", " ",
+		"(", " ", ")", " ",
+		"\"", "", "'", "",
+	)
+	cleaned := replacer.Replace(trimmed)
+	lower := strings.ToLower(cleaned)
+
+	// Canonical product aliases
+	switch {
+	case strings.Contains(lower, "netscaler"):
+		return "netscaler"
+	case strings.Contains(lower, "fortimail"):
+		return "fortimail"
+	case strings.Contains(lower, "fortios") || strings.Contains(lower, "fortigate") || strings.Contains(lower, "forticloud"):
+		return "fortios"
+	case strings.Contains(lower, "fortinet") && !strings.Contains(lower, "fortimail"):
+		return "fortinet"
+	case strings.Contains(lower, "wordpress"):
+		return "wordpress"
+	case strings.Contains(lower, "movable type") || strings.Contains(lower, "movabletype"):
+		return "movable type"
+	case strings.Contains(lower, "routeros") || strings.Contains(lower, "mikrotik"):
+		return "mikrotik routeros"
+	case strings.Contains(lower, "ivanti"):
+		return "ivanti"
+	case strings.Contains(lower, "langflow"):
+		return "langflow"
+	case strings.Contains(lower, "tomcat"):
+		return "apache tomcat"
+	case strings.Contains(lower, "pan-os") || strings.Contains(lower, "panos") || strings.Contains(lower, "palo alto") || strings.Contains(lower, "globalprotect"):
+		return "pan-os"
+	case strings.Contains(lower, "exchange"):
+		return "microsoft exchange"
+	case strings.Contains(lower, "sharepoint"):
+		return "microsoft sharepoint"
+	case strings.Contains(lower, "esxi") || strings.Contains(lower, "vcenter") || strings.Contains(lower, "vmware"):
+		return "vmware"
+	case strings.Contains(lower, "confluence"):
+		return "atlassian confluence"
+	case strings.Contains(lower, "jira"):
+		return "atlassian jira"
+	case strings.Contains(lower, "gitlab"):
+		return "gitlab"
+	case strings.Contains(lower, "github"):
+		return "github"
+	}
+
+	// Strip noise words
+	noiseWords := []string{
+		"vulnerability", "advisories", "advisory", "zero-day", "0-day",
+		"脆弱性", "に関する注意喚起", "不具合", "アップデート", "セキュリティ",
+		"security", "update", "patch", "exploit", "悪用",
+	}
+	for _, nw := range noiseWords {
+		lower = strings.ReplaceAll(lower, nw, " ")
+	}
+
+	var b strings.Builder
+	for _, r := range lower {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == ' ' {
+			b.WriteRune(r)
+		}
+	}
+	res := strings.Join(strings.Fields(b.String()), " ")
+	if len([]rune(res)) < 3 {
+		return ""
+	}
+	return res
+}
+
+// ExtractAffectedProduct identifies the affected product name and its normalized clustering key.
+func ExtractAffectedProduct(item ThreatItem, enriched *EnrichedThreat) (string, string) {
+	// 1. From enriched metadata
+	if enriched != nil {
+		for _, p := range enriched.AffectedProducts {
+			norm := NormalizeProduct(p)
+			if norm != "" {
+				return strings.TrimSpace(p), norm
+			}
+		}
+	}
+
+	// 2. From item metadata
+	if item.Metadata != nil {
+		if p, ok := item.Metadata["affected_product"].(string); ok && p != "" {
+			norm := NormalizeProduct(p)
+			if norm != "" {
+				return strings.TrimSpace(p), norm
+			}
+		}
+		if p, ok := item.Metadata["product"].(string); ok && p != "" {
+			norm := NormalizeProduct(p)
+			if norm != "" {
+				return strings.TrimSpace(p), norm
+			}
+		}
+	}
+
+	// 3. Known product heuristic matching in Title and Summary
+	combined := item.Title + " " + item.Summary
+	lower := strings.ToLower(combined)
+
+	type knownProduct struct {
+		keyword string
+		raw     string
+		norm    string
+	}
+	known := []knownProduct{
+		{"netscaler", "NetScaler ADC/Gateway", "netscaler"},
+		{"fortimail", "Fortinet FortiMail", "fortimail"},
+		{"fortios", "Fortinet FortiOS", "fortios"},
+		{"fortigate", "Fortinet FortiOS", "fortios"},
+		{"wordpress", "WordPress", "wordpress"},
+		{"movable type", "Movable Type", "movable type"},
+		{"movabletype", "Movable Type", "movable type"},
+		{"routeros", "MikroTik RouterOS", "mikrotik routeros"},
+		{"mikrotik", "MikroTik RouterOS", "mikrotik routeros"},
+		{"ivanti", "Ivanti Connect Secure", "ivanti"},
+		{"langflow", "Langflow", "langflow"},
+		{"tomcat", "Apache Tomcat", "apache tomcat"},
+		{"pan-os", "Palo Alto PAN-OS", "pan-os"},
+		{"globalprotect", "Palo Alto GlobalProtect", "pan-os"},
+		{"sharepoint", "Microsoft SharePoint", "microsoft sharepoint"},
+		{"exchange server", "Microsoft Exchange Server", "microsoft exchange"},
+		{"esxi", "VMware ESXi", "vmware"},
+		{"vcenter", "VMware vCenter", "vmware"},
+		{"confluence", "Atlassian Confluence", "atlassian confluence"},
+		{"jira", "Atlassian Jira", "atlassian jira"},
+		{"gitlab", "GitLab", "gitlab"},
+	}
+
+	for _, kp := range known {
+		if strings.Contains(lower, kp.keyword) {
+			return kp.raw, kp.norm
+		}
+	}
+
+	return "", ""
+}
+
