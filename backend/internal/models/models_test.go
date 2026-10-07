@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -98,3 +99,81 @@ func TestNormalizeURL(t *testing.T) {
 		}
 	}
 }
+
+func TestNewSTIXIncidentID(t *testing.T) {
+	id := NewSTIXIncidentID()
+	if !strings.HasPrefix(id, "incident--") {
+		t.Fatalf("expected STIX prefix 'incident--', got %s", id)
+	}
+	if len(id) != len("incident--")+36 {
+		t.Fatalf("expected length of incident--<uuid>, got %s", id)
+	}
+}
+
+func TestNormalizeVictimOrg(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"パーク24株式会社", "パーク24"},
+		{"株式会社パーク24", "パーク24"},
+		{"Park24 Co., Ltd.", "park24"},
+		{"Keio Corporation", "keio"},
+		{"日本企業", ""}, // Generic
+		{"Unknown", ""}, // Generic
+		{"病院", ""},   // Generic
+		{"N/A", ""},    // Generic
+	}
+
+	for _, c := range cases {
+		out := NormalizeVictimOrg(c.input)
+		if out != c.expected {
+			t.Errorf("NormalizeVictimOrg(%q) = %q, expected %q", c.input, out, c.expected)
+		}
+	}
+}
+
+func TestComputeContentHash(t *testing.T) {
+	item1 := NewThreatItem(
+		SourceTypeWebSearch,
+		"WebSearch",
+		"Times Car Data Breach",
+		"https://example.com/news/123",
+		"Summary",
+		"",
+		nil,
+		nil,
+	)
+	item2 := NewThreatItem(
+		SourceTypeWebSearch,
+		"WebSearch2",
+		"Times Car Data Breach (Updated)",
+		"https://example.com/news/123?utm_source=feed",
+		"Different summary",
+		"",
+		nil,
+		nil,
+	)
+	if item1.ContentHash == "" || item2.ContentHash == "" {
+		t.Fatal("expected non-empty ContentHash")
+	}
+	if item1.ContentHash != item2.ContentHash {
+		t.Fatalf("expected identical ContentHash for same normalized URL, got %s vs %s", item1.ContentHash, item2.ContentHash)
+	}
+}
+
+func TestSeverityAndRelevanceRanking(t *testing.T) {
+	if HigherSeverity(SeverityLow, SeverityCritical) != SeverityCritical {
+		t.Error("expected Critical to be higher than Low")
+	}
+	if HigherSeverity(SeverityHigh, SeverityMedium) != SeverityHigh {
+		t.Error("expected High to be higher than Medium")
+	}
+	if HigherRelevance(JapanRelevanceNone, JapanRelevanceDirect) != JapanRelevanceDirect {
+		t.Error("expected Direct to be higher than None")
+	}
+	if HigherRelevance(JapanRelevanceDirect, JapanRelevanceIndirect) != JapanRelevanceDirect {
+		t.Error("expected Direct to be higher than Indirect")
+	}
+}
+

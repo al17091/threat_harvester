@@ -111,7 +111,7 @@ For each incident, output a JSON array of objects with the following schema:
 [
   {
     "title": "Concise headline of the threat disclosure from X",
-    "url": "Tweet URL or source URL",
+    "url": "Direct Tweet URL or source article URL found in the search results (e.g. https://...). Must be a full URL, do not leave empty.",
     "summary": "Key details of the disclosure and significance to Japanese defenders",
     "published_date": "YYYY-MM-DD or estimated ISO date",
     "victim_name": "Targeted organization if mentioned"
@@ -165,6 +165,15 @@ Only return valid JSON array without Markdown code block formatting.
 						Text string `json:"text"`
 					} `json:"parts"`
 				} `json:"content"`
+				GroundingMetadata struct {
+					GroundingChunks []struct {
+						Web struct {
+							URI   string `json:"uri"`
+							Title string `json:"title"`
+						} `json:"web"`
+					} `json:"groundingChunks"`
+					WebSearchQueries []string `json:"webSearchQueries"`
+				} `json:"groundingMetadata"`
 			} `json:"candidates"`
 		}
 
@@ -174,7 +183,8 @@ Only return valid JSON array without Markdown code block formatting.
 			continue
 		}
 
-		rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+		candidate := geminiResp.Candidates[0]
+		rawText := candidate.Content.Parts[0].Text
 		rawText = strings.TrimPrefix(rawText, "```json")
 		rawText = strings.TrimPrefix(rawText, "```")
 		rawText = strings.TrimSuffix(rawText, "```")
@@ -186,9 +196,29 @@ Only return valid JSON array without Markdown code block formatting.
 			continue
 		}
 
+		var chunks []geminiGroundingChunk
+		for _, c := range candidate.GroundingMetadata.GroundingChunks {
+			chunks = append(chunks, geminiGroundingChunk{
+				Web: struct {
+					URI   string `json:"uri"`
+					Title string `json:"title"`
+				}{
+					URI:   c.Web.URI,
+					Title: c.Web.Title,
+				},
+			})
+		}
+
 		for _, res := range searchResults {
 			if res.Title == "" {
 				continue
+			}
+
+			finalURL := strings.TrimSpace(res.URL)
+			if finalURL == "" || !strings.HasPrefix(finalURL, "http") || isGenericDomain(finalURL) {
+				if chunkURL := matchGroundingChunkURL(res.Title, res.VictimName, chunks); chunkURL != "" {
+					finalURL = chunkURL
+				}
 			}
 
 			var pubDate *time.Time
@@ -217,7 +247,7 @@ Only return valid JSON array without Markdown code block formatting.
 				models.SourceTypeXMonitor,
 				sourceName,
 				res.Title,
-				res.URL,
+				finalURL,
 				res.Summary,
 				"",
 				pubDate,

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dapt/information_harvester/backend/internal/config"
@@ -131,5 +132,26 @@ func TestAPIRoutes(t *testing.T) {
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 9. GET /api/feed.xml and GET /rss
+	req = httptest.NewRequest(http.MethodGet, "/api/feed.xml", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Header().Get("Content-Type"), "application/rss+xml") {
+		t.Fatalf("expected RSS content-type, got %s", w.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(w.Body.String(), "<rss version=\"2.0\"") {
+		t.Fatalf("expected RSS 2.0 root element, got %s", w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/rss", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /rss, got %d", w.Code)
 	}
 }

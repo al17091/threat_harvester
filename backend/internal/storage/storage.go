@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,6 +37,13 @@ type Store interface {
 	GetHistory(ctx context.Context, filter HistoryFilter) ([]map[string]interface{}, error)
 	GetHistoryTotal(ctx context.Context, filter HistoryFilter) (int, error)
 	GetItem(ctx context.Context, itemID string) (map[string]interface{}, error)
+
+	FindOrCreateIncident(ctx context.Context, item models.ThreatItem, enriched *models.EnrichedThreat, windowDays int) (*models.Incident, error)
+	GetIncidents(ctx context.Context, filter HistoryFilter) ([]map[string]interface{}, error)
+	GetIncidentsTotal(ctx context.Context, filter HistoryFilter) (int, error)
+	GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error)
+	BackfillIncidents(ctx context.Context, windowDays int) (int, error)
+
 	Close() error
 }
 
@@ -90,8 +98,10 @@ func NewStore(dbURL, sqlitePath string) (Store, error) {
 		}
 		if path != ":memory:" {
 			_ = os.MkdirAll(filepath.Dir(path), 0755)
+			targetURL = path
+		} else {
+			targetURL = "file::memory:?cache=shared"
 		}
-		targetURL = path
 		isSQLite = true
 	}
 
@@ -100,7 +110,15 @@ func NewStore(dbURL, sqlitePath string) (Store, error) {
 		return nil, fmt.Errorf("failed to open database (%s): %w", driver, err)
 	}
 
-	db.SetMaxOpenConns(25)
+	if isSQLite {
+		if targetURL == "file::memory:?cache=shared" || sqlitePath == ":memory:" {
+			db.SetMaxOpenConns(1)
+		} else {
+			db.SetMaxOpenConns(5)
+		}
+	} else {
+		db.SetMaxOpenConns(25)
+	}
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
@@ -114,6 +132,19 @@ func NewStore(dbURL, sqlitePath string) (Store, error) {
 	if err := store.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+
+	// Trigger automatic backfill if incidents table is empty but threat items exist
+	if sqlitePath != ":memory:" {
+		go func() {
+			var incCount, itemCount int
+			_ = store.db.QueryRow("SELECT COUNT(*) FROM incidents").Scan(&incCount)
+			_ = store.db.QueryRow("SELECT COUNT(*) FROM threat_items").Scan(&itemCount)
+			if incCount == 0 && itemCount > 0 {
+				log.Printf("[Storage] Incidents table empty but %d threat items exist. Starting automatic backfill...", itemCount)
+				_, _ = store.BackfillIncidents(context.Background(), 30)
+			}
+		}()
 	}
 
 	return store, nil
@@ -151,17 +182,47 @@ func (s *SQLStore) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_source_type ON threat_items(source_type);
 	CREATE INDEX IF NOT EXISTS idx_url ON threat_items(url);
 	CREATE INDEX IF NOT EXISTS idx_notified_at ON threat_items(notified_at);
+
+	CREATE TABLE IF NOT EXISTS incidents (
+		id VARCHAR(64) PRIMARY KEY,
+		victim_org VARCHAR(255) NOT NULL,
+		normalized_victim_org VARCHAR(255),
+		title VARCHAR(512) NOT NULL,
+		summary_ja TEXT,
+		impact_analysis_ja TEXT,
+		severity VARCHAR(32) NOT NULL,
+		japan_relevance VARCHAR(32) NOT NULL,
+		attack_type VARCHAR(64),
+		primary_url TEXT,
+		source_urls TEXT,
+		sources_detail TEXT,
+		first_seen_at TEXT NOT NULL,
+		last_seen_at TEXT NOT NULL,
+		report_count INT DEFAULT 1,
+		threat_actors TEXT,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_incidents_victim ON incidents(normalized_victim_org);
+	CREATE INDEX IF NOT EXISTS idx_incidents_last_seen ON incidents(last_seen_at);
+	CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
 
-	// Migrate existing tables to ensure raw_content column exists
+	// Migrate existing tables
 	if s.isSQLite {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN raw_content TEXT")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN incident_id VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN content_hash VARCHAR(64)")
 	} else {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS raw_content TEXT")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS incident_id VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)")
 	}
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_incident ON threat_items(incident_id)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_content_hash ON threat_items(content_hash)")
 
 	// Backfill existing records if raw_content is NULL
 	_, _ = s.db.Exec("UPDATE threat_items SET raw_content = summary WHERE raw_content IS NULL AND summary IS NOT NULL")
@@ -186,29 +247,49 @@ func (s *SQLStore) IsSeen(ctx context.Context, itemID string) (bool, error) {
 }
 
 func (s *SQLStore) IsSeenItem(ctx context.Context, item models.ThreatItem) (bool, error) {
-	if item.ID == "" && item.URL == "" {
+	if item.ID == "" && item.URL == "" && item.ContentHash == "" {
 		return false, nil
 	}
 
-	var query string
+	var conditions []string
 	var args []interface{}
+	argIdx := 1
+
+	if item.ID != "" {
+		if s.isSQLite {
+			conditions = append(conditions, "id = ?")
+		} else {
+			conditions = append(conditions, fmt.Sprintf("id = $%d", argIdx))
+			argIdx++
+		}
+		args = append(args, item.ID)
+	}
 
 	if item.URL != "" {
 		if s.isSQLite {
-			query = "SELECT 1 FROM threat_items WHERE id = ? OR (url IS NOT NULL AND url != '' AND url = ?) LIMIT 1"
+			conditions = append(conditions, "(url IS NOT NULL AND url != '' AND url = ?)")
 		} else {
-			query = "SELECT 1 FROM threat_items WHERE id = $1 OR (url IS NOT NULL AND url != '' AND url = $2) LIMIT 1"
+			conditions = append(conditions, fmt.Sprintf("(url IS NOT NULL AND url != '' AND url = $%d)", argIdx))
+			argIdx++
 		}
-		args = []interface{}{item.ID, item.URL}
-	} else {
-		if s.isSQLite {
-			query = "SELECT 1 FROM threat_items WHERE id = ? LIMIT 1"
-		} else {
-			query = "SELECT 1 FROM threat_items WHERE id = $1 LIMIT 1"
-		}
-		args = []interface{}{item.ID}
+		args = append(args, item.URL)
 	}
 
+	if item.ContentHash != "" {
+		if s.isSQLite {
+			conditions = append(conditions, "(content_hash IS NOT NULL AND content_hash != '' AND content_hash = ?)")
+		} else {
+			conditions = append(conditions, fmt.Sprintf("(content_hash IS NOT NULL AND content_hash != '' AND content_hash = $%d)", argIdx))
+			argIdx++
+		}
+		args = append(args, item.ContentHash)
+	}
+
+	if len(conditions) == 0 {
+		return false, nil
+	}
+
+	query := "SELECT 1 FROM threat_items WHERE " + strings.Join(conditions, " OR ") + " LIMIT 1"
 	var exists int
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -340,8 +421,8 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		query = `
 		INSERT INTO threat_items (
 			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
-			severity, japan_relevance, notified_at, enriched_data
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			summary = excluded.summary,
@@ -350,14 +431,16 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			severity = excluded.severity,
 			japan_relevance = excluded.japan_relevance,
 			notified_at = excluded.notified_at,
-			enriched_data = excluded.enriched_data
+			enriched_data = excluded.enriched_data,
+			incident_id = COALESCE(NULLIF(excluded.incident_id, ''), threat_items.incident_id),
+			content_hash = COALESCE(NULLIF(excluded.content_hash, ''), threat_items.content_hash)
 		`
 	} else {
 		query = `
 		INSERT INTO threat_items (
 			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
-			severity, japan_relevance, notified_at, enriched_data
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		ON CONFLICT(id) DO UPDATE SET
 			title = EXCLUDED.title,
 			summary = EXCLUDED.summary,
@@ -366,7 +449,9 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			severity = EXCLUDED.severity,
 			japan_relevance = EXCLUDED.japan_relevance,
 			notified_at = EXCLUDED.notified_at,
-			enriched_data = EXCLUDED.enriched_data
+			enriched_data = EXCLUDED.enriched_data,
+			incident_id = COALESCE(NULLIF(EXCLUDED.incident_id, ''), threat_items.incident_id),
+			content_hash = COALESCE(NULLIF(EXCLUDED.content_hash, ''), threat_items.content_hash)
 		`
 	}
 
@@ -384,15 +469,18 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		japanRelStr,
 		notifiedStr,
 		enrichedJSON,
+		item.IncidentID,
+		item.ContentHash,
 	)
 	return err
 }
 
 func (s *SQLStore) GetStats(ctx context.Context) (map[string]interface{}, error) {
-	var total, notified, japanDirect int
+	var total, notified, japanDirect, totalIncidents int
 	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM threat_items").Scan(&total)
 	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM threat_items WHERE notified_at IS NOT NULL").Scan(&notified)
 	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM threat_items WHERE japan_relevance = 'Direct'").Scan(&japanDirect)
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM incidents").Scan(&totalIncidents)
 
 	backendName := "sqlite"
 	if !s.isSQLite {
@@ -403,6 +491,7 @@ func (s *SQLStore) GetStats(ctx context.Context) (map[string]interface{}, error)
 
 	return map[string]interface{}{
 		"total_items":        total,
+		"total_incidents":    totalIncidents,
 		"notified_items":     notified,
 		"japan_direct_items": japanDirect,
 		"backend":            backendName,

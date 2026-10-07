@@ -58,7 +58,25 @@ interface Incident {
   source_name: string;
   title: string;
   url: string | null;
+  primary_url?: string | null;
+  source_urls?: string[];
+  sources_detail?: Array<{
+    source_type: string;
+    source_name: string;
+    title: string;
+    url: string;
+    published_at?: string;
+    harvested_at?: string;
+  }>;
+  victim_org?: string;
+  normalized_victim_org?: string;
+  report_count?: number;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  child_items?: Incident[];
   summary: string;
+  summary_ja?: string;
+  impact_analysis_ja?: string;
   raw_content?: string | null;
   published_at: string | null;
   harvested_at: string;
@@ -174,9 +192,18 @@ export default function DashboardPage() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [showRawInModal, setShowRawInModal] = useState<boolean>(false);
 
-  const openIncidentModal = (item: Incident) => {
+  const openIncidentModal = async (item: Incident) => {
     setSelectedIncident(item);
     setShowRawInModal(false);
+    try {
+      const res = await fetch(`/api/incidents/${encodeURIComponent(item.id)}`);
+      if (res.ok) {
+        const full = await res.json();
+        setSelectedIncident(full);
+      }
+    } catch {
+      // keep initial item data if fetch fails
+    }
   };
   const [addModal, setAddModal] = useState<{
     visible: boolean;
@@ -757,6 +784,17 @@ export default function DashboardPage() {
             </button>
 
             <a
+              href="/api/feed.xml"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
+              title="Subscribe to RSS 2.0 Feed (/api/feed.xml)"
+            >
+              <Rss className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
+              <span>RSS Feed</span>
+            </a>
+
+            <a
               href="/api/config/export"
               download="config.yaml"
               className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
@@ -1105,8 +1143,21 @@ export default function DashboardPage() {
                           Indirect Impact
                         </span>
                       )}
+                      {/* Cluster / Source Count Badge */}
+                      {item.report_count && item.report_count > 1 ? (
+                        <span className="px-2 py-0.5 rounded text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-700/80 flex items-center shadow-sm">
+                          <Radio className="w-3 h-3 mr-1 text-cyan-400" />
+                          {item.report_count} ソース集約
+                        </span>
+                      ) : null}
 
-                      <span className="text-xs text-slate-400 font-mono">{item.source_name}</span>
+                      {item.id.startsWith("incident--") && (
+                        <span className="hidden sm:inline-flex px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                          STIX
+                        </span>
+                      )}
+
+                      <span className="text-xs text-slate-400 font-mono truncate max-w-[150px] sm:max-w-xs">{item.source_name}</span>
                     </div>
 
                     <div className="text-right">
@@ -1165,8 +1216,23 @@ export default function DashboardPage() {
                       </div>
                     )}
 
-                    <div className="ml-auto flex items-center text-cyan-400 font-medium text-xs">
-                      View Intelligence <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                    <div className="ml-auto flex items-center space-x-3">
+                      {(item.url || item.primary_url) && (
+                        <a
+                          href={item.url || item.primary_url || "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center text-xs text-cyan-400 hover:text-cyan-300 font-mono hover:underline"
+                          title="Open primary source URL"
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1" />
+                          元記事
+                        </a>
+                      )}
+                      <div className="flex items-center text-cyan-400 font-medium text-xs">
+                        View Intelligence <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2330,19 +2396,125 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {selectedIncident.url && (
-                <div className="pt-2">
-                  <a
-                    href={selectedIncident.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center text-xs text-cyan-400 hover:text-cyan-300 font-mono"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                    Open Source Reference URL
-                  </a>
+              {/* Preserved Sources & Child Reports Timeline */}
+              <div className="pt-2 border-t border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider flex items-center">
+                    <Radio className="w-3.5 h-3.5 mr-1.5" />
+                    情報ソース・参照URL一覧 ({selectedIncident.sources_detail?.length || selectedIncident.source_urls?.length || (selectedIncident.url ? 1 : 0)} 件)
+                  </h4>
+                  {selectedIncident.id.startsWith("incident--") && (
+                    <span className="text-[10px] font-mono text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                      STIX ID: {selectedIncident.id}
+                    </span>
+                  )}
                 </div>
-              )}
+
+                {selectedIncident.sources_detail && selectedIncident.sources_detail.length > 0 ? (
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {selectedIncident.sources_detail.map((src, sIdx) => (
+                      <div
+                        key={sIdx}
+                        className="bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-cyan-300 border border-slate-700">
+                              {src.source_type}
+                            </span>
+                            <span className="text-xs font-medium text-slate-300 truncate">
+                              {src.source_name}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 truncate">{src.title}</p>
+                        </div>
+                        <div className="flex items-center space-x-3 shrink-0">
+                          {src.published_at && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              {formatDate(src.published_at)}
+                            </span>
+                          )}
+                          {src.url ? (
+                            <a
+                              href={src.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center text-xs text-cyan-400 hover:text-cyan-300 hover:underline font-mono bg-cyan-950/40 px-2 py-1 rounded border border-cyan-800/50"
+                            >
+                              <ExternalLink className="w-3 h-3 mr-1" />
+                              元リンク
+                            </a>
+                          ) : (
+                            <span className="text-[10px] text-slate-600 font-mono">No URL</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : selectedIncident.source_urls && selectedIncident.source_urls.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {selectedIncident.source_urls.map((u, uIdx) => (
+                      <div key={uIdx} className="bg-slate-950 p-2 rounded border border-slate-800 flex items-center justify-between">
+                        <span className="text-xs text-slate-400 font-mono truncate mr-2">{u}</span>
+                        <a
+                          href={u}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center text-xs text-cyan-400 hover:text-cyan-300 shrink-0 font-mono"
+                        >
+                          <ExternalLink className="w-3 h-3 mr-1" />
+                          開く
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                ) : selectedIncident.url ? (
+                  <div className="pt-1">
+                    <a
+                      href={selectedIncident.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center text-xs text-cyan-400 hover:text-cyan-300 font-mono"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                      Open Source Reference URL ({selectedIncident.url})
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-500">No external source URL recorded.</span>
+                )}
+
+                {/* Attached Child Reports Timeline */}
+                {selectedIncident.child_items && selectedIncident.child_items.length > 1 && (
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2">
+                      Child Reports Timeline ({selectedIncident.child_items.length} 件)
+                    </h5>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {selectedIncident.child_items.map((c, cIdx) => (
+                        <div key={cIdx} className="bg-slate-950/60 p-2 rounded border border-slate-800 text-xs">
+                          <div className="flex items-center justify-between text-slate-500 text-[10px] font-mono mb-1">
+                            <span>{c.source_name} ({c.source_type})</span>
+                            <span>{c.published_at ? formatDate(c.published_at) : formatDate(c.harvested_at)}</span>
+                          </div>
+                          <p className="text-slate-300 font-medium">{c.title}</p>
+                          {c.url && (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-cyan-400 hover:underline text-[10px] font-mono mt-1 inline-flex items-center"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5 mr-1" />
+                              {c.url}
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="p-4 border-t border-slate-800 flex justify-end">

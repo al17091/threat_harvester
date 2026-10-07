@@ -165,11 +165,16 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 					summary = entry.Content
 				}
 
+				link := entry.Link
+				if link == "" {
+					link = target.URL
+				}
+
 				item := models.NewThreatItem(
 					models.SourceTypeDarkwebOnion,
 					target.Name,
 					entry.Title,
-					entry.Link,
+					link,
 					summary,
 					entry.Content,
 					pubDate,
@@ -216,6 +221,15 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 						permalink, _ := post["permalink"].(string)
 						if permalink == "" {
 							permalink, _ = post["website"].(string)
+						}
+						if permalink == "" {
+							if groupName != "" && groupName != "Unknown Group" {
+								permalink = fmt.Sprintf("https://www.ransomlook.io/group/%s", url.PathEscape(groupName))
+							} else if target.URL != "" {
+								permalink = target.URL
+							} else {
+								permalink = "https://www.ransomlook.io/recent"
+							}
 						}
 
 						var pubDate *time.Time

@@ -73,8 +73,12 @@ func (s *Server) setupRoutes() {
 
 	r.Get("/", s.handleRoot)
 	r.Head("/", s.handleRoot)
+	r.Get("/rss", s.handleRSSFeed)
+	r.Get("/feed.xml", s.handleRSSFeed)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/rss", s.handleRSSFeed)
+		r.Get("/feed.xml", s.handleRSSFeed)
 		r.Get("/status", s.handleStatus)
 		r.Get("/incidents", s.handleListIncidents)
 		r.Get("/incidents/{id}", s.handleGetIncident)
@@ -87,6 +91,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/config/compliance", s.handleUpdateCompliance)
 
 		r.Post("/pipeline/run", s.handleTriggerPipeline)
+		r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
 		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
@@ -260,15 +265,39 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		OrderBy:    sortBy,
 	}
 
-	items, err := s.store.GetHistory(ctx, filter)
-	if err != nil {
-		errorResponse(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	viewMode := q.Get("view")
+	var items []map[string]interface{}
+	var total int
+	var err error
 
-	total, err := s.store.GetHistoryTotal(ctx, filter)
-	if err != nil {
-		total = len(items)
+	if viewMode == "raw" {
+		items, err = s.store.GetHistory(ctx, filter)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		total, err = s.store.GetHistoryTotal(ctx, filter)
+		if err != nil {
+			total = len(items)
+		}
+	} else {
+		items, err = s.store.GetIncidents(ctx, filter)
+		if err != nil {
+			errorResponse(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		total, err = s.store.GetIncidentsTotal(ctx, filter)
+		if err != nil {
+			total = len(items)
+		}
+		// Graceful fallback to raw history if incidents have not yet been clustered
+		if total == 0 && search == "" && severity == "" {
+			rawItems, rawErr := s.store.GetHistory(ctx, filter)
+			if rawErr == nil && len(rawItems) > 0 {
+				items = rawItems
+				total, _ = s.store.GetHistoryTotal(ctx, filter)
+			}
+		}
 	}
 
 	if items == nil {
@@ -286,6 +315,14 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	// Try clustered incident first
+	inc, err := s.store.GetIncident(r.Context(), id)
+	if err == nil && inc != nil {
+		jsonResponse(w, http.StatusOK, inc)
+		return
+	}
+
+	// Fallback to raw threat item
 	item, err := s.store.GetItem(r.Context(), id)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, err.Error())
@@ -296,6 +333,25 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, item)
+}
+
+func (s *Server) handleBackfillIncidents(w http.ResponseWriter, r *http.Request) {
+	windowDays := 30
+	if wStr := r.URL.Query().Get("window_days"); wStr != "" {
+		if wd, err := strconv.Atoi(wStr); err == nil && wd > 0 {
+			windowDays = wd
+		}
+	}
+	count, err := s.store.BackfillIncidents(r.Context(), windowDays)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("backfill failed: %v", err))
+		return
+	}
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"status":      "success",
+		"window_days": windowDays,
+		"incidents":   count,
+	})
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {

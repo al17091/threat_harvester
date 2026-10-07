@@ -200,6 +200,16 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				}
 			}
 
+			// Cluster into STIX 2.1 parent incident (30-day dynamic sliding window)
+			incident, err := p.store.FindOrCreateIncident(ctx, item, enriched, 30)
+			if err != nil {
+				log.Printf("[Pipeline] Error clustering incident for item %s: %v", item.Title, err)
+			} else if incident != nil {
+				item.IncidentID = incident.ID
+				log.Printf("[Pipeline] Clustered item into parent incident: %s (Total reports: %d, Victim: %s)",
+					incident.ID, incident.ReportCount, incident.VictimOrg)
+			}
+
 			if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {
 				log.Printf("[Pipeline] Failed to mark seen in store: %v", err)
 			}
