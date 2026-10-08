@@ -43,7 +43,7 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 	apiKey := cfg.AI.GeminiAPIKey
 	model := cfg.AI.GeminiModel
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.5-flash-lite"
 	}
 
 	if apiKey == "" {
@@ -112,6 +112,7 @@ For each incident, output a JSON array of objects with the following schema:
   {
     "title": "Concise headline of the threat disclosure from X",
     "url": "Direct Tweet URL or source article URL found in the search results (e.g. https://...). Must be a full URL, do not leave empty.",
+    "linked_urls": ["Any external URLs, blog links, or advisories mentioned or linked in the tweet/thread (e.g. https://...)"],
     "summary": "Key details of the disclosure and significance to Japanese defenders",
     "published_date": "YYYY-MM-DD or estimated ISO date",
     "victim_name": "Targeted organization if mentioned"
@@ -243,13 +244,37 @@ Only return valid JSON array without Markdown code block formatting.
 				meta["directive"] = job.directive
 			}
 
+			// Collect target links from AI disclosure, finalURL, and summary
+			var targetURLs []string
+			for _, lu := range res.LinkedURLs {
+				if IsCrawleableURL(lu) {
+					targetURLs = append(targetURLs, lu)
+				}
+			}
+			if finalURL != "" && IsCrawleableURL(finalURL) {
+				targetURLs = append(targetURLs, finalURL)
+			}
+			targetURLs = append(targetURLs, ExtractURLsFromText(res.Summary)...)
+
+			rawContent := fmt.Sprintf("[%s]\nTitle: %s\nSummary: %s", sourceName, res.Title, res.Summary)
+			if len(targetURLs) > 0 {
+				enrichedScraped, visitedURLs := FollowAndScrapeLinkedArticles(ctx, targetURLs, 2)
+				if enrichedScraped != "" {
+					rawContent += "\n\n" + enrichedScraped
+				}
+				if len(visitedURLs) > 0 {
+					meta["linked_urls"] = visitedURLs
+					log.Printf("[XMonitor] %s: recursively followed %d links (%d chars)", sourceName, len(visitedURLs), len([]rune(enrichedScraped)))
+				}
+			}
+
 			item := models.NewThreatItem(
 				models.SourceTypeXMonitor,
 				sourceName,
 				res.Title,
 				finalURL,
 				res.Summary,
-				"",
+				rawContent,
 				pubDate,
 				meta,
 			)

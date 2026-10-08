@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -43,6 +44,7 @@ type Store interface {
 	GetIncidentsTotal(ctx context.Context, filter HistoryFilter) (int, error)
 	GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error)
 	BackfillIncidents(ctx context.Context, windowDays int) (int, error)
+	BackfillArticleContents(ctx context.Context, fetcher func(ctx context.Context, url string) (string, error)) (int, error)
 
 	Close() error
 }
@@ -195,6 +197,7 @@ func (s *SQLStore) initSchema() error {
 		severity VARCHAR(32) NOT NULL,
 		japan_relevance VARCHAR(32) NOT NULL,
 		attack_type VARCHAR(64),
+		raw_content TEXT,
 		primary_url TEXT,
 		source_urls TEXT,
 		sources_detail TEXT,
@@ -220,12 +223,14 @@ func (s *SQLStore) initSchema() error {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN content_hash VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN cves TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN affected_product VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN raw_content TEXT")
 	} else {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS raw_content TEXT")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS incident_id VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS cves TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS affected_product VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS raw_content TEXT")
 	}
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_incident ON threat_items(incident_id)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_content_hash ON threat_items(content_hash)")
@@ -237,6 +242,28 @@ func (s *SQLStore) initSchema() error {
 	// Migrate historical clearnet ransomware tracker items away from darkweb_onion
 	_, _ = s.db.Exec("UPDATE threat_items SET source_type = 'ransomware_tracker' WHERE source_type = 'darkweb_onion' AND (url NOT LIKE '%.onion%' OR source_name LIKE 'Ransomlook%')")
 	_, _ = s.db.Exec("UPDATE incidents SET sources_detail = REPLACE(sources_detail, '\"source_type\":\"darkweb_onion\"', '\"source_type\":\"ransomware_tracker\"') WHERE sources_detail LIKE '%Ransomlook Tracker%'")
+
+	// Backfill incidents.raw_content from threat_items if empty
+	if s.isSQLite {
+		_, _ = s.db.Exec(`
+			UPDATE incidents SET raw_content = (
+				SELECT group_concat(COALESCE(NULLIF(raw_content, ''), summary), char(10) || '---' || char(10))
+				FROM threat_items WHERE threat_items.incident_id = incidents.id
+			) WHERE raw_content IS NULL OR raw_content = ''
+		`)
+	} else {
+		_, _ = s.db.Exec(`
+			UPDATE incidents i
+			SET raw_content = sub.combined
+			FROM (
+				SELECT incident_id, string_agg(COALESCE(NULLIF(raw_content, ''), summary), E'\n\n---\n\n') AS combined
+				FROM threat_items
+				WHERE incident_id IS NOT NULL AND (raw_content IS NOT NULL OR summary IS NOT NULL)
+				GROUP BY incident_id
+			) sub
+			WHERE i.id = sub.incident_id AND (i.raw_content IS NULL OR i.raw_content = '')
+		`)
+	}
 
 	// Migrate service releases / non-threat announcements to Info severity and detach from incidents
 	serviceReleaseSQL := `
@@ -692,6 +719,101 @@ func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]inter
 	}
 
 	return item, nil
+}
+
+// BackfillArticleContents retrieves full text for threat_items with missing or very brief raw_content.
+func (s *SQLStore) BackfillArticleContents(ctx context.Context, fetcher func(ctx context.Context, url string) (string, error)) (int, error) {
+	if fetcher == nil {
+		return 0, fmt.Errorf("fetcher function is nil")
+	}
+
+	query := `
+		SELECT id, incident_id, url, title
+		FROM threat_items
+		WHERE url IS NOT NULL AND url != '' 
+		  AND url NOT LIKE '%.onion%'
+		  AND (raw_content IS NULL OR TRIM(raw_content) = '' OR (source_type = 'vendor_rss' AND LENGTH(raw_content) < 150))
+		ORDER BY harvested_at DESC
+		LIMIT 150
+	`
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type targetRow struct {
+		id         string
+		incidentID sql.NullString
+		url        string
+		title      string
+	}
+
+	var targets []targetRow
+	for rows.Next() {
+		var r targetRow
+		if err := rows.Scan(&r.id, &r.incidentID, &r.url, &r.title); err == nil {
+			targets = append(targets, r)
+		}
+	}
+
+	if len(targets) == 0 {
+		return 0, nil
+	}
+
+	log.Printf("[Backfill] Found %d articles needing full content extraction", len(targets))
+
+	type resultItem struct {
+		target targetRow
+		text   string
+	}
+
+	resultsChan := make(chan resultItem, len(targets))
+	sem := make(chan struct{}, 6)
+	var wg sync.WaitGroup
+
+	for _, t := range targets {
+		wg.Add(1)
+		go func(row targetRow) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+
+			text, err := fetcher(fetchCtx, row.url)
+			if err == nil && len(strings.TrimSpace(text)) > 0 {
+				resultsChan <- resultItem{target: row, text: text}
+			}
+		}(t)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	updatedCount := 0
+	for res := range resultsChan {
+		updateItemQ := "UPDATE threat_items SET raw_content = ?, summary = CASE WHEN (summary IS NULL OR summary = '') THEN ? ELSE summary END WHERE id = ?"
+		if !s.isSQLite {
+			updateItemQ = "UPDATE threat_items SET raw_content = $1, summary = CASE WHEN (summary IS NULL OR summary = '') THEN $2 ELSE summary END WHERE id = $3"
+		}
+		summaryTeaser := models.TruncateRunes(res.text, 400)
+		_, _ = s.db.ExecContext(ctx, updateItemQ, res.text, summaryTeaser, res.target.id)
+
+		if res.target.incidentID.Valid && res.target.incidentID.String != "" {
+			updateIncQ := "UPDATE incidents SET raw_content = ? WHERE id = ? AND (raw_content IS NULL OR TRIM(raw_content) = '' OR LENGTH(raw_content) < 150)"
+			if !s.isSQLite {
+				updateIncQ = "UPDATE incidents SET raw_content = $1 WHERE id = $2 AND (raw_content IS NULL OR TRIM(raw_content) = '' OR LENGTH(raw_content) < 150)"
+			}
+			_, _ = s.db.ExecContext(ctx, updateIncQ, res.text, res.target.incidentID.String)
+		}
+		updatedCount++
+	}
+
+	log.Printf("[Backfill] Completed article backfill: successfully enriched %d/%d articles", updatedCount, len(targets))
+	return updatedCount, nil
 }
 
 func (s *SQLStore) Close() error {

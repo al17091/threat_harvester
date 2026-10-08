@@ -117,15 +117,43 @@ func (h *TelegramHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 
 			summary := models.TruncateRunes(text, 1000)
 
+			// Extract links referenced in the Telegram message
+			var targetURLs []string
+			textDiv.Find("a").Each(func(_ int, a *goquery.Selection) {
+				if href, ok := a.Attr("href"); ok {
+					targetURLs = append(targetURLs, href)
+				}
+			})
+			s.Find("a.tgme_widget_message_link_preview").Each(func(_ int, a *goquery.Selection) {
+				if href, ok := a.Attr("href"); ok {
+					targetURLs = append(targetURLs, href)
+				}
+			})
+			targetURLs = append(targetURLs, ExtractURLsFromText(text)...)
+
+			rawContent := text
+			meta := map[string]interface{}{"channel": cleanCh}
+
+			if len(targetURLs) > 0 {
+				enrichedScraped, visitedURLs := FollowAndScrapeLinkedArticles(ctx, targetURLs, 2)
+				if enrichedScraped != "" {
+					rawContent = text + "\n\n" + enrichedScraped
+				}
+				if len(visitedURLs) > 0 {
+					meta["linked_urls"] = visitedURLs
+					log.Printf("[Telegram] @%s: recursively followed %d links (%d chars)", cleanCh, len(visitedURLs), len([]rune(enrichedScraped)))
+				}
+			}
+
 			item := models.NewThreatItem(
 				models.SourceTypeTelegram,
 				fmt.Sprintf("Telegram:@%s", cleanCh),
 				title,
 				msgLink,
 				summary,
-				text,
+				rawContent,
 				pubDate,
-				map[string]interface{}{"channel": cleanCh},
+				meta,
 			)
 			items = append(items, item)
 		})

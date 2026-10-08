@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -126,6 +127,36 @@ func (h *VendorRSSHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 			items = append(items, item)
 		}
 	}
+
+	// Concurrently fetch original article text from source URLs if missing or brief (< 300 runes)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 6)
+
+	for i := range items {
+		if items[i].URL == "" || strings.Contains(items[i].URL, ".onion") {
+			continue
+		}
+		if len([]rune(strings.TrimSpace(items[i].RawContent))) < 300 {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+				defer cancel()
+
+				articleText, err := FetchArticleContent(fetchCtx, items[idx].URL)
+				if err == nil && len(strings.TrimSpace(articleText)) > 0 {
+					items[idx].RawContent = articleText
+					if items[idx].Summary == "" {
+						items[idx].Summary = models.TruncateRunes(articleText, 400)
+					}
+				}
+			}(i)
+		}
+	}
+	wg.Wait()
 
 	log.Printf("[RSS] VendorRSSHarvester collected %d items", len(items))
 	return items, nil

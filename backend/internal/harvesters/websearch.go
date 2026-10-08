@@ -39,11 +39,12 @@ func (h *WebSearchHarvester) SourceType() models.SourceType {
 }
 
 type groundedItem struct {
-	Title         string `json:"title"`
-	URL           string `json:"url"`
-	Summary       string `json:"summary"`
-	PublishedDate string `json:"published_date"`
-	VictimName    string `json:"victim_name"`
+	Title         string   `json:"title"`
+	URL           string   `json:"url"`
+	LinkedURLs    []string `json:"linked_urls,omitempty"`
+	Summary       string   `json:"summary"`
+	PublishedDate string   `json:"published_date"`
+	VictimName    string   `json:"victim_name"`
 }
 
 type searchJob struct {
@@ -57,7 +58,7 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 	apiKey := cfg.AI.GeminiAPIKey
 	model := cfg.AI.GeminiModel
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.5-flash-lite"
 	}
 
 	if apiKey == "" {

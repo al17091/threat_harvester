@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 	"time"
 
@@ -77,10 +78,81 @@ func (s *SQLStore) FindOrCreateIncident(
 		HarvestedAt: item.HarvestedAt,
 	}
 
+	var candidateURLs []string
+	if item.URL != "" {
+		candidateURLs = append(candidateURLs, item.URL)
+	}
+	if item.Metadata != nil {
+		if rawLinks, ok := item.Metadata["linked_urls"]; ok {
+			switch links := rawLinks.(type) {
+			case []string:
+				candidateURLs = append(candidateURLs, links...)
+			case []interface{}:
+				for _, l := range links {
+					if str, ok := l.(string); ok && str != "" {
+						candidateURLs = append(candidateURLs, str)
+					}
+				}
+			}
+		}
+	}
+	candidateURLs = mergeUniqueStrings(nil, candidateURLs)
+
 	var matched *models.Incident
 
+	// TRACK 0: Direct URL or Linked URL Matching
+	// If the item URL or any of its recursively followed links match an existing incident,
+	// cluster them into the exact same incident bundle.
+	for _, candURL := range candidateURLs {
+		trimmedCand := strings.TrimSpace(candURL)
+		if trimmedCand == "" || len(trimmedCand) < 10 {
+			continue
+		}
+		candPattern := "%" + trimmedCand + "%"
+		var urlQuery string
+		if s.isSQLite {
+			urlQuery = `
+				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
+				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				FROM incidents
+				WHERE (primary_url = ? OR source_urls LIKE ?)
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		} else {
+			urlQuery = `
+				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
+				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				FROM incidents
+				WHERE (primary_url = $1 OR source_urls LIKE $2)
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		}
+
+		rows, err := s.db.QueryContext(ctx, urlQuery, trimmedCand, candPattern)
+		if err == nil {
+			for rows.Next() {
+				inc, err := scanIncident(rows)
+				if err != nil {
+					continue
+				}
+				if isWithinWindow(inc, itemTime, windowDuration) {
+					matched = inc
+					break
+				}
+			}
+			_ = rows.Close()
+		}
+		if matched != nil {
+			break
+		}
+	}
+
 	// TRACK 1: Vulnerability & CVE Clustering
-	if isVuln && (len(cves) > 0 || normProduct != "") {
+	if matched == nil && isVuln && (len(cves) > 0 || normProduct != "") {
 		// 1-A. Try matching by identical CVEs
 		if len(cves) > 0 {
 			var cveConds []string
@@ -97,7 +169,7 @@ func (s *SQLStore) FindOrCreateIncident(
 
 			cveQuery := `
 				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 				FROM incidents
 				WHERE ` + strings.Join(cveConds, " OR ") + `
@@ -129,7 +201,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			prodPattern := "%" + normProduct + "%"
 			prodQuery := `
 				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 				FROM incidents
 				WHERE ((affected_product IS NOT NULL AND affected_product != '' AND LOWER(affected_product) LIKE ?) OR LOWER(title) LIKE ?)
@@ -139,7 +211,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			if !s.isSQLite {
 				prodQuery = `
 					SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-					       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+					       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 					       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 					FROM incidents
 					WHERE ((affected_product IS NOT NULL AND affected_product != '' AND affected_product ILIKE $1) OR title ILIKE $2)
@@ -172,7 +244,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) {
 		query := `
 			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-			       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+			       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 			FROM incidents
 			WHERE normalized_victim_org = ?
@@ -182,7 +254,7 @@ func (s *SQLStore) FindOrCreateIncident(
 		if !s.isSQLite {
 			query = `
 				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 				FROM incidents
 				WHERE normalized_victim_org = $1
@@ -241,13 +313,33 @@ func (s *SQLStore) FindOrCreateIncident(
 			matched.AttackType = "Vulnerability"
 		}
 
+		// Merge raw content from newly incoming report
+		newRaw := strings.TrimSpace(item.RawContent)
+		if newRaw == "" {
+			newRaw = strings.TrimSpace(item.Summary)
+		}
+		if newRaw != "" && !strings.Contains(matched.RawContent, newRaw) {
+			if matched.RawContent != "" {
+				matched.RawContent += "\n\n---\n\n" + newRaw
+			} else {
+				matched.RawContent = newRaw
+			}
+		}
+
 		if matched.PrimaryURL == "" && item.URL != "" {
 			matched.PrimaryURL = item.URL
 		}
-		if item.URL != "" {
-			matched.SourceURLs = appendUniqueString(matched.SourceURLs, item.URL)
+		for _, u := range candidateURLs {
+			if u != "" {
+				matched.SourceURLs = appendUniqueString(matched.SourceURLs, u)
+			}
 		}
 		matched.SourcesDetail = appendSourceDetail(matched.SourcesDetail, detail)
+		if item.Metadata != nil {
+			if rawLinks, ok := item.Metadata["linked_urls"]; ok {
+				matched.SourcesDetail = appendLinkedSourceDetails(matched.SourcesDetail, rawLinks, item.PublishedAt)
+			}
+		}
 		matched.UpdatedAt = time.Now().UTC()
 
 		if err := s.updateIncident(ctx, matched); err != nil {
@@ -257,7 +349,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	}
 
 	// TRACK 3: No match found within sliding window -> create new incident
-	inc := s.buildNewIncident(item, enriched, rawVictim, normVictim, cves, rawProduct, itemTime, detail)
+	inc := s.buildNewIncident(item, enriched, rawVictim, normVictim, cves, rawProduct, itemTime, detail, candidateURLs)
 	if inc.AttackType == "" && isVuln {
 		inc.AttackType = "Vulnerability"
 	}
@@ -275,6 +367,7 @@ func (s *SQLStore) buildNewIncident(
 	rawProduct string,
 	itemTime time.Time,
 	detail models.SourceDetail,
+	candidateURLs []string,
 ) *models.Incident {
 	id := models.NewSTIXIncidentID()
 	title := item.Title
@@ -308,9 +401,26 @@ func (s *SQLStore) buildNewIncident(
 		vOrg = "Unknown"
 	}
 
+	rawContent := strings.TrimSpace(item.RawContent)
+	if rawContent == "" {
+		rawContent = strings.TrimSpace(item.Summary)
+	}
+
 	var sourceURLs []string
-	if item.URL != "" {
+	for _, u := range candidateURLs {
+		if u != "" {
+			sourceURLs = appendUniqueString(sourceURLs, u)
+		}
+	}
+	if len(sourceURLs) == 0 && item.URL != "" {
 		sourceURLs = append(sourceURLs, item.URL)
+	}
+
+	sourcesDetail := []models.SourceDetail{detail}
+	if item.Metadata != nil {
+		if rawLinks, ok := item.Metadata["linked_urls"]; ok {
+			sourcesDetail = appendLinkedSourceDetails(sourcesDetail, rawLinks, item.PublishedAt)
+		}
 	}
 
 	now := time.Now().UTC()
@@ -326,9 +436,10 @@ func (s *SQLStore) buildNewIncident(
 		Severity:            sev,
 		JapanRelevance:      jrel,
 		AttackType:          attackType,
+		RawContent:          rawContent,
 		PrimaryURL:          item.URL,
 		SourceURLs:          sourceURLs,
-		SourcesDetail:       []models.SourceDetail{detail},
+		SourcesDetail:       sourcesDetail,
 		FirstSeenAt:         itemTime,
 		LastSeenAt:          itemTime,
 		ReportCount:         1,
@@ -336,6 +447,46 @@ func (s *SQLStore) buildNewIncident(
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
+}
+
+func appendLinkedSourceDetails(details []models.SourceDetail, rawLinks interface{}, pubDate *time.Time) []models.SourceDetail {
+	var urls []string
+	switch links := rawLinks.(type) {
+	case []string:
+		urls = links
+	case []interface{}:
+		for _, l := range links {
+			if str, ok := l.(string); ok && str != "" {
+				urls = append(urls, str)
+			}
+		}
+	}
+
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		domain := extractDomainFromURL(u)
+		linkedDetail := models.SourceDetail{
+			Type:        models.SourceTypeVendorRSS,
+			Name:        fmt.Sprintf("Ref:%s", domain),
+			Title:       fmt.Sprintf("Linked Reference: %s", u),
+			URL:         u,
+			PublishedAt: pubDate,
+			HarvestedAt: time.Now().UTC(),
+		}
+		details = appendSourceDetail(details, linkedDetail)
+	}
+	return details
+}
+
+func extractDomainFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
 
 func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) error {
@@ -354,17 +505,17 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 		query = `
 			INSERT INTO incidents (
 				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 	} else {
 		query = `
 			INSERT INTO incidents (
 				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+				severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		`
 	}
 
@@ -380,6 +531,7 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 		string(inc.Severity),
 		string(inc.JapanRelevance),
 		inc.AttackType,
+		inc.RawContent,
 		inc.PrimaryURL,
 		string(srcURLsJSON),
 		string(srcDetailJSON),
@@ -415,6 +567,7 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 				severity = ?,
 				japan_relevance = ?,
 				attack_type = ?,
+				raw_content = ?,
 				primary_url = ?,
 				source_urls = ?,
 				sources_detail = ?,
@@ -436,15 +589,16 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 				severity = $6,
 				japan_relevance = $7,
 				attack_type = $8,
-				primary_url = $9,
-				source_urls = $10,
-				sources_detail = $11,
-				first_seen_at = $12,
-				last_seen_at = $13,
-				report_count = $14,
-				threat_actors = $15,
-				updated_at = $16
-			WHERE id = $17
+				raw_content = $9,
+				primary_url = $10,
+				source_urls = $11,
+				sources_detail = $12,
+				first_seen_at = $13,
+				last_seen_at = $14,
+				report_count = $15,
+				threat_actors = $16,
+				updated_at = $17
+			WHERE id = $18
 		`
 	}
 
@@ -457,6 +611,7 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 		string(inc.Severity),
 		string(inc.JapanRelevance),
 		inc.AttackType,
+		inc.RawContent,
 		inc.PrimaryURL,
 		string(srcURLsJSON),
 		string(srcDetailJSON),
@@ -476,14 +631,14 @@ func scanIncident(scanner interface {
 	var (
 		id, victimOrg, title, firstSeen, lastSeen, created, updated string
 		normVictim, cvesRaw, affProduct                              sql.NullString
-		sumJa, impJa, attackType, primURL, srcURLs, srcDetail, actors sql.NullString
+		sumJa, impJa, attackType, rawContent, primURL, srcURLs, srcDetail, actors sql.NullString
 		sev, jrel                                                    string
 		reportCount                                                  int
 	)
 
 	err := scanner.Scan(
 		&id, &victimOrg, &normVictim, &cvesRaw, &affProduct, &title, &sumJa, &impJa,
-		&sev, &jrel, &attackType, &primURL, &srcURLs, &srcDetail,
+		&sev, &jrel, &attackType, &rawContent, &primURL, &srcURLs, &srcDetail,
 		&firstSeen, &lastSeen, &reportCount, &actors, &created, &updated,
 	)
 	if err != nil {
@@ -527,6 +682,7 @@ func scanIncident(scanner interface {
 		Severity:            models.Severity(sev),
 		JapanRelevance:      models.JapanRelevance(jrel),
 		AttackType:          attackType.String,
+		RawContent:          rawContent.String,
 		PrimaryURL:          primURL.String,
 		SourceURLs:          sourceURLs,
 		SourcesDetail:       sourcesDetail,
@@ -591,7 +747,7 @@ func (s *SQLStore) GetIncidents(ctx context.Context, f HistoryFilter) ([]map[str
 	whereClause, args := s.buildIncidentsConditions(f)
 	query := `
 		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-		       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+		       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 		FROM incidents
 	` + whereClause
@@ -639,7 +795,7 @@ func (s *SQLStore) GetIncidentsTotal(ctx context.Context, f HistoryFilter) (int,
 func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error) {
 	query := `
 		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-		       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+		       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 		FROM incidents
 		WHERE id = ? OR id LIKE ?
@@ -650,7 +806,7 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 	if !s.isSQLite {
 		query = `
 			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-			       severity, japan_relevance, attack_type, primary_url, source_urls, sources_detail,
+			       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
 			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
 			FROM incidents
 			WHERE id = $1 OR id LIKE $2
@@ -721,6 +877,29 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 			}
 		}
 		res["child_items"] = childItems
+
+		// If incident raw_content is empty, synthesize from child items
+		if rawStr, ok := res["raw_content"].(string); !ok || strings.TrimSpace(rawStr) == "" {
+			var rawParts []string
+			for _, c := range childItems {
+				cRaw, _ := c["raw_content"].(string)
+				if strings.TrimSpace(cRaw) == "" {
+					cRaw, _ = c["summary"].(string)
+				}
+				cRaw = strings.TrimSpace(cRaw)
+				if cRaw != "" {
+					header := fmt.Sprintf("=== [%s / %s] %s ===", c["source_type"], c["source_name"], c["title"])
+					urlStr, _ := c["url"].(string)
+					if urlStr != "" {
+						header += "\nURL: " + urlStr
+					}
+					rawParts = append(rawParts, header+"\n\n"+cRaw)
+				}
+			}
+			if len(rawParts) > 0 {
+				res["raw_content"] = strings.Join(rawParts, "\n\n---\n\n")
+			}
+		}
 	}
 
 	return res, nil
@@ -863,6 +1042,7 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		"severity":              string(inc.Severity),
 		"japan_relevance":       string(inc.JapanRelevance),
 		"attack_type":           inc.AttackType,
+		"raw_content":           inc.RawContent,
 		"url":                   inc.PrimaryURL,
 		"primary_url":           inc.PrimaryURL,
 		"source_urls":           inc.SourceURLs,

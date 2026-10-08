@@ -393,5 +393,93 @@ func TestServiceReleaseAndInfoIncidentExclusion(t *testing.T) {
 	}
 }
 
+func TestIncidentClusteringByURLAndLinkedURL(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub := time.Now().UTC()
+
+	// 1. Telegram post linking to an external advisory
+	itemTelegram := models.NewThreatItem(
+		models.SourceTypeTelegram,
+		"Telegram:@intel_news",
+		"[@intel_news] 重大な認証バイパスのゼロデイ発見",
+		"https://t.me/s/intel_news/123",
+		"テレグラム速報",
+		"テレグラム本文\n\n--- [Linked Content: https://advisories.vendor.com/sec-2026-01] ---\n詳細な脆弱性解説",
+		&pub,
+		map[string]interface{}{
+			"channel":     "intel_news",
+			"linked_urls": []string{"https://advisories.vendor.com/sec-2026-01"},
+		},
+	)
+	enrichedTG := &models.EnrichedThreat{
+		Severity:       models.SeverityCritical,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Zero-day",
+		TitleJa:        "ベンダー製品における重大な認証バイパス脆弱性",
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, itemTelegram, enrichedTG, 14)
+	if err != nil {
+		t.Fatalf("failed to create incident from Telegram: %v", err)
+	}
+	if inc1.ReportCount != 1 {
+		t.Fatalf("expected ReportCount 1, got %d", inc1.ReportCount)
+	}
+	// Check source URLs contain both Telegram and linked URL
+	foundLinked := false
+	for _, u := range inc1.SourceURLs {
+		if u == "https://advisories.vendor.com/sec-2026-01" {
+			foundLinked = true
+			break
+		}
+	}
+	if !foundLinked {
+		t.Fatalf("expected linked URL to be in inc1.SourceURLs, got %v", inc1.SourceURLs)
+	}
+	if len(inc1.SourcesDetail) < 2 {
+		t.Fatalf("expected at least 2 sources_detail entries (telegram + linked), got %d", len(inc1.SourcesDetail))
+	}
+
+	// 2. An X (Twitter) post referencing the same advisory URL
+	itemX := models.NewThreatItem(
+		models.SourceTypeXMonitor,
+		"XMonitor:zeroday_alert",
+		"Researcher confirms exploitation of vendor bug",
+		"https://x.com/researcher/status/987654321",
+		"X post summary",
+		"Tweet text\n\n--- [Linked Content: https://advisories.vendor.com/sec-2026-01] ---\n詳細",
+		&pub,
+		map[string]interface{}{
+			"linked_urls": []string{"https://advisories.vendor.com/sec-2026-01"},
+		},
+	)
+	enrichedX := &models.EnrichedThreat{
+		Severity:       models.SeverityCritical,
+		JapanRelevance: models.JapanRelevanceDirect,
+		AttackType:     "Zero-day",
+		TitleJa:        "ベンダー製品における重大な認証バイパス脆弱性",
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, itemX, enrichedX, 14)
+	if err != nil {
+		t.Fatalf("failed to cluster X post: %v", err)
+	}
+
+	// Must cluster into the EXACT same incident bundle (same ID, report count 2)
+	if inc2.ID != inc1.ID {
+		t.Fatalf("expected same incident ID, got %s vs %s", inc2.ID, inc1.ID)
+	}
+	if inc2.ReportCount != 2 {
+		t.Fatalf("expected ReportCount 2, got %d", inc2.ReportCount)
+	}
+}
+
+
 
 

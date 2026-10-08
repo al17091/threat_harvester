@@ -96,10 +96,13 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 	}
 
 	attackType := out.AttackType
-	if models.IsServiceReleaseOrNonThreat(item, nil) {
-		severity = models.SeverityInfo
-		if attackType == "" || attackType == "Vulnerability" {
-			attackType = "Service Release"
+	// Only fall back to heuristic detection if Gemini returned unknown severity
+	if severity == models.SeverityUnknown {
+		if models.IsServiceReleaseOrNonThreat(item, nil) {
+			severity = models.SeverityInfo
+			if attackType == "" {
+				attackType = "Service Release"
+			}
 		}
 	}
 
@@ -171,7 +174,7 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 	apiKey := cfg.AI.GeminiAPIKey
 	model := cfg.AI.GeminiModel
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.5-flash-lite"
 	}
 
 	if apiKey == "" {
@@ -207,10 +210,16 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 		}, nil
 	}
 
+	contentToAnalyze := strings.TrimSpace(item.RawContent)
+	if contentToAnalyze == "" {
+		contentToAnalyze = strings.TrimSpace(item.Summary)
+	}
+	contentToAnalyze = models.TruncateRunes(contentToAnalyze, 4000)
+
 	metaJSON, _ := json.Marshal(item.Metadata)
 	prompt := fmt.Sprintf(`
 あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
-以下の脅威情報を分析し、特に「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+以下の脅威情報の原文データ（記事本文やリーク情報）を精読して詳細に分析し、特に「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
 
 # 評価基準
 1. japan_relevance (日本への関連性):
@@ -225,12 +234,17 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
    - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
    - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
 
+# 判定上の重要注意事項（見落とし・情報欠落の防止）
+- 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
+- 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
+- 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
+
 # 対象インシデント情報
 ソース種別: %s
 情報源: %s
 タイトル: %s
 URL: %s
-本文/要約: %s
+原文本文データ: %s
 付加情報: %s
 
 # 出力形式 (必ず以下のJSONフォーマットのみを出力してください)
@@ -247,7 +261,7 @@ URL: %s
     "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
     "recommended_actions_ja": ["推奨される初動対応・防御策"]
 }
-`, item.SourceType, item.SourceName, item.Title, item.URL, item.Summary, string(metaJSON))
+`, item.SourceType, item.SourceName, item.Title, item.URL, contentToAnalyze, string(metaJSON))
 
 	reqBody := geminiRequest{
 		Contents: []geminiContent{
@@ -314,7 +328,7 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 	apiKey := cfg.AI.GeminiAPIKey
 	model := cfg.AI.GeminiModel
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.5-flash-lite"
 	}
 
 	if apiKey == "" {
@@ -341,18 +355,22 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 		SourceName string `json:"source_name"`
 		Title      string `json:"title"`
 		URL        string `json:"url"`
-		Summary    string `json:"summary"`
+		Content    string `json:"content"`
 	}
 
 	inputList := make([]batchInputItem, len(items))
 	for i, it := range items {
+		content := strings.TrimSpace(it.RawContent)
+		if content == "" {
+			content = strings.TrimSpace(it.Summary)
+		}
 		inputList[i] = batchInputItem{
 			Index:      i,
 			SourceType: string(it.SourceType),
 			SourceName: it.SourceName,
 			Title:      it.Title,
 			URL:        it.URL,
-			Summary:    models.TruncateRunes(it.Summary, 600),
+			Content:    models.TruncateRunes(content, 3500),
 		}
 	}
 	itemsJSON, err := json.Marshal(inputList)
@@ -361,7 +379,7 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 	}
 
 	prompt := fmt.Sprintf(`あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
-以下の複数の脅威情報（計 %d 件）を個別に分析し、各インシデントについて「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+以下の複数の脅威情報（計 %d 件）の原文データ（"content" フィールドの元記事本文・リーク詳細）を精読して個別に分析し、各インシデントについて「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
 
 # 評価基準
 1. japan_relevance (日本への関連性):
@@ -375,6 +393,11 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
    - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
    - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
    - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
+
+# 判定上の重要注意事項（見落とし・情報欠落の防止）
+- 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
+- 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
+- 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
 
 # 対象インシデント一覧 (JSON)
 %s
@@ -524,7 +547,7 @@ func (a *GeminiThreatAnalyzer) GenerateSearchQueries(ctx context.Context, direct
 	apiKey := cfg.AI.GeminiAPIKey
 	model := cfg.AI.GeminiModel
 	if model == "" {
-		model = "gemini-2.5-flash"
+		model = "gemini-3.5-flash-lite"
 	}
 	if apiKey == "" {
 		log.Printf("[Analyzer] Gemini API key not configured. Returning directive as literal query.")

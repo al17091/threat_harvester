@@ -34,6 +34,7 @@ type Incident struct {
 	Severity            Severity       `json:"severity"`
 	JapanRelevance      JapanRelevance `json:"japan_relevance"`
 	AttackType          string         `json:"attack_type,omitempty"`
+	RawContent          string         `json:"raw_content,omitempty"`
 	PrimaryURL          string         `json:"primary_url"`
 	SourceURLs          []string       `json:"source_urls"`
 	SourcesDetail       []SourceDetail `json:"sources_detail"`
@@ -191,9 +192,14 @@ func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool
 		if strings.EqualFold(enriched.AttackType, "Service Release") ||
 			strings.EqualFold(enriched.AttackType, "PR") ||
 			strings.EqualFold(enriched.AttackType, "Marketing") ||
-			strings.EqualFold(enriched.AttackType, "Product Release") ||
-			strings.EqualFold(enriched.AttackType, "None") {
+			strings.EqualFold(enriched.AttackType, "Product Release") {
 			return true
+		}
+		// If AI analyzed and determined this is an active threat (Critical/High/Medium/Low),
+		// trust the AI's contextual judgment over keyword heuristics.
+		if enriched.Severity == SeverityCritical || enriched.Severity == SeverityHigh ||
+			enriched.Severity == SeverityMedium || enriched.Severity == SeverityLow {
+			return false
 		}
 	}
 
@@ -228,7 +234,7 @@ func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool
 	}
 
 	// Explicit threat indicators in the raw report - if any exist, do not classify as non-threat
-	rawLower := strings.ToLower(item.Title + " " + item.Summary)
+	rawLower := strings.ToLower(item.Title + " " + item.Summary + " " + item.RawContent)
 	threatIndicators := []string{
 		"ゼロデイ", "0-day", "zero-day", "ランサムウェア", "ransomware", "不正アクセス",
 		"情報漏洩", "データ漏洩", "情報流出", "マルウェア", "malware", "侵入検知",

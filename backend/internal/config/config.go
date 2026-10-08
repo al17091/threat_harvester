@@ -242,7 +242,7 @@ func DefaultConfig() AppConfig {
 			SQLitePath: "data/threat_cache.db",
 		},
 		AI: AiConfig{
-			GeminiModel: "gemini-2.5-flash",
+			GeminiModel: "gemini-3.5-flash-lite",
 		},
 		Network: NetworkConfig{
 			TorProxyURL:    "socks5h://127.0.0.1:9050",

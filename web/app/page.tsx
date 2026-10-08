@@ -177,6 +177,27 @@ interface ConfigData {
   };
 }
 
+function getRawContentText(inc: Incident | null): string {
+  if (!inc) return "";
+  if (inc.raw_content && inc.raw_content.trim() !== "") {
+    return inc.raw_content.trim();
+  }
+  if (inc.child_items && inc.child_items.length > 0) {
+    const parts = inc.child_items
+      .map((c) => {
+        const raw = (c.raw_content || c.summary || "").trim();
+        if (!raw) return null;
+        const header = `=== [${c.source_type || "Source"} / ${c.source_name || "Unknown"}] ${c.title || ""} ===${c.url ? `\nURL: ${c.url}` : ""}`;
+        return `${header}\n\n${raw}`;
+      })
+      .filter((p): p is string => Boolean(p));
+    if (parts.length > 0) {
+      return parts.join("\n\n---\n\n");
+    }
+  }
+  return "";
+}
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<"incidents" | "sources" | "config" | "status" | "console">("incidents");
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -2275,7 +2296,7 @@ export default function DashboardPage() {
               </div>
               <div className="bg-slate-950 p-4 rounded-lg border border-slate-800">
                 <div className="text-xs text-slate-400 font-semibold mb-1">Gemini AI Model</div>
-                <div className="text-sm font-mono text-emerald-400">{config?.ai?.gemini_model || "gemini-2.5-flash"}</div>
+                <div className="text-sm font-mono text-emerald-400">{config?.ai?.gemini_model || "gemini-3.5-flash-lite"}</div>
                 <div className="text-xs font-mono text-slate-500 mt-1 truncate">
                   Key: {config?.ai?.gemini_api_key || "Configured"}
                 </div>
@@ -2509,36 +2530,41 @@ export default function DashboardPage() {
               </div>
 
               {/* RAW SOURCE ACCORDION IN MODAL */}
-              <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/70">
-                <button
-                  type="button"
-                  onClick={() => setShowRawInModal(!showRawInModal)}
-                  className="w-full px-3 py-2 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800/80 transition"
-                >
-                  <div className="flex items-center space-x-2">
-                    <FileCode className="w-4 h-4 text-cyan-400" />
-                    <span>原文データ / Raw Source Content</span>
-                    {selectedIncident.raw_content ? (
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        ({selectedIncident.raw_content.length} chars)
-                      </span>
-                    ) : null}
+              {(() => {
+                const rawText = getRawContentText(selectedIncident);
+                return (
+                  <div className="border border-slate-800 rounded-lg overflow-hidden bg-slate-950/70">
+                    <button
+                      type="button"
+                      onClick={() => setShowRawInModal(!showRawInModal)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800/80 transition"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <FileCode className="w-4 h-4 text-cyan-400" />
+                        <span>原文データ / Raw Source Content</span>
+                        {rawText ? (
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            ({rawText.length} chars)
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center space-x-1.5 text-slate-400">
+                        <span className="text-[10px]">{showRawInModal ? "閉じる" : "開いて表示"}</span>
+                        <ChevronDown
+                          className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                            showRawInModal ? "rotate-180" : ""
+                          }`}
+                        />
+                      </div>
+                    </button>
+                    {showRawInModal && (
+                      <div className="p-3 border-t border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 whitespace-pre-wrap break-words max-h-80 overflow-y-auto select-text leading-relaxed">
+                        {rawText || "（収集元の原文データ・スニペットは記録されていません）"}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex items-center space-x-1.5 text-slate-400">
-                    <span className="text-[10px]">{showRawInModal ? "閉じる" : "開いて表示"}</span>
-                    <ChevronDown
-                      className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                        showRawInModal ? "rotate-180" : ""
-                      }`}
-                    />
-                  </div>
-                </button>
-                {showRawInModal && (
-                  <div className="p-3 border-t border-slate-800 bg-slate-950 font-mono text-xs text-slate-300 whitespace-pre-wrap break-words max-h-80 overflow-y-auto select-text leading-relaxed">
-                    {selectedIncident.raw_content || selectedIncident.summary || "原文データなし"}
-                  </div>
-                )}
-              </div>
+                );
+              })()}
 
               {selectedIncident.enriched_parsed?.impact_analysis_ja && (
                 <div>

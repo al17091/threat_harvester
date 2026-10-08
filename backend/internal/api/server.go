@@ -92,6 +92,7 @@ func (s *Server) setupRoutes() {
 
 		r.Post("/pipeline/run", s.handleTriggerPipeline)
 		r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
+		r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
 		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
@@ -367,6 +368,23 @@ func (s *Server) handleBackfillIncidents(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func (s *Server) handleBackfillArticles(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		count, err := s.store.BackfillArticleContents(ctx, harvesters.FetchArticleContent)
+		if err != nil {
+			log.Printf("[Backfill] Manual article backfill error: %v", err)
+		} else {
+			log.Printf("[Backfill] Manual article backfill completed: %d enriched", count)
+		}
+	}()
+	jsonResponse(w, http.StatusAccepted, map[string]string{
+		"status":  "accepted",
+		"message": "Article content backfill started in background",
+	})
+}
+
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, config.GetSettings().ToSafeMap())
 }
@@ -638,6 +656,19 @@ func (s *Server) StartScheduler(ctx context.Context) {
 				s.nextPipeRunAt = &next
 				s.pipeMu.Unlock()
 			}
+		}
+	}()
+
+	// Asynchronously enrich existing items that lack full article body
+	go func() {
+		time.Sleep(2 * time.Second)
+		bCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		count, err := s.store.BackfillArticleContents(bCtx, harvesters.FetchArticleContent)
+		if err != nil {
+			log.Printf("[Backfill] Article content backfill encountered error: %v", err)
+		} else if count > 0 {
+			log.Printf("[Backfill] Successfully enriched %d articles with full original content", count)
 		}
 	}()
 }
