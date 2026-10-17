@@ -1,7 +1,7 @@
-# Task Tracker - Threat Information Harvester
+# Task Tracker - Threat Harvester
 
 ## Overview
-Status tracking and milestone roadmap for the **Threat Information Harvester** project.
+Status tracking and milestone roadmap for the **Threat Harvester** project.
 
 ---
 

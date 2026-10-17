@@ -1,4 +1,4 @@
-# Threat Information Harvester (Japan Cyber Threat Intelligence Feeds Collector)
+# Threat Harvester (Japan Cyber Threat Intelligence Feeds Collector)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go: 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)

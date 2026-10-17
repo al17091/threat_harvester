@@ -1,4 +1,4 @@
-# Contributing to Threat Information Harvester
+# Contributing to Threat Harvester
 
 We welcome contributions from the open-source community! Whether you are reporting bugs, proposing new threat intelligence sources, improving AI analysis prompts, or optimizing Kubernetes Helm charts, your help is appreciated.
 

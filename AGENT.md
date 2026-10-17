@@ -1,6 +1,6 @@
 # AGENT.md - AI Agent & Developer Guidelines
 
-Guidelines, constraints, and operational protocols for AI coding assistants and contributors working on **Threat Information Harvester**.
+Guidelines, constraints, and operational protocols for AI coding assistants and contributors working on **Threat Harvester**.
 
 ---
 
@@ -41,7 +41,7 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 
 ### 2.2 Mandatory Signature
 - **Always sign commits**: `git commit -S -m "..."`.
-- The user's SSH signing key (`git@engineerlab.jp`) is configured in the environment (`commit.gpgsign=true`).
+- The user's SSH signing key is configured in the environment (`commit.gpgsign=true`).
 - **Never** use `--no-gpg-sign` or bypass commit signing.
 
 ---
