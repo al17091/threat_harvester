@@ -1,0 +1,76 @@
+{{- $api := .Values.api | default .Values.backend -}}
+{{- if $api.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-api
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ $api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: api
+          image: "{{ $api.image.repository | default .Values.image.repository }}:{{ $api.image.tag | default (printf "api-%s" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ $api.image.pullPolicy | default .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $api.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ $api.port | quote }}
+            {{- if .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: uri
+            {{- else if and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threat-harvester.fullname" . }}-db-app
+                  key: uri
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "threat-harvester.fullname" . }}-config
+            - secretRef:
+                name: {{ include "threat-harvester.secretName" . }}
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          {{- end }}
+          resources:
+            {{- toYaml $api.resources | nindent 12 }}
+      {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "threat-harvester.fullname" . }}-data
+      {{- end }}
+{{- end }}

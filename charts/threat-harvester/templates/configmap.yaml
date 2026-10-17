@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "threat-harvester.labels" . | nindent 4 }}
 data:
-  PORT: {{ .Values.backend.port | default 8000 | quote }}
+  PORT: {{ ((.Values.api | default dict).port) | default ((.Values.backend | default dict).port) | default 8000 | quote }}
   COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
   AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "openai_compatible" | quote }}
   LITELLM_ENDPOINT: {{ .Values.config.litellmEndpoint | default "https://litellm.lab.internal/v1/chat/completions" | quote }}

@@ -1,10 +1,10 @@
 # Default values for threat-harvester.
 
-# Base repository & version (shared across backend, web, and cronjob)
+# Base repository & version (shared across api, worker, web, and cronjob)
 image:
   repository: ghcr.io/al17091/threat_harvester
   version: "0.1.0"
-  tag: "backend-0.1.0"
+  tag: "api-0.1.0"
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
@@ -16,18 +16,35 @@ devImage:
 nameOverride: ""
 fullnameOverride: ""
 
-# Go CTI Backend Service & Deployment
-backend:
+# Go CTI Engine & REST API Service & Deployment
+api:
   enabled: true
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "backend-0.1.0"
+    tag: "api-0.1.0"
     pullPolicy: IfNotPresent
   port: 8000
   service:
     type: ClusterIP
     port: 8000
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Python Threat Harvester & Batch Worker Deployment
+worker:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/al17091/threat_harvester
+    tag: "worker-0.1.0"
+    pullPolicy: IfNotPresent
+  mode: "batch"  # "batch" or "api"
   resources:
     limits:
       cpu: 1000m
@@ -114,13 +131,16 @@ config:
   requestTimeout: 25
 
 # Standalone scheduled harvester CronJob
-# Note: When backend.enabled is true, the Go backend runs its own internal scheduler and async scraper.
 cronjob:
   enabled: false
   schedule: "0 * * * *"  # Run hourly
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   concurrencyPolicy: Forbid
+  image:
+    repository: ghcr.io/al17091/threat_harvester
+    tag: "worker-0.1.0"
+    pullPolicy: IfNotPresent
   resources:
     limits:
       cpu: 1000m

@@ -32,7 +32,7 @@ spec:
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: BACKEND_URL
-              value: "http://{{ include "threat-harvester.fullname" . }}-backend:{{ .Values.backend.service.port }}"
+              value: "http://{{ include "threat-harvester.fullname" . }}-api:{{ (index (.Values.api | default dict) "service" | default dict).port | default (index (.Values.backend | default dict) "service" | default dict).port | default 8000 }}"
             - name: BASE_PATH
               value: {{ .Values.dashboard.basePath | default "/thhv" | quote }}
           envFrom:

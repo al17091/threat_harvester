@@ -3,11 +3,11 @@ FROM golang:alpine AS builder
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates tzdata
 
-COPY backend/go.mod backend/go.sum ./backend/
-WORKDIR /app/backend
+COPY api/go.mod api/go.sum ./api/
+WORKDIR /app/api
 RUN go mod download
 
-COPY backend/ /app/backend/
+COPY api/ /app/api/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/harvester ./cmd/harvester
 
 FROM alpine:3.20
