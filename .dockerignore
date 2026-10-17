@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Local configuration & secrets (never bake into images)
+config.yaml
+.env
+*.local
+secrets/
+*.key
+
+# Persistent data & logs
+data/
+*.sqlite3
+*.db
+*.log
+
+# Python virtualenvs & caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node.js build artifacts
+web/node_modules/
+web/.next/
+web/out/
+*.tsbuildinfo
+
+# Local compiled binaries
+bin/information-harvester
+*.exe
+*.test
+
+# IDE
+.idea/
+.vscode/
+.DS_Store

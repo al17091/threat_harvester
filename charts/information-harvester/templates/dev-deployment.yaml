@@ -23,6 +23,22 @@ spec:
           image: "{{ .Values.devImage.repository }}:{{ .Values.devImage.tag }}"
           imagePullPolicy: {{ .Values.devImage.pullPolicy }}
           command: ["sleep", "infinity"]
+          {{- if or .Values.database.existingSecret (and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled) }}
+          env:
+            {{- if .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: uri
+            {{- else if and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "information-harvester.fullname" . }}-db-app
+                  key: uri
+            {{- end }}
+          {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "information-harvester.fullname" . }}-config

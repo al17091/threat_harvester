@@ -22,9 +22,9 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: harvester
-              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-              imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: ["python", "app.py"]
+              image: "{{ .Values.backend.image.repository | default .Values.image.repository }}:{{ .Values.backend.image.tag | default (printf "backend-%s" .Chart.AppVersion) }}"
+              imagePullPolicy: {{ .Values.backend.image.pullPolicy | default .Values.image.pullPolicy }}
+              command: ["harvester", "run"]
               env:
                 - name: MODE
                   value: "batch"

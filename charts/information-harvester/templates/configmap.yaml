@@ -5,8 +5,13 @@ metadata:
   labels:
     {{- include "information-harvester.labels" . | nindent 4 }}
 data:
-  PORT: "8080"
-  GEMINI_MODEL: {{ .Values.config.geminiModel | quote }}
+  PORT: {{ .Values.backend.port | default 8000 | quote }}
+  COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
+  AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "openai_compatible" | quote }}
+  LITELLM_ENDPOINT: {{ .Values.config.litellmEndpoint | default "https://litellm.lab.internal/v1/chat/completions" | quote }}
+  LITELLM_MODEL: {{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" | quote }}
+  GEMINI_MODEL: {{ .Values.config.geminiModel | default "gemini-3.5-flash-lite" | quote }}
+  SEARXNG_URL: {{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" | quote }}
   CHECK_INTERVAL_HOURS: {{ .Values.config.checkIntervalHours | quote }}
   NOTIFY_DIRECT_ONLY: {{ .Values.config.notifyDirectOnly | quote }}
   REQUEST_TIMEOUT: {{ .Values.config.requestTimeout | quote }}

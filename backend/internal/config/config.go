@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -285,7 +286,33 @@ func DefaultConfig() AppConfig {
 			SQLitePath: "data/threat_cache.db",
 		},
 		AI: AiConfig{
-			GeminiModel: "gemini-3.5-flash-lite",
+			PrimaryProvider:    "openai_compatible",
+			Endpoint:           "https://litellm.lab.internal/v1/chat/completions",
+			Model:              "qwen2.5-3b-instruct",
+			Temperature:        0.1,
+			InsecureSkipVerify: true,
+			TimeoutSeconds:     60,
+			GeminiModel:        "gemini-3.5-flash-lite",
+			Escalation: EscalationConfig{
+				Enabled:              true,
+				GeminiModel:          "gemini-3.5-flash-lite",
+				MaxLocalContentRunes: 6000,
+				TriggerSeverities:    []string{"Critical"},
+				TriggerJapanDirect:   true,
+			},
+		},
+		Scraper: ScraperConfig{
+			Enabled:                true,
+			ClearnetEnabled:        true,
+			TorEnabled:             true,
+			ClearnetConcurrency:    5,
+			TorConcurrency:         2,
+			ClearnetTimeoutSeconds: 15,
+			TorTimeoutSeconds:      45,
+			WorkerIntervalSeconds:  10,
+			BatchSize:              20,
+			MaxAttempts:            2,
+			AutoReAnalyze:          false,
 		},
 		Network: NetworkConfig{
 			TorProxyURL:    "socks5h://127.0.0.1:9050",
@@ -379,11 +406,52 @@ func (s *SettingsManager) Reload(path string) error {
 }
 
 func (s *SettingsManager) applyEnvOverrides() {
+	if v := os.Getenv("AI_PRIMARY_PROVIDER"); v != "" {
+		s.Config.AI.PrimaryProvider = v
+	}
+	if v := os.Getenv("LITELLM_ENDPOINT"); v != "" {
+		s.Config.AI.Endpoint = v
+	}
+	if v := os.Getenv("LITELLM_MODEL"); v != "" {
+		s.Config.AI.Model = v
+	}
+	if v := os.Getenv("AI_API_KEY"); v != "" {
+		s.Config.AI.APIKey = v
+	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		s.Config.AI.GeminiAPIKey = v
+		if s.Config.AI.Escalation.GeminiAPIKey == "" {
+			s.Config.AI.Escalation.GeminiAPIKey = v
+		}
 	}
 	if v := os.Getenv("GEMINI_MODEL"); v != "" {
 		s.Config.AI.GeminiModel = v
+		if s.Config.AI.Escalation.GeminiModel == "" {
+			s.Config.AI.Escalation.GeminiModel = v
+		}
+	}
+	if v := os.Getenv("DB_TYPE"); v != "" {
+		s.Config.Database.Type = v
+	}
+	if v := os.Getenv("DB_HOST"); v != "" {
+		s.Config.Database.Host = v
+	}
+	if v := os.Getenv("DB_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			s.Config.Database.Port = p
+		}
+	}
+	if v := os.Getenv("DB_NAME"); v != "" {
+		s.Config.Database.Name = v
+	}
+	if v := os.Getenv("DB_USER"); v != "" {
+		s.Config.Database.User = v
+	}
+	if v := os.Getenv("DB_PASSWORD"); v != "" {
+		s.Config.Database.Password = v
+	}
+	if v := os.Getenv("DB_SSLMODE"); v != "" {
+		s.Config.Database.SSLMode = v
 	}
 	if v := os.Getenv("DATABASE_URL"); v != "" {
 		s.Config.Database.URL = v
@@ -410,6 +478,19 @@ func (s *SettingsManager) applyEnvOverrides() {
 	}
 	if v := os.Getenv("TOR_PROXY_URL"); v != "" {
 		s.Config.Network.TorProxyURL = v
+	}
+	if v := os.Getenv("REQUEST_TIMEOUT"); v != "" {
+		if t, err := strconv.Atoi(v); err == nil && t > 0 {
+			s.Config.Network.RequestTimeout = t
+		}
+	}
+	if v := os.Getenv("CHECK_INTERVAL_HOURS"); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+			s.Config.Pipeline.CheckIntervalHours = h
+		}
+	}
+	if v := os.Getenv("NOTIFY_DIRECT_ONLY"); v != "" {
+		s.Config.Pipeline.NotifyDirectOnly = strings.EqualFold(v, "true") || v == "1"
 	}
 	if v := os.Getenv("CACHE_DB_PATH"); v != "" {
 		s.Config.Database.SQLitePath = v

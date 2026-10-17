@@ -11,10 +11,10 @@ RUN apk add --no-cache \
 WORKDIR /app
 
 COPY . /app/
-RUN chmod +x /app/bin/harvester /app/docker/entrypoint-dev.sh && \
-    ln -sf /app/bin/harvester /usr/local/bin/harvester
+RUN cp /app/config.example.yaml /app/config.yaml && \
+    chmod +x /app/scripts/harvester.sh && \
+    ln -sf /app/scripts/harvester.sh /usr/local/bin/harvester
 
 ENV PORT=8000
 
-ENTRYPOINT ["/app/docker/entrypoint-dev.sh"]
 CMD ["bash"]

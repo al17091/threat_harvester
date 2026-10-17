@@ -1,28 +1,53 @@
 # Default values for information-harvester.
 
-# Production image for Web Dashboard and Batch runner
+# Base repository & version (shared across backend, web, and cronjob)
 image:
-  repository: ghcr.io/dapt/information_harvester
-  tag: latest
+  repository: ghcr.io/al17091/information_harvester
+  version: "0.1.0"
+  tag: "backend-0.1.0"
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
 devImage:
-  repository: ghcr.io/dapt/information_harvester
-  tag: dev
+  repository: ghcr.io/al17091/information_harvester
+  tag: "dev-0.1.0"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
 fullnameOverride: ""
 
-# Web Dashboard Service & Deployment
+# Go CTI Backend Service & Deployment
+backend:
+  enabled: true
+  replicas: 1
+  image:
+    repository: ghcr.io/al17091/information_harvester
+    tag: "backend-0.1.0"
+    pullPolicy: IfNotPresent
+  port: 8000
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Next.js Cyber SOC Web Dashboard Service & Deployment
 dashboard:
   enabled: true
   replicas: 1
-  port: 8080
+  image:
+    repository: ghcr.io/al17091/information_harvester
+    tag: "web-0.1.0"
+    pullPolicy: IfNotPresent
+  port: 3000
   service:
     type: ClusterIP
-    port: 8080
+    port: 3000
   ingress:
     enabled: false
     className: ""
@@ -66,6 +91,8 @@ secrets:
   # Existing secret name if managed externally (e.g. sealed-secrets / vault)
   existingSecret: ""
   # Or provide values directly here
+  adminPassword: "harvester2026"
+  aiApiKey: ""
   geminiApiKey: ""
   discordWebhookUrl: ""
   slackWebhookUrl: ""
@@ -75,14 +102,20 @@ secrets:
 
 # General application configuration
 config:
-  geminiModel: "gemini-2.5-flash"
+  complianceMode: "all"
+  aiPrimaryProvider: "openai_compatible"
+  litellmEndpoint: "https://litellm.lab.internal/v1/chat/completions"
+  litellmModel: "qwen2.5-3b-instruct"
+  geminiModel: "gemini-3.5-flash-lite"
+  searxngUrl: "https://searxng.lab.internal/search"
   checkIntervalHours: 1
   notifyDirectOnly: false
   requestTimeout: 25
 
-# Scheduled harvester CronJob
+# Standalone scheduled harvester CronJob
+# Note: When backend.enabled is true, the Go backend runs its own internal scheduler and async scraper.
 cronjob:
-  enabled: true
+  enabled: false
   schedule: "0 * * * *"  # Run hourly
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

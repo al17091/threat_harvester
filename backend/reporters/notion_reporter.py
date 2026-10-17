@@ -13,8 +13,8 @@ class NotionReporter:
     """Publishes enriched threat intelligence items to a Notion Database."""
 
     def __init__(self, api_key: str | None = None, database_id: str | None = None):
-        self.api_key = api_key or settings.notion_api_key
-        self.database_id = database_id or settings.notion_database_id
+        self.api_key = api_key if api_key is not None else settings.notion_api_key
+        self.database_id = database_id if database_id is not None else settings.notion_database_id
 
     @property
     def is_configured(self) -> bool:

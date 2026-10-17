@@ -1,39 +1,41 @@
 # Threat Information Harvester (Japan Cyber Threat Intelligence Feeds Collector)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python: 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Go: 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)
 [![Next.js: 14+](https://img.shields.io/badge/Next.js-14+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/information-harvester)
 
-Automated Cyber Threat Intelligence (CTI) collection, AI analysis, SOC Dashboard, and notification platform focusing on **Japan-targeted threats and domestic incidents**.
+Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLLM Qwen2.5-3B + Gemini Escalation), Cyber SOC Dashboard, and notification platform focusing on **Japan-targeted threats and domestic incidents**.
 
 ---
 
 ## 1. Architecture & Services
 
-The platform consists of a decoupled microservice architecture:
-- **Web Dashboard (`web/`)**: Next.js 14 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (Port 3000).
-- **Backend Service (`backend/`)**: FastAPI asynchronous CTI Engine, Gemini AI analyzer, and threat collectors (Port 8000).
-- **Database Engine**: PostgreSQL 16 (CNPG on k3s / container) with SQLite fallback.
-- **Tor SOCKS5 Proxy**: Alpine-based in-cluster/container Tor daemon for dark web (.onion) reachability.
+The platform consists of a decoupled microservice architecture (orchestrated via Docker Compose or Helm using `ghcr.io/al17091/information_harvester`):
+- **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 14 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja`, `/admin` on Port 3000).
+- **Backend CTI Engine (`backend/`, tag `backend-<version>`)**: High-performance Go 1.22+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and concurrent threat collectors (Port 8000).
+- **Database Engine**: PostgreSQL 16 (CloudNativePG on k3s / container) with pure-Go SQLite fallback.
+- **Tor SOCKS5 Proxy**: External or in-cluster Tor SOCKS5h proxy for dark web (`.onion`) reachability.
 
 | Intelligence Source | Collection Method | Cost & Footprint |
 | :--- | :--- | :--- |
-| **Web Search Grounding** | Gemini API (`google-genai` SDK) Grounded Search | Free / Included in Gemini quota |
-| **Dark Web (.onion)** | Tor SOCKS5 proxy crawler monitoring ransomware DLS | Free (via Tor proxy service) |
-| **Telegram Channels** | Public web preview scraper (`t.me/s/<channel>`) | Free (no API key or phone required) |
-| **X (Twitter) Feeds** | Grounded researcher feed monitoring | Low cost (no Enterprise X API required) |
-| **Vendor & CERT Feeds** | JPCERT/CC, IPA, BleepingComputer, CISA, etc. | Free & highly reliable |
+| **SearXNG Cross-Search** | Metasearch across Ahmia, Torch (.onion), and Clearnet News/Web | Free (Self-hosted SearXNG JSON API) |
+| **Web Search Grounding** | Gemini API (`gemini-3.5-flash-lite`) Grounded Search (4h throttled) | Low cost / Included in Gemini quota |
+| **Dark Web (.onion)** | Tor SOCKS5h proxy crawler & Ahmia search monitoring ransomware DLS | Free (via Tor proxy service) |
+| **Ransomware Trackers** | Ransomlook API & RansomFeed RSS tracking global/domestic victims | Free & real-time |
+| **Telegram Channels** | Public web preview scraper (`t.me/s/<channel>`) + recursive link scraper | Free (no API key or phone required) |
+| **X (Twitter) Feeds** | Grounded researcher & domestic security feed monitoring | Low cost (no Enterprise X API required) |
+| **Vendor & CERT Feeds** | JPCERT/CC, IPA, ScanNetSecurity, Security Next, CISA KEV, BleepingComputer | Free & highly reliable |
 
 ---
 
-## 2. Quickstart with Docker Compose (Recommended)
+## 2. Quickstart with Docker Compose
 
-Run the entire stack (Next.js Dashboard, FastAPI Backend, PostgreSQL DB, and Tor Proxy) with a single command:
+Run the stack (Next.js Dashboard, Go Backend, and PostgreSQL DB) with a single command:
 
 ```bash
-# 1. Clone repository & configure environment variables (optional)
+# 1. Configure environment variables
 cp .env.example .env
 
 # 2. Start all services with Docker Compose
@@ -42,66 +44,56 @@ docker compose up -d --build
 # 3. Access Web Dashboard
 open http://localhost:3000
 
-# 4. Access Backend API & OpenAPI Docs
-open http://localhost:8000/docs
+# 4. Access Backend API Status & RSS Feed
+open http://localhost:3000/api/status
+open http://localhost:3000/rss
 ```
-
-Services started:
-- **Next.js Web Dashboard**: `http://localhost:3000`
-- **FastAPI Backend API**: `http://localhost:8000`
-- **PostgreSQL Database**: `localhost:5433` (internal `db:5432`)
-- **Tor SOCKS5 Proxy**: `localhost:9050` (internal `tor:9050`)
 
 ---
 
-## 3. Local Development
+## 3. Container Image Build & Release Workflow (GHCR)
 
-### Backend (Python)
+Images are published to `ghcr.io/al17091/information_harvester` using Semantic Versioning (`VERSION` file) via GitHub Actions ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)):
+- **`main` branch / release tag (`v0.1.0`)**:
+  - `ghcr.io/al17091/information_harvester:backend-0.1.0`
+  - `ghcr.io/al17091/information_harvester:web-0.1.0`
+- **`develop` branch (automatic `-preview` suffix)**:
+  - `ghcr.io/al17091/information_harvester:backend-0.0.5-preview`
+  - `ghcr.io/al17091/information_harvester:web-0.0.5-preview`
+
+You can also build and push manually using [`scripts/build_and_push.sh`](scripts/build_and_push.sh):
+
 ```bash
-# Install virtualenv requirements
-pip install -r requirements.txt
+# Build & push using VERSION file (auto-appends -preview on develop branch)
+./scripts/build_and_push.sh al17091
 
-# Start API service
-python app.py
-# or
-harvester serve --port 8000
-```
-
-### Web Dashboard (Next.js)
-```bash
-cd web
-npm install
-npm run dev
-# Dashboard runs on http://localhost:3000
+# Specify explicit SemVer version
+./scripts/build_and_push.sh al17091 0.1.0 all
+./scripts/build_and_push.sh al17091 0.0.5-preview all
 ```
 
 ---
 
 ## 4. CLI Operations (`harvester`)
 
-The `harvester` CLI tool is available directly in the local environment and inside containers:
+The `harvester` CLI tool is available via `./scripts/harvester.sh` locally and as `harvester` inside containers:
 
 ```bash
-# System status & probes
+# System status & database statistics
 harvester status
 
-# Execute harvesting pipeline across all sources
-harvester run --hours 24
-harvester run --hours 24 --direct-only
+# Execute a single harvesting & enrichment cycle
+harvester run
+harvester run --lookback 24 --direct-only
 
-# Test individual collector modules
-harvester test --source vendor
-harvester test --source telegram
-harvester test --source web
-
-# Search threats with Gemini Search Grounding
-harvester search "Japan targeted ransomware breach"
+# Start continuous cron loop
+harvester cron
 
 # Inspect harvested incidents
-harvester history
+harvester history --limit 20 --japan-only
 harvester show <ID>
 
-# Test notification sinks
+# Test notification & Notion sinks
 harvester test-notify
 harvester test-notion
 ```
@@ -110,14 +102,17 @@ harvester test-notion
 
 ## 5. Kubernetes & k3s (CloudNativePG) Deployment
 
-Deploy to Kubernetes / k3s using Helm (`charts/information-harvester`):
+Deploy the separated `backend` (`backend-0.1.0`) and `dashboard` (`web-0.1.0`) services to Kubernetes / k3s using Helm (`charts/information-harvester`):
 
 ```bash
 helm upgrade --install information-harvester ./charts/information-harvester \
   --namespace security \
   --create-namespace \
+  --set backend.image.tag="backend-0.1.0" \
+  --set dashboard.image.tag="web-0.1.0" \
   --set database.type="postgres" \
   --set database.existingSecret="information-harvester-db-app" \
+  --set secrets.adminPassword="YOUR_ADMIN_PASSWORD" \
   --set secrets.geminiApiKey="YOUR_GEMINI_API_KEY" \
   --set secrets.discordWebhookUrl="YOUR_DISCORD_WEBHOOK_URL"
 ```

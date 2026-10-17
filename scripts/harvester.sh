@@ -2,9 +2,9 @@
 # Unified CLI wrapper for Threat Information Harvester (Containerized Go build & execution)
 set -eo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${DIR}/.." && pwd)"
-BIN="${DIR}/information-harvester"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BIN="${ROOT_DIR}/bin/information-harvester"
 
 # Load local environment variables if .env exists
 if [ -f "${ROOT_DIR}/.env" ]; then
@@ -15,6 +15,7 @@ if [ -f "${ROOT_DIR}/.env" ]; then
 fi
 
 build_container() {
+    mkdir -p "${ROOT_DIR}/bin"
     echo "==> Building information-harvester inside Docker container (golang:alpine)..." >&2
     docker run --rm \
         -u "$(id -u):$(id -g)" \
@@ -63,4 +64,3 @@ case "$1" in
         exec "$BIN" "$@"
         ;;
 esac
-

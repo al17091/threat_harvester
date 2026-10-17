@@ -15,7 +15,11 @@ def test_root_endpoint():
     assert "Threat Information Harvester API" in data["service"]
 
 
-def test_api_status():
+def test_api_status(tmp_path, monkeypatch):
+    db_file = str(tmp_path / "status_test.db")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("DB_HOST", "")
+    monkeypatch.setenv("CACHE_DB_PATH", db_file)
     response = client.get("/api/status")
     assert response.status_code == 200
     data = response.json()
@@ -27,6 +31,8 @@ def test_api_status():
 
 def test_api_incidents(tmp_path, monkeypatch):
     db_file = str(tmp_path / "web_test.db")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("DB_HOST", "")
     monkeypatch.setenv("CACHE_DB_PATH", db_file)
 
     cache = ThreatCache(db_path=db_file)

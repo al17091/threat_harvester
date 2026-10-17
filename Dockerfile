@@ -17,7 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /app/harvester /usr/local/bin/harvester
 COPY --from=builder /app/harvester /app/harvester
-COPY config.example.yaml config.yaml ./
+COPY config.example.yaml /app/config.example.yaml
+COPY config.example.yaml /app/config.yaml
 
 ENV PORT=8000
 EXPOSE 8000
