@@ -142,6 +142,47 @@ func TestRansomwareTrackerHarvester(t *testing.T) {
 	if items[0].SourceType != models.SourceTypeRansomwareTracker {
 		t.Errorf("expected SourceTypeRansomwareTracker, got %s", items[0].SourceType)
 	}
+
+	// Harvest RSS target
+	rssFeed := `<?xml version="1.0" encoding="utf-8"?>
+	<rss version="2.0">
+	<channel>
+		<title>RansomFeed Aggregator</title>
+		<item>
+			<title>[LockBit] Target Organization Data Published</title>
+			<link>https://ransomfeed.test/post/1</link>
+			<description>Victim: Target Organization</description>
+			<pubDate>` + time.Now().UTC().Format(time.RFC1123) + `</pubDate>
+		</item>
+	</channel>
+	</rss>`
+
+	h.client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(rssFeed)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	cfg.Sources.RansomwareTracker = []config.RansomwareSourceConfig{
+		{
+			Name:           "Test Ransomware RSS",
+			URL:            "https://ransomfeed.test/news.rss",
+			Type:           "rss",
+			Enabled:        true,
+			ComplianceTier: config.TierCommercialViaOfficialAPI,
+		},
+	}
+	config.GetSettings().SetConfig(cfg)
+
+	rssItems, err := h.Harvest(ctx, nil)
+	if err != nil || len(rssItems) != 1 {
+		t.Fatalf("expected 1 RSS item, got %d, err: %v", len(rssItems), err)
+	}
+	if rssItems[0].SourceType != models.SourceTypeRansomwareTracker {
+		t.Errorf("expected SourceTypeRansomwareTracker, got %s", rssItems[0].SourceType)
+	}
 }
 
 func TestVendorRSSHarvester(t *testing.T) {
@@ -260,6 +301,49 @@ func TestXMonitorHarvester(t *testing.T) {
 
 	if !h.TestConnection(ctx) {
 		t.Errorf("expected TestConnection to succeed with API key")
+	}
+
+	geminiJSON := `{
+		"candidates": [
+			{
+				"content": {
+					"parts": [
+						{
+							"text": "[{\"title\": \"Critical breach alert on X\", \"url\": \"https://x.com/researcher/status/12345\", \"summary\": \"Data breach disclosed\", \"published_date\": \"2026-10-15\"}]"
+						}
+					]
+				},
+				"groundingMetadata": {
+					"groundingChunks": [
+						{
+							"web": {
+								"uri": "https://x.com/researcher/status/12345",
+								"title": "Critical breach alert on X"
+							}
+						}
+					]
+				}
+			}
+		]
+	}`
+
+	h.client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(geminiJSON)),
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	items, err := h.Harvest(ctx, nil)
+	if err != nil {
+		t.Fatalf("h.Harvest failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 grounded X item, got %d", len(items))
+	}
+	if items[0].Title != "Critical breach alert on X" {
+		t.Errorf("expected title 'Critical breach alert on X', got: %s", items[0].Title)
 	}
 }
 
@@ -407,4 +491,30 @@ func TestDarkwebHarvester_BasicAndSearch(t *testing.T) {
 		t.Errorf("expected .onion URL, got %s", items[0].URL)
 	}
 }
+
+func TestHarvesterTestConnections(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. WebSearchHarvester TestConnection with Gemini API key
+	origCfg := config.GetSettings().GetConfig()
+	defer config.GetSettings().SetConfig(origCfg)
+
+	cfg := origCfg
+	cfg.AI.GeminiAPIKey = "test-key"
+	config.GetSettings().SetConfig(cfg)
+
+	wsh := NewWebSearchHarvester()
+	if !wsh.TestConnection(ctx) {
+		t.Errorf("expected WebSearchHarvester.TestConnection to return true when API key is set")
+	}
+
+	// 2. DarkwebOnionHarvester TestConnection with canceled context
+	dwh := NewDarkwebOnionHarvester()
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if dwh.TestConnection(canceledCtx) {
+		t.Errorf("expected DarkwebOnionHarvester.TestConnection to return false for canceled context")
+	}
+}
+
 

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 from worker.models import EnrichedThreat, JapanRelevance, Severity, SourceType, ThreatItem
 from worker.notifiers import NotificationManager
+from worker.notifiers.discord import DiscordNotifier
 from worker.notifiers.generic_webhook import GenericWebhookNotifier
 from worker.notifiers.slack import SlackNotifier
 
@@ -65,3 +66,22 @@ def test_notification_manager(monkeypatch):
     assert manager.dispatch(threat) is True
     discord.notify.assert_called_once_with(threat)
     slack.notify.assert_called_once_with(threat)
+
+
+def test_discord_notifier(monkeypatch):
+    # 1. Dry run (no webhook url)
+    notifier_dry = DiscordNotifier(webhook_url="")
+    threat = _make_threat()
+    assert notifier_dry.notify(threat) is True
+
+    # 2. Live webhook
+    notifier = DiscordNotifier(webhook_url="https://discord.com/api/webhooks/test")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 204
+    monkeypatch.setattr("requests.post", lambda url, json, timeout: mock_resp)
+    assert notifier.notify(threat) is True
+
+    # 3. Webhook error handling
+    mock_resp.status_code = 500
+    assert notifier.notify(threat) is False
+

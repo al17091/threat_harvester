@@ -115,7 +115,7 @@ func TestOpenAICompatibleAnalyzer_LifecycleAndMethods(t *testing.T) {
 	item := models.ThreatItem{
 		ID:         "test-item-1",
 		Title:      "Suspicious Activity Detected",
-		RawContent: "A severe ransomware incident affected Target Org via VPN Gateway.",
+		RawContent: "A severe ransomware incident attributed to Lazarus affected Target Org via VPN Gateway.",
 		Metadata:   map[string]interface{}{"source": "threat_intel"},
 	}
 	enriched, err := analyzer.Analyze(ctx, item)

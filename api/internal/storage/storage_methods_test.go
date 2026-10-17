@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -307,6 +308,144 @@ func TestBackfillOperations(t *testing.T) {
 	}
 	if clusteredCount < 1 {
 		t.Errorf("Expected at least 1 incident created during backfill, got %d", clusteredCount)
+	}
+}
+
+func TestBuildIncidentActorReasons(t *testing.T) {
+	// 1. Empty cleanActors
+	rEn, rJa := buildIncidentActorReasons(&models.Incident{}, nil)
+	if len(rEn) != 0 || len(rJa) != 0 {
+		t.Errorf("expected empty maps, got %v, %v", rEn, rJa)
+	}
+
+	inc := &models.Incident{
+		Title:      "Incident title mentioning Lazarus Group",
+		TitleJa:    "日本語タイトル APT29 を含む",
+		RawContent: "Full article body reporting that Volt Typhoon was detected",
+		Summary:    "Summary text mentioning FIN7 financial threat",
+		SourcesDetail: []models.SourceDetail{
+			{Name: "CISA Alert", Title: "Advisory on BlackCat ransomware operations"},
+		},
+	}
+
+	actors := []string{"BlackCat", "Lazarus Group", "APT29", "Volt Typhoon", "FIN7", "UnknownActor"}
+	reasonsEn, reasonsJa := buildIncidentActorReasons(inc, actors)
+
+	if len(reasonsEn) != 6 {
+		t.Fatalf("expected 6 reasons, got %d", len(reasonsEn))
+	}
+	if reasonsEn["BlackCat"] == "" || reasonsJa["BlackCat"] == "" {
+		t.Errorf("expected reason for BlackCat from SourceDetail")
+	}
+	if reasonsEn["Lazarus Group"] == "" || reasonsJa["Lazarus Group"] == "" {
+		t.Errorf("expected reason for Lazarus from Title")
+	}
+	if reasonsEn["APT29"] == "" || reasonsJa["APT29"] == "" {
+		t.Errorf("expected reason for APT29 from TitleJa")
+	}
+	if reasonsEn["Volt Typhoon"] == "" || reasonsJa["Volt Typhoon"] == "" {
+		t.Errorf("expected reason for Volt Typhoon from RawContent")
+	}
+	if reasonsEn["FIN7"] == "" || reasonsJa["FIN7"] == "" {
+		t.Errorf("expected reason for FIN7 from Summary")
+	}
+	if reasonsEn["UnknownActor"] == "" || reasonsJa["UnknownActor"] == "" {
+		t.Errorf("expected fallback reason for UnknownActor")
+	}
+}
+
+func TestCleanUngroundedIncidentThreatActors(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	sqlStore := store.(*SQLStore)
+	ctx := context.Background()
+
+	// Insert an incident with an ungrounded threat actor directly into DB
+	_, err = sqlStore.db.ExecContext(ctx, `
+		INSERT INTO incidents (
+			id, title, raw_content, summary_ja, sources_detail, threat_actors, severity, japan_relevance, attack_type, victim_org, first_seen_at, last_seen_at, created_at, updated_at
+		) VALUES (
+			'inc-ungrounded-1', 'Routine system maintenance', 'No threats mentioned in content', 'Summary text', '[]', '["FakeHallucinatedActor"]', 'Low', 'Indirect', 'Unknown', 'Test Victim', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert test incident: %v", err)
+	}
+
+	// Also insert an incident with valid JSON array of grounded actor
+	_, err = sqlStore.db.ExecContext(ctx, `
+		INSERT INTO incidents (
+			id, title, raw_content, summary_ja, sources_detail, threat_actors, severity, japan_relevance, attack_type, victim_org, first_seen_at, last_seen_at, created_at, updated_at
+		) VALUES (
+			'inc-grounded-1', 'Incident mentioning Lazarus', 'Content about Lazarus group', 'Summary', '[]', '["Lazarus"]', 'High', 'Direct', 'Ransomware', 'Test Victim', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert test incident: %v", err)
+	}
+
+	// Run sanitization
+	sqlStore.cleanUngroundedIncidentThreatActors()
+
+	// Verify ungrounded actor was removed
+	var ungroundedActors string
+	err = sqlStore.db.QueryRowContext(ctx, "SELECT threat_actors FROM incidents WHERE id = 'inc-ungrounded-1'").Scan(&ungroundedActors)
+	if err != nil {
+		t.Fatalf("failed to query cleaned incident: %v", err)
+	}
+	if ungroundedActors != "[]" {
+		t.Errorf("expected empty actors '[]', got: %s", ungroundedActors)
+	}
+
+	// Verify grounded actor was preserved
+	var groundedActors string
+	err = sqlStore.db.QueryRowContext(ctx, "SELECT threat_actors FROM incidents WHERE id = 'inc-grounded-1'").Scan(&groundedActors)
+	if err != nil {
+		t.Fatalf("failed to query grounded incident: %v", err)
+	}
+	if !strings.Contains(groundedActors, "Lazarus") {
+		t.Errorf("expected Lazarus preserved, got: %s", groundedActors)
+	}
+}
+
+func TestIncidentsFilterConditions(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	sqlStore := store.(*SQLStore)
+
+	// Test comprehensive HistoryFilter conditions
+	filter := HistoryFilter{
+		Severity:   string(models.SeverityCritical),
+		JapanOnly:  true,
+		Search:     "Healthcare",
+		SourceType: string(models.SourceTypeVendorRSS),
+		Limit:      10,
+		Offset:     0,
+	}
+
+	incidents, err := sqlStore.GetIncidents(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetIncidents failed: %v", err)
+	}
+	if len(incidents) != 0 {
+		t.Errorf("expected 0 incidents on empty DB, got %d", len(incidents))
+	}
+
+	total, err := sqlStore.GetIncidentsTotal(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetIncidentsTotal failed: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected total 0, got %d", total)
 	}
 }
 

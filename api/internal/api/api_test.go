@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,10 +12,55 @@ import (
 	"testing"
 	"time"
 
+	"github.com/al17091/threat_harvester/api/internal/analyzer"
 	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/models"
 	"github.com/al17091/threat_harvester/api/internal/storage"
 )
+
+type mockAPIAnalyzer struct{}
+
+func (m *mockAPIAnalyzer) Analyze(ctx context.Context, item models.ThreatItem) (*models.EnrichedThreat, error) {
+	return &models.EnrichedThreat{ItemID: item.ID, Title: item.Title, Severity: models.SeverityHigh}, nil
+}
+func (m *mockAPIAnalyzer) AnalyzeBatch(ctx context.Context, items []models.ThreatItem) ([]*models.EnrichedThreat, error) {
+	var res []*models.EnrichedThreat
+	for _, it := range items {
+		res = append(res, &models.EnrichedThreat{ItemID: it.ID, Title: it.Title, Severity: models.SeverityHigh})
+	}
+	return res, nil
+}
+func (m *mockAPIAnalyzer) GenerateSearchQueries(ctx context.Context, directive, targetDesc string, count int) ([]string, error) {
+	return []string{directive}, nil
+}
+func (m *mockAPIAnalyzer) TranslateIncident(ctx context.Context, input analyzer.IncidentTranslationInput) (*analyzer.IncidentTranslationOutput, error) {
+	return &analyzer.IncidentTranslationOutput{
+		ID: input.ID,
+		Title: "Translated " + input.Title,
+		Summary: "Translated summary",
+	}, nil
+}
+func (m *mockAPIAnalyzer) TranslateIncidentFields(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {
+	return "Translated " + title, "Translated summary", "Translated impact", actions, nil
+}
+func (m *mockAPIAnalyzer) TranslateFieldsToJapanese(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {
+	return title, summary, impact, actions, nil
+}
+func (m *mockAPIAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enriched *models.EnrichedThreat) error {
+	return nil
+}
+func (m *mockAPIAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	var res []analyzer.BatchTranslateResult
+	for _, it := range items {
+		res = append(res, analyzer.BatchTranslateResult{
+			ID: it.ID,
+			Title: "Translated " + it.Title,
+			Summary: "Translated " + it.Summary,
+		})
+	}
+	return res, nil
+}
+
 
 func TestAPIRoutes(t *testing.T) {
 	defer os.Remove("config.yaml")
@@ -332,6 +378,7 @@ func TestAPIPipelineAndUtilities(t *testing.T) {
 	defer store.Close()
 
 	srv := NewServer(store)
+	srv.pipeline.SetAnalyzer(&mockAPIAnalyzer{})
 
 	// 1. HEAD /
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
@@ -510,6 +557,7 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 	defer store.Close()
 
 	srv := NewServer(store)
+	srv.pipeline.SetAnalyzer(&mockAPIAnalyzer{})
 	ctx := context.Background()
 
 	// Insert test incident
@@ -695,5 +743,174 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 	}
 
 	_ = inc
+}
+
+func TestAPIServerExtended(t *testing.T) {
+	store, err := storage.NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	srv := NewServer(store)
+	srv.pipeline.SetAnalyzer(&mockAPIAnalyzer{})
+
+	// Seed test incident
+	item := models.ThreatItem{
+		ID:         "threat-ext-1",
+		Title:      "テストインシデント",
+		Summary:    "テストの要約内容",
+		RawContent: "LockBit targeted ターゲット企業",
+		SourceType: models.SourceTypeVendorRSS,
+		SourceName: "TestFeed",
+		URL:        "https://example.com/test-ext-1",
+	}
+	enriched := &models.EnrichedThreat{
+		ItemID:           "threat-ext-1",
+		Title:            "テストインシデント",
+		TitleJa:          "テストインシデント",
+		Summary:          "テストの要約内容",
+		SummaryJa:        "テストの要約内容",
+		ImpactAnalysis:   "影響大",
+		ImpactAnalysisJa: "影響大",
+		Severity:         models.SeverityHigh,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Ransomware",
+		ThreatActors:     []string{"LockBit"},
+		VictimOrgs:       []string{"ターゲット企業"},
+	}
+	inc, err := store.FindOrCreateIncident(context.Background(), item, enriched, 30)
+	if err != nil {
+		t.Fatalf("failed to create incident: %v", err)
+	}
+
+	// 1. GET /api/incidents/{id}
+	// Normal
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/incidents/%s", inc.ID), nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for existing incident, got %d", w.Code)
+	}
+
+	// With lang=ja
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/incidents/%s?lang=ja", inc.ID), nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for incident with lang=ja, got %d", w.Code)
+	}
+
+	// With lang=en
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/incidents/%s?lang=en", inc.ID), nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for incident with lang=en, got %d", w.Code)
+	}
+
+	// Non-existent incident
+	req = httptest.NewRequest(http.MethodGet, "/api/incidents/nonexistent-999", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for non-existent incident, got %d", w.Code)
+	}
+
+	// 2. POST /api/incidents/{id}/update
+	labelPayload := map[string]interface{}{
+		"threat_actors":   []string{"LockBit", "BlackCat"},
+		"severity":        "Critical",
+		"japan_relevance": "Direct",
+		"attack_type":     "Data Exfiltration",
+		"victim_org":      "Updated Org",
+	}
+	body, _ := json.Marshal(labelPayload)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/incidents/%s/update", inc.ID), bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on update labels, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Invalid body for update labels
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/incidents/%s/update", inc.ID), bytes.NewReader([]byte("NOT_JSON")))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on invalid JSON for update labels, got %d", w.Code)
+	}
+
+	// 3. POST /api/pipeline/translate-incidents & RunIncidentBatchTranslation
+	req = httptest.NewRequest(http.MethodPost, "/api/pipeline/translate-incidents", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on translate incidents endpoint, got %d", w.Code)
+	}
+	translated := srv.RunIncidentBatchTranslation(context.Background(), 10)
+	if translated == 0 {
+		t.Logf("RunIncidentBatchTranslation translated %d items", translated)
+	}
+
+	// 4. POST /api/pipeline/backfill-articles and /api/pipeline/backfill-incidents
+	req = httptest.NewRequest(http.MethodPost, "/api/pipeline/backfill-articles", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Errorf("expected 202 on backfill articles, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/pipeline/backfill-incidents", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on backfill incidents, got %d", w.Code)
+	}
+
+	// 5. POST /api/ai/generate-queries
+	qPayload := map[string]interface{}{
+		"directive":   "ransomware attacks",
+		"source_type": "vendor_rss",
+		"count":       2,
+	}
+	body, _ = json.Marshal(qPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/ai/generate-queries", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on generate queries, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// 6. Source management extra actions & compliance
+	tierPayload := map[string]interface{}{
+		"action":     "toggle_tier",
+		"identifier": config.TierDarkwebAccess,
+		"enabled":    false,
+	}
+	body, _ = json.Marshal(tierPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on toggle tier, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// Update compliance
+	compPayload := map[string]interface{}{
+		"mode": "strict",
+	}
+	body, _ = json.Marshal(compPayload)
+	req = httptest.NewRequest(http.MethodPost, "/api/config/compliance", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on update compliance, got %d (body: %s)", w.Code, w.Body.String())
+	}
+
+	// 7. StartScheduler test with canceled context
+	schedCtx, schedCancel := context.WithCancel(context.Background())
+	schedCancel()
+	srv.StartScheduler(schedCtx)
 }
 

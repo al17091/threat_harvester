@@ -67,8 +67,10 @@ func TestCLICommands(t *testing.T) {
 	os.Args = []string{"harvester", "web", "-port=18080"}
 	runWeb(webCtx, store)
 
-	// 10. runHarvest
+	// 10. runHarvest with pre-cancelled context
+	harvestCtx, cancelHarvest := context.WithCancel(context.Background())
+	cancelHarvest() // cancel immediately
 	os.Args = []string{"harvester", "run", "-lookback=1", "-direct-only=true"}
-	runHarvest(ctx, store)
+	runHarvest(harvestCtx, store)
 }
 

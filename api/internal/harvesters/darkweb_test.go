@@ -1,7 +1,9 @@
 package harvesters
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -291,4 +293,61 @@ func TestSearXNGHarvest(t *testing.T) {
 		t.Errorf("expected is_onion=false, got %v", clearItem.Metadata["is_onion"])
 	}
 }
+
+func TestHarvestSearch_Ahmia(t *testing.T) {
+	ctx := context.Background()
+	dw := NewDarkwebOnionHarvester()
+
+	htmlHome := `<!DOCTYPE html><html><body>
+		<form action="/search/" method="get">
+			<input type="hidden" name="c0ffee1234" value="9876543210abcdef">
+			<input type="text" name="q">
+		</form>
+	</body></html>`
+
+	htmlSearch := `<!DOCTYPE html><html><body>
+		<ol>
+			<li class="result">
+				<h4><a href="/search/redirect?search_term=leak&redirect_url=http%3A%2F%2Flockbitcorp1234.onion%2Ftarget">LockBit 3.0: Japan Corp Data Leak</a></h4>
+				<p>Stolen confidential accounting files and customer database published.</p>
+				<span class="lastSeen">2026-10-07</span>
+			</li>
+		</ol>
+	</body></html>`
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/" {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(htmlHome)),
+					Header:     make(http.Header),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(htmlSearch)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	target := config.DarkwebSourceConfig{
+		Name:  "Test Ahmia Search",
+		Type:  "search",
+		Query: "leak",
+	}
+
+	items, err := dw.harvestSearch(ctx, client, target, nil)
+	if err != nil {
+		t.Fatalf("harvestSearch failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if !strings.Contains(items[0].URL, ".onion") {
+		t.Errorf("expected onion url, got %s", items[0].URL)
+	}
+}
+
 
