@@ -92,7 +92,7 @@ class DatabaseConfig(BaseModel):
     url: str = ""
     host: str = "postgres-cluster-rw"
     port: int = 5432
-    name: str = "information_harvester"
+    name: str = "threat_harvester"
     user: str = "postgres"
     password: str = ""
     sslmode: str = "prefer"

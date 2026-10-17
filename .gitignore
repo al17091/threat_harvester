@@ -55,7 +55,7 @@ out/
 .DS_Store
 
 # Go
-bin/information-harvester
+bin/threat-harvester
 *.exe
 *.test
 

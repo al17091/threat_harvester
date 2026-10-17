@@ -14,7 +14,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-logger = logging.getLogger("information_harvester")
+logger = logging.getLogger("threat_harvester")
 
 
 def run_batch():

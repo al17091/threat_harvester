@@ -70,7 +70,7 @@ class ThreatCache:
             user = os.getenv("DB_USER", "postgres")
             password = os.getenv("DB_PASSWORD", "")
             port = os.getenv("DB_PORT", "5432")
-            name = os.getenv("DB_NAME", "information_harvester")
+            name = os.getenv("DB_NAME", "threat_harvester")
             sslmode = os.getenv("DB_SSLMODE", "")
             auth = f"{user}:{password}@" if password else f"{user}@"
             url = f"postgresql+psycopg://{auth}{host}:{port}/{name}"

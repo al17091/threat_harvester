@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-data
+  name: {{ include "threat-harvester.fullname" . }}-data
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
 spec:
   accessModes:
     - {{ .Values.persistence.accessMode }}

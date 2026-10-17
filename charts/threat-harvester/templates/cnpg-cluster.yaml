@@ -2,9 +2,9 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-db
+  name: {{ include "threat-harvester.fullname" . }}-db
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: database
 spec:
   instances: {{ .Values.database.cnpg.instances | default 1 }}
@@ -15,6 +15,6 @@ spec:
     {{- end }}
   bootstrap:
     initdb:
-      database: {{ .Values.database.name | default "information_harvester" }}
+      database: {{ .Values.database.name | default "threat_harvester" }}
       owner: {{ .Values.database.user | default "harvester" }}
 {{- end }}

@@ -2,20 +2,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-tor
+  name: {{ include "threat-harvester.fullname" . }}-tor
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: tor-proxy
 spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "information-harvester.selectorLabels" . | nindent 6 }}
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: tor-proxy
   template:
     metadata:
       labels:
-        {{- include "information-harvester.selectorLabels" . | nindent 8 }}
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: tor-proxy
     spec:
       containers:

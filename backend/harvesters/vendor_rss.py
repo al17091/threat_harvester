@@ -60,7 +60,7 @@ class VendorRSSHarvester(BaseHarvester):
 
     def harvest(self, since: datetime | None = None) -> list[ThreatItem]:
         items: list[ThreatItem] = []
-        headers = {"User-Agent": "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)"}
+        headers = {"User-Agent": "ThreatHarvesterBot/1.0 (+https://github.com/al17091/threat_harvester)"}
 
         for feed_cfg in self.feeds:
             try:

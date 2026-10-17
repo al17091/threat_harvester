@@ -280,7 +280,7 @@ func DefaultConfig() AppConfig {
 			Type:       "sqlite",
 			Host:       "postgres-cluster-rw",
 			Port:       5432,
-			Name:       "information_harvester",
+			Name:       "threat_harvester",
 			User:       "postgres",
 			SSLMode:    "prefer",
 			SQLitePath: "data/threat_cache.db",

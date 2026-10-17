@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-IMAGE_NAME="information_harvester"
+IMAGE_NAME="threat_harvester"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 

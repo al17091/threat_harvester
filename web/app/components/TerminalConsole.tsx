@@ -19,6 +19,7 @@ import {
   Layers,
   Cpu,
 } from "lucide-react";
+import { withBasePath } from "./basePath";
 
 export interface LogEntry {
   timestamp: string;
@@ -71,7 +72,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
     let isSubscribed = true;
 
     // Fetch initial history
-    fetch("/api/pipeline/logs?limit=150")
+    fetch(withBasePath("/api/pipeline/logs?limit=150"))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.logs && isSubscribed) {
@@ -85,7 +86,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
 
     // Connect Server-Sent Events stream
     try {
-      const es = new EventSource("/api/pipeline/stream");
+      const es = new EventSource(withBasePath("/api/pipeline/stream"));
       eventSourceRef.current = es;
 
       es.addEventListener("log", (e: MessageEvent) => {
@@ -132,7 +133,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
 
     // Secondary polling interval while active to ensure state synchronization
     const pollInterval = setInterval(() => {
-      fetch("/api/pipeline/logs?limit=100")
+      fetch(withBasePath("/api/pipeline/logs?limit=100"))
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
           if (data && isSubscribed) {
@@ -173,7 +174,7 @@ export const TerminalConsole: React.FC<TerminalConsoleProps> = ({
   const handleClearLogs = async () => {
     setLogs([]);
     try {
-      await fetch("/api/pipeline/logs/clear", { method: "POST" });
+      await fetch(withBasePath("/api/pipeline/logs/clear"), { method: "POST" });
     } catch (e) {
       console.error("Clear logs error:", e);
     }

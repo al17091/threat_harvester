@@ -15,7 +15,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/proxy"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 var (

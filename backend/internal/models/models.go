@@ -257,12 +257,13 @@ type EnrichedThreat struct {
 	SummaryJa            string         `json:"summary_ja,omitempty"`
 	ImpactAnalysis       string         `json:"impact_analysis,omitempty"`
 	ImpactAnalysisJa     string         `json:"impact_analysis_ja,omitempty"`
-	VictimOrgs           []string       `json:"victim_orgs"`
-	ThreatActors         []string       `json:"threat_actors"`
-	AttackType           string         `json:"attack_type,omitempty"`
-	CVEs                 []string       `json:"cves,omitempty"`
-	AffectedProducts     []string       `json:"affected_products,omitempty"`
-	RecommendedActions   []string       `json:"recommended_actions,omitempty"`
-	RecommendedActionsJa []string       `json:"recommended_actions_ja,omitempty"`
-	AnalyzedAt           time.Time      `json:"analyzed_at"`
+	VictimOrgs           []string          `json:"victim_orgs"`
+	ThreatActors         []string          `json:"threat_actors"`
+	ThreatActorReasons   map[string]string `json:"threat_actor_reasons,omitempty"`
+	AttackType           string            `json:"attack_type,omitempty"`
+	CVEs                 []string          `json:"cves,omitempty"`
+	AffectedProducts     []string          `json:"affected_products,omitempty"`
+	RecommendedActions   []string          `json:"recommended_actions,omitempty"`
+	RecommendedActionsJa []string          `json:"recommended_actions_ja,omitempty"`
+	AnalyzedAt           time.Time         `json:"analyzed_at"`
 }

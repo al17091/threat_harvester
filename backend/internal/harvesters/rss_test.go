@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 func TestHarvestCISAKEV(t *testing.T) {

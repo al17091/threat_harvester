@@ -1,14 +1,14 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "information-harvester.name" -}}
+{{- define "threat-harvester.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Create a default fully qualified app name.
 */}}
-{{- define "information-harvester.fullname" -}}
+{{- define "threat-harvester.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -24,9 +24,9 @@ Create a default fully qualified app name.
 {{/*
 Common labels
 */}}
-{{- define "information-harvester.labels" -}}
-helm.sh/chart: {{ include "information-harvester.name" . }}-{{ .Chart.Version | replace "+" "_" }}
-app.kubernetes.io/name: {{ include "information-harvester.name" . }}
+{{- define "threat-harvester.labels" -}}
+helm.sh/chart: {{ include "threat-harvester.name" . }}-{{ .Chart.Version | replace "+" "_" }}
+app.kubernetes.io/name: {{ include "threat-harvester.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
@@ -34,18 +34,18 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "information-harvester.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "information-harvester.name" . }}
+{{- define "threat-harvester.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "threat-harvester.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Secret name
 */}}
-{{- define "information-harvester.secretName" -}}
+{{- define "threat-harvester.secretName" -}}
 {{- if .Values.secrets.existingSecret }}
 {{- .Values.secrets.existingSecret }}
 {{- else }}
-{{- printf "%s-secrets" (include "information-harvester.fullname" .) }}
+{{- printf "%s-secrets" (include "threat-harvester.fullname" .) }}
 {{- end }}
 {{- end }}

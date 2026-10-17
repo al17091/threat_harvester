@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 const incidentSelectCols = `
@@ -1004,10 +1004,28 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		}
 		res["child_items"] = childItems
 
-		// Propagate recommended actions from enriched child items if available
+		// Propagate recommended actions and threat actor attribution reasons from child items
 		var recActions []string
 		var recActionsJa []string
+		actorReasonsEn, _ := res["threat_actor_reasons"].(map[string]string)
+		if actorReasonsEn == nil {
+			actorReasonsEn = make(map[string]string)
+		}
+		actorReasonsJa, _ := res["threat_actor_reasons_ja"].(map[string]string)
+		if actorReasonsJa == nil {
+			actorReasonsJa = make(map[string]string)
+		}
+		cleanActors, _ := res["threat_actors"].([]string)
+
 		for _, c := range childItems {
+			cSrcName, _ := c["source_name"].(string)
+			if cSrcName == "" {
+				cSrcName, _ = c["source_type"].(string)
+			}
+			cTitle, _ := c["title"].(string)
+			cRaw, _ := c["raw_content"].(string)
+			cSum, _ := c["summary"].(string)
+
 			if ep, ok := c["enriched_parsed"].(map[string]interface{}); ok {
 				if ra, ok := ep["recommended_actions"].([]interface{}); ok && len(ra) > 0 {
 					for _, a := range ra {
@@ -1023,8 +1041,41 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 						}
 					}
 				}
+				if rawReasons, ok := ep["threat_actor_reasons"].(map[string]interface{}); ok {
+					for _, actor := range cleanActors {
+						for rk, rv := range rawReasons {
+							if strings.EqualFold(strings.TrimSpace(rk), actor) {
+								if rStr, ok := rv.(string); ok && strings.TrimSpace(rStr) != "" {
+									actorReasonsEn[actor] = strings.TrimSpace(rStr)
+								}
+							}
+						}
+					}
+				}
+			}
+
+			for _, actor := range cleanActors {
+				if snip := models.ExtractActorSnippet(cTitle, actor, 140); snip != "" {
+					actorReasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] report title: \"%s\"", cSrcName, snip)
+					actorReasonsJa[actor] = fmt.Sprintf("情報源「%s」のタイトルに記載: 「%s」", cSrcName, snip)
+					continue
+				}
+				if snip := models.ExtractActorSnippet(cRaw, actor, 160); snip != "" {
+					actorReasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] report body: \"%s\"", cSrcName, snip)
+					actorReasonsJa[actor] = fmt.Sprintf("情報源「%s」の本文に記載: 「%s」", cSrcName, snip)
+					continue
+				}
+				if snip := models.ExtractActorSnippet(cSum, actor, 160); snip != "" {
+					actorReasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] summary: \"%s\"", cSrcName, snip)
+					actorReasonsJa[actor] = fmt.Sprintf("情報源「%s」の概要に記載: 「%s」", cSrcName, snip)
+					continue
+				}
 			}
 		}
+
+		res["threat_actor_reasons"] = actorReasonsEn
+		res["threat_actor_reasons_ja"] = actorReasonsJa
+
 		if ep, ok := res["enriched_parsed"].(map[string]interface{}); ok {
 			if len(recActions) > 0 {
 				ep["recommended_actions"] = recActions
@@ -1032,6 +1083,8 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 			if len(recActionsJa) > 0 {
 				ep["recommended_actions_ja"] = recActionsJa
 			}
+			ep["threat_actor_reasons"] = actorReasonsEn
+			ep["threat_actor_reasons_ja"] = actorReasonsJa
 		}
 
 		// If incident raw_content is empty, synthesize from child items
@@ -1240,56 +1293,148 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		impJa = inc.ImpactAnalysis
 	}
 
+	actorReasonsEn, actorReasonsJa := buildIncidentActorReasons(inc, cleanActors)
+
 	return map[string]interface{}{
-		"id":                    inc.ID,
-		"victim_org":            displayVictim,
-		"victim_org_en":         victimOrgEn,
-		"victim_org_ja":         victimOrgJa,
-		"normalized_victim_org": inc.NormalizedVictimOrg,
-		"cves":                  inc.CVEs,
-		"affected_product":      displayProduct,
-		"affected_product_en":   productEn,
-		"affected_product_ja":   productJa,
-		"title":                 titleEn,
-		"title_ja":              titleJa,
-		"summary":               sumEn,
-		"summary_ja":            sumJa,
-		"impact_analysis":       impEn,
-		"impact_analysis_ja":    impJa,
-		"severity":              string(inc.Severity),
-		"japan_relevance":       string(inc.JapanRelevance),
-		"attack_type":           inc.AttackType,
-		"raw_content":           inc.RawContent,
-		"url":                   inc.PrimaryURL,
-		"primary_url":           inc.PrimaryURL,
-		"source_urls":           inc.SourceURLs,
-		"sources_detail":        inc.SourcesDetail,
-		"first_seen_at":         firstStr,
-		"last_seen_at":          lastStr,
-		"published_at":          lastStr,  // compatible with frontend Incident interface
-		"harvested_at":          firstStr, // compatible with frontend Incident interface
-		"report_count":          inc.ReportCount,
-		"threat_actors":         cleanActors,
-		"created_at":            createdStr,
-		"updated_at":            updatedStr,
+		"id":                      inc.ID,
+		"victim_org":              displayVictim,
+		"victim_org_en":           victimOrgEn,
+		"victim_org_ja":           victimOrgJa,
+		"normalized_victim_org":   inc.NormalizedVictimOrg,
+		"cves":                    inc.CVEs,
+		"affected_product":        displayProduct,
+		"affected_product_en":     productEn,
+		"affected_product_ja":     productJa,
+		"title":                   titleEn,
+		"title_ja":                titleJa,
+		"summary":                 sumEn,
+		"summary_ja":              sumJa,
+		"impact_analysis":         impEn,
+		"impact_analysis_ja":      impJa,
+		"severity":                string(inc.Severity),
+		"japan_relevance":         string(inc.JapanRelevance),
+		"attack_type":             inc.AttackType,
+		"raw_content":             inc.RawContent,
+		"url":                     inc.PrimaryURL,
+		"primary_url":             inc.PrimaryURL,
+		"source_urls":             inc.SourceURLs,
+		"sources_detail":          inc.SourcesDetail,
+		"first_seen_at":           firstStr,
+		"last_seen_at":            lastStr,
+		"published_at":            lastStr,  // compatible with frontend Incident interface
+		"harvested_at":            firstStr, // compatible with frontend Incident interface
+		"report_count":            inc.ReportCount,
+		"threat_actors":           cleanActors,
+		"threat_actor_reasons":    actorReasonsEn,
+		"threat_actor_reasons_ja": actorReasonsJa,
+		"created_at":              createdStr,
+		"updated_at":              updatedStr,
 		"enriched_parsed": map[string]interface{}{
-			"title":               titleEn,
-			"title_ja":            titleJa,
-			"summary":             sumEn,
-			"summary_ja":          sumJa,
-			"impact_analysis":     impEn,
-			"impact_analysis_ja":  impJa,
-			"victim_orgs":         victimOrgs,
-			"victim_org_en":       victimOrgEn,
-			"victim_org_ja":       victimOrgJa,
-			"threat_actors":       cleanActors,
-			"attack_type":         inc.AttackType,
-			"cves":                inc.CVEs,
-			"affected_products":   affProds,
-			"affected_product_en": productEn,
-			"affected_product_ja": productJa,
+			"title":                   titleEn,
+			"title_ja":                titleJa,
+			"summary":                 sumEn,
+			"summary_ja":              sumJa,
+			"impact_analysis":         impEn,
+			"impact_analysis_ja":      impJa,
+			"victim_orgs":             victimOrgs,
+			"victim_org_en":           victimOrgEn,
+			"victim_org_ja":           victimOrgJa,
+			"threat_actors":           cleanActors,
+			"threat_actor_reasons":    actorReasonsEn,
+			"threat_actor_reasons_ja": actorReasonsJa,
+			"attack_type":             inc.AttackType,
+			"cves":                    inc.CVEs,
+			"affected_products":       affProds,
+			"affected_product_en":     productEn,
+			"affected_product_ja":     productJa,
 		},
 	}
+}
+
+func buildIncidentActorReasons(inc *models.Incident, cleanActors []string) (map[string]string, map[string]string) {
+	reasonsEn := make(map[string]string, len(cleanActors))
+	reasonsJa := make(map[string]string, len(cleanActors))
+	if len(cleanActors) == 0 {
+		return reasonsEn, reasonsJa
+	}
+
+	primarySource := ""
+	if len(inc.SourcesDetail) > 0 {
+		primarySource = inc.SourcesDetail[0].Name
+	}
+
+	for _, actor := range cleanActors {
+		matched := false
+		// 1. Check source details titles
+		for _, sd := range inc.SourcesDetail {
+			if snip := models.ExtractActorSnippet(sd.Title, actor, 140); snip != "" {
+				reasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] report title: \"%s\"", sd.Name, snip)
+				reasonsJa[actor] = fmt.Sprintf("情報源「%s」のタイトルに記載: 「%s」", sd.Name, snip)
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+
+		// 2. Check incident title
+		if snip := models.ExtractActorSnippet(inc.Title, actor, 140); snip != "" {
+			if primarySource != "" {
+				reasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] title: \"%s\"", primarySource, snip)
+				reasonsJa[actor] = fmt.Sprintf("情報源「%s」のタイトルに記載: 「%s」", primarySource, snip)
+			} else {
+				reasonsEn[actor] = fmt.Sprintf("Mentioned in incident title: \"%s\"", snip)
+				reasonsJa[actor] = fmt.Sprintf("インシデントタイトルに記載: 「%s」", snip)
+			}
+			continue
+		}
+		if snip := models.ExtractActorSnippet(inc.TitleJa, actor, 140); snip != "" {
+			reasonsEn[actor] = fmt.Sprintf("Mentioned in incident title: \"%s\"", snip)
+			reasonsJa[actor] = fmt.Sprintf("インシデントタイトルに記載: 「%s」", snip)
+			continue
+		}
+
+		// 3. Check raw_content
+		if snip := models.ExtractActorSnippet(inc.RawContent, actor, 160); snip != "" {
+			if primarySource != "" {
+				reasonsEn[actor] = fmt.Sprintf("Mentioned in [%s] article body: \"%s\"", primarySource, snip)
+				reasonsJa[actor] = fmt.Sprintf("情報源「%s」の本文に記載: 「%s」", primarySource, snip)
+			} else {
+				reasonsEn[actor] = fmt.Sprintf("Mentioned in source article body: \"%s\"", snip)
+				reasonsJa[actor] = fmt.Sprintf("収集した元記事の本文に記載: 「%s」", snip)
+			}
+			continue
+		}
+
+		// 4. Check summary / impact analysis
+		if snip := models.ExtractActorSnippet(inc.Summary, actor, 160); snip != "" {
+			reasonsEn[actor] = fmt.Sprintf("Mentioned in intelligence summary: \"%s\"", snip)
+			reasonsJa[actor] = fmt.Sprintf("AI要約・レポート概要に記載: 「%s」", snip)
+			continue
+		}
+		if snip := models.ExtractActorSnippet(inc.SummaryJa, actor, 160); snip != "" {
+			reasonsEn[actor] = fmt.Sprintf("Mentioned in intelligence summary: \"%s\"", snip)
+			reasonsJa[actor] = fmt.Sprintf("AI要約・レポート概要に記載: 「%s」", snip)
+			continue
+		}
+		if snip := models.ExtractActorSnippet(inc.ImpactAnalysis, actor, 160); snip != "" {
+			reasonsEn[actor] = fmt.Sprintf("Referenced in impact analysis: \"%s\"", snip)
+			reasonsJa[actor] = fmt.Sprintf("影響分析に記載: 「%s」", snip)
+			continue
+		}
+
+		// 5. Fallback (feed metadata, darkweb leak site attribution, or AI/analyst correlation)
+		if primarySource != "" {
+			reasonsEn[actor] = fmt.Sprintf("Attributed via [%s] feed metadata or AI threat correlation", primarySource)
+			reasonsJa[actor] = fmt.Sprintf("情報源「%s」のメタデータまたはAI脅威分析により特定", primarySource)
+		} else {
+			reasonsEn[actor] = "Attributed via AI threat intelligence analysis"
+			reasonsJa[actor] = "AI脅威インテリジェンス分析により特定"
+		}
+	}
+
+	return reasonsEn, reasonsJa
 }
 
 func mergeUniqueStrings(existing, incoming []string) []string {

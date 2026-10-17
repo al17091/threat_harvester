@@ -22,7 +22,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: information_harvester
+  IMAGE_NAME: threat_harvester
 
 jobs:
   test-and-lint:
@@ -59,7 +59,7 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Lint Helm Chart
-        run: helm lint charts/information-harvester
+        run: helm lint charts/threat-harvester
 
   build-and-push:
     name: Build & Push Images to GHCR

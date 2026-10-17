@@ -3,10 +3,11 @@ package analyzer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 // BatchTranslateItem defines input structure for incident translation.
@@ -79,14 +80,67 @@ type AnalysisOutput struct {
 	ImpactAnalysis       string   `json:"impact_analysis,omitempty"`
 	ImpactAnalysisEn     string   `json:"impact_analysis_en,omitempty"`
 	ImpactAnalysisJa     string   `json:"impact_analysis_ja,omitempty"`
-	VictimOrgs           []string `json:"victim_orgs"`
-	ThreatActors         []string `json:"threat_actors"`
-	AttackType           string   `json:"attack_type"`
-	CVEs                 []string `json:"cves,omitempty"`
-	AffectedProducts     []string `json:"affected_products,omitempty"`
-	RecommendedActions   []string `json:"recommended_actions,omitempty"`
-	RecommendedActionsEn []string `json:"recommended_actions_en,omitempty"`
-	RecommendedActionsJa []string `json:"recommended_actions_ja,omitempty"`
+	VictimOrgs           []string          `json:"victim_orgs"`
+	ThreatActors         []string          `json:"threat_actors"`
+	ThreatActorReasons   map[string]string `json:"threat_actor_reasons,omitempty"`
+	AttackType           string            `json:"attack_type"`
+	CVEs                 []string          `json:"cves,omitempty"`
+	AffectedProducts     []string          `json:"affected_products,omitempty"`
+	RecommendedActions   []string          `json:"recommended_actions,omitempty"`
+	RecommendedActionsEn []string          `json:"recommended_actions_en,omitempty"`
+	RecommendedActionsJa []string          `json:"recommended_actions_ja,omitempty"`
+}
+
+// ResolveThreatActorReasons normalizes LLM-provided reasons and falls back to extracting context snippets from the ThreatItem.
+func ResolveThreatActorReasons(item models.ThreatItem, cleanActors []string, rawReasons map[string]string) map[string]string {
+	if len(cleanActors) == 0 {
+		return nil
+	}
+	reasons := make(map[string]string, len(cleanActors))
+	srcLabel := strings.TrimSpace(item.SourceName)
+	if srcLabel == "" {
+		srcLabel = string(item.SourceType)
+	}
+
+	for _, actor := range cleanActors {
+		var matchedReason string
+		for k, v := range rawReasons {
+			if strings.EqualFold(strings.TrimSpace(k), actor) && strings.TrimSpace(v) != "" {
+				matchedReason = strings.TrimSpace(v)
+				break
+			}
+		}
+		if matchedReason != "" {
+			if srcLabel != "" && !strings.Contains(strings.ToLower(matchedReason), strings.ToLower(srcLabel)) {
+				matchedReason = fmt.Sprintf("[%s] %s", srcLabel, matchedReason)
+			}
+			reasons[actor] = matchedReason
+			continue
+		}
+
+		// Automatic snippet extraction from item fields
+		if snip := models.ExtractActorSnippet(item.Title, actor, 140); snip != "" {
+			reasons[actor] = fmt.Sprintf("[%s] Mentioned in report title: \"%s\"", srcLabel, snip)
+			continue
+		}
+		if snip := models.ExtractActorSnippet(item.RawContent, actor, 160); snip != "" {
+			reasons[actor] = fmt.Sprintf("[%s] Mentioned in report body: \"%s\"", srcLabel, snip)
+			continue
+		}
+		if snip := models.ExtractActorSnippet(item.Summary, actor, 160); snip != "" {
+			reasons[actor] = fmt.Sprintf("[%s] Mentioned in report summary: \"%s\"", srcLabel, snip)
+			continue
+		}
+		if item.Metadata != nil {
+			metaBytes, _ := json.Marshal(item.Metadata)
+			if snip := models.ExtractActorSnippet(string(metaBytes), actor, 140); snip != "" {
+				reasons[actor] = fmt.Sprintf("[%s] Attributed in feed metadata: %s", srcLabel, snip)
+				continue
+			}
+		}
+		reasons[actor] = fmt.Sprintf("[%s] Identified by AI analysis from report context", srcLabel)
+	}
+	return reasons
 }
 
 // CleanJSONFences removes markdown code fences around JSON outputs.
@@ -251,6 +305,9 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		actionsJa = actions
 	}
 
+	cleanActors := models.CleanThreatActors(out.ThreatActors)
+	actorReasons := ResolveThreatActorReasons(item, cleanActors, out.ThreatActorReasons)
+
 	return &models.EnrichedThreat{
 		ItemID:               item.ID,
 		Item:                 item,
@@ -263,7 +320,8 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     impactJa,
 		VictimOrgs:           out.VictimOrgs,
-		ThreatActors:         models.CleanThreatActors(out.ThreatActors),
+		ThreatActors:         cleanActors,
+		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
 		AffectedProducts:     affectedProducts,

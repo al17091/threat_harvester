@@ -1,42 +1,50 @@
 # Contributing to Threat Information Harvester
 
-We welcome contributions from the open-source community! Whether you are reporting bugs, proposing new threat intelligence sources, improving Gemini prompts, or optimizing Kubernetes Helm charts, your help is appreciated.
+We welcome contributions from the open-source community! Whether you are reporting bugs, proposing new threat intelligence sources, improving AI analysis prompts, or optimizing Kubernetes Helm charts, your help is appreciated.
 
 ---
 
 ## 1. Development Environment
 
-The fastest way to start contributing is using the provided development container:
+You can run the full stack locally using Docker Compose:
 
 ```bash
-# Build the dev container
-docker build -t information_harvester:dev -f Dockerfile.dev .
+# 1. Copy example environment variables
+cp .env.example .env
 
-# Run dev shell
-docker run -it --rm -v $(pwd):/app information_harvester:dev bash
+# 2. Build and start the services (Web Dashboard, Go Backend, PostgreSQL)
+docker compose up -d --build
 ```
 
-Or using a local virtual environment (Python 3.11+):
+Or build and work with the Go backend and Next.js frontend directly:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+# Backend (Go 1.22+)
+cd backend
+go mod download
+go test -v ./...
+
+# Web Dashboard (Node.js 20+)
+cd ../web
+npm ci
+npm run dev
 ```
 
 ---
 
 ## 2. Coding Standards & Quality Checks
 
-Before submitting a Pull Request, please ensure all checks pass:
+Before submitting a Pull Request, please ensure all tests, builds, and chart lints pass:
 
 ```bash
-# Run automated tests
-pytest tests/
+# 1. Run Go backend tests
+cd backend && go test -v ./...
 
-# Run linter and formatting checks
-ruff check .
-ruff format --check .
+# 2. Verify Next.js production build & TypeScript checks
+npm --prefix web run build
+
+# 3. Lint Kubernetes Helm chart
+helm lint charts/threat-harvester
 ```
 
 ---
@@ -53,8 +61,8 @@ All Git commit messages MUST follow the **Conventional Commits** format in Engli
 ```
 
 - **Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`
-- **Scope**: Module name (e.g., `harvester`, `analyzer`, `helm`, `cli`, `cache`)
-- **Signature**: Sign all commits with GPG/SSH key (`-S` or default `commit.gpgsign=true`). Verified signatures are required.
+- **Scope**: Module name (e.g., `backend`, `web`, `harvester`, `analyzer`, `helm`, `ci`)
+- **Signature**: Sign all commits with a GPG/SSH key (`git commit -S` or `commit.gpgsign=true`). Verified signatures are required.
 
 **Example:**
 ```text
@@ -62,15 +70,15 @@ feat(harvester): add new ransomware leak tracker source
 
 - Add RansomFeed RSS feed integration
 - Update onion proxy handler with retry logic
-- Add unit tests for new source in tests/
+- Add unit tests for new source
 ```
 
 ---
 
 ## 4. Pull Request Process
 
-1. Fork the repository and create your branch from `main` (e.g. `feature/add-new-source`).
-2. Implement your changes with accompanying unit tests in `tests/`.
-3. Verify that all tests pass (`pytest`) and code style complies (`ruff check`).
-4. Commit your changes following the commit conventions above.
+1. Fork the repository and create your feature branch from `develop` or `main` (e.g., `feat/add-new-source`).
+2. Implement your changes with accompanying unit tests.
+3. Verify that all Go tests (`go test ./...`) and Next.js builds (`npm --prefix web run build`) pass.
+4. Commit your changes using signed Conventional Commits (`git commit -S`).
 5. Push to your fork and submit a Pull Request with a clear description of the modifications.

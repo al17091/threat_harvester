@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type chatMessage struct {
@@ -216,6 +216,7 @@ Focus heavily on assessing relevance and potential impact on organizations, crit
   "impact_analysis": "Concrete evaluation of threat impact and risks in English",
   "victim_orgs": ["Identified victim organization names"],
   "threat_actors": ["Specific named threat actors or cybercrime groups, or [] if none identified"],
+  "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
   "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
   "cves": ["CVE identifiers e.g. CVE-2026-9999"],
   "affected_products": ["Affected product/software names e.g. FortiMail, Citrix ADC"],

@@ -1,13 +1,14 @@
 # Task Tracker - Threat Information Harvester
 
 ## Overview
-Status tracking for the **Threat Information Harvester** project. This file is referenced whenever planning or proposing the next actions.
+Status tracking and milestone roadmap for the **Threat Information Harvester** project.
 
 ---
 
 ## Current Status
-- **Current Phase**: Phase 5 Completed (Docker Compose, Next.js Web Dashboard, and Decoupled Architecture)
-- **Last Updated**: 2026-10-05
+- **Current Version**: `v0.1.0`
+- **Current Phase**: Phase 6 Completed (v0.1.0 Release Preparation, GHCR CI/CD Workflow, Helm Split Services, and Hybrid AI Pipeline)
+- **Last Updated**: 2026-10-17
 
 ---
 
@@ -15,89 +16,54 @@ Status tracking for the **Threat Information Harvester** project. This file is r
 
 ### Phase 1: Foundation & Architecture Setup
 - [x] Establish `AGENT.md` specifications, Git conventions, and interaction guidelines.
-- [x] Initialize Git repository with proper conventions.
+- [x] Initialize Git repository with signed Conventional Commits.
 - [x] Create project task tracker (`docs/task_tracker.md`).
 - [x] Refactor codebase structure into modular hierarchy (Harvesters, Analyzer, Notifiers, Storage, CLI).
-- [x] Implement Unified CLI (`bin/harvester`) for centralized command execution.
+- [x] Implement Unified CLI (`scripts/harvester.sh`) for centralized command execution.
 - [x] Create development container configuration (`Dockerfile.dev`).
-- [x] Initialize Helm Chart structure (`charts/information-harvester/`) with Tor proxy, CronJob, and Dev Pod support.
+- [x] Initialize Helm Chart structure (`charts/threat-harvester/`) with Tor proxy, CronJob, and Dev Pod support.
 
 ### Phase 2: Core Harvesters & Enrichment Implementation
 - [x] **Vendor & CERT RSS Harvester**: Japanese feeds (JPCERT/CC, IPA, ScanNetSecurity, Security Next) & global feeds.
 - [x] **Gemini Web Search Grounding Harvester**: Targeted threat hunting using Gemini Search Grounding.
-- [x] **Dark Web (.onion) Harvester via Tor**: SOCKS5 proxy connectivity and ransomware leak site monitoring.
-- [x] **Telegram Monitor Harvester**: Public channel web-preview scraper (`t.me/s/<channel>`).
-- [x] **X (Twitter) Monitor Harvester**: Low-cost Grounded search monitoring researcher posts.
-- [x] **Gemini Intelligence Enrichment**: Structured schema (Severity, Japan Relevance, Victims, Actors, Action items).
-- [x] **Persistent Cache & Notifications**: SQLite deduplication & Discord notifications with Japan-target highlight flags.
+- [x] **Dark Web (.onion) Harvester via Tor**: SOCKS5 proxy connectivity and SearXNG / ransomware leak site monitoring.
+- [x] **Telegram Monitor Harvester**: Public channel web-preview scraper (`t.me/s/<channel>`) and recursive link extraction.
+- [x] **X (Twitter) Monitor Harvester**: Low-cost grounded search monitoring security researcher posts.
+- [x] **AI Intelligence Enrichment**: Structured schema (Severity, Japan Relevance, Victims, Actors, Recommended Actions, MITRE ATT&CK TTPs).
+- [x] **Persistent Cache & Notifications**: PostgreSQL / SQLite deduplication & Discord/Slack/Webhook notifications.
 
 ### Phase 3: Reporting & Notification Expansion
-- [x] Establish **MIT License** explicitly permitting commercial and non-commercial usage.
+- [x] Establish **MIT License** with non-commercial third-party collector notice.
 - [x] Create **SECURITY.md** with responsible CTI use disclaimer and vulnerability reporting policy.
 - [x] Create **CONTRIBUTING.md** defining PR workflow, quality checks, and Conventional Commits.
-- [x] Implement **Notion Reporter** (`backend/reporters/notion_reporter.py`) to auto-create incident pages in Notion databases.
-- [x] Implement **Slack Webhook** (`backend/notifiers/slack.py`) and **Generic JSON Webhook** (`backend/notifiers/generic_webhook.py`).
-- [x] Implement `NotificationManager` dispatcher and CLI commands (`harvester history`, `harvester show`, `harvester test-notify`, `harvester test-notion`).
+- [x] Implement **Notion Reporter** to auto-create incident pages in Notion databases.
+- [x] Implement **Slack Webhook** and **Generic JSON Webhook** notifiers.
+- [x] Implement CLI commands (`harvester status`, `harvester run`, `harvester cron`, `harvester history`, `harvester show`, `harvester test-notify`, `harvester test-notion`).
 
 ### Phase 4: Unified Config & CloudNativePG Storage
 - [x] **Unified YAML Configuration (`config.yaml`)**:
-  - Connection endpoints, DB, credentials, sinks, and sources configured in `config.yaml`.
+  - Connection endpoints, DB, credentials, sinks, scraper, and sources configured in `config.yaml` (`config.example.yaml` template).
   - Supports `${ENV_VAR}` and `${ENV_VAR:-default}` dynamic environment variable expansion.
-- [x] **GUI Source Management & YAML Export**:
-  - Add, toggle ON/OFF, and delete threat sources (RSS, Telegram, Darkweb, X, Web search) directly from GUI.
-  - One-click "Export config.yaml" download feature.
 - [x] **Multi-Database Support (PostgreSQL / CloudNativePG & SQLite)**:
-  - SQLAlchemy-backed storage layer supporting PostgreSQL (CNPG on k3s) and SQLite fallback.
-  - Dialect-aware upserts (`pg_insert` and `sqlite_insert`).
+  - Storage layer supporting PostgreSQL (CNPG on k3s) and pure-Go SQLite fallback.
 - [x] **Kubernetes / Helm Enhancements**:
-  - Added CloudNativePG (`Cluster` CRD) integration and secret binding.
+  - CloudNativePG (`Cluster` CRD) secret integration and separated Backend/Dashboard deployments.
 
 ### Phase 5: Decoupled Full-Stack Architecture, Next.js SOC Dashboard & Go Backend
 - [x] **Service Decoupling (`backend/` & `web/`)**:
-  - Renamed and organized modules symmetrically into `backend/` and `web/`.
-  - Removed awkward legacy folder structure.
-- [x] **High-Performance Go CTI Engine (`backend/`)**:
-  - Rebuilt backend in Go 1.22 with single static binary (`bin/information-harvester`, 25MB).
-  - Parallel concurrent harvesting using Goroutines across RSS, Dark Web (.onion via Tor SOCKS5), Telegram, X, and Gemini Grounded Search.
-  - Pure Go SQLite (`modernc.org/sqlite`, zero CGO) and PostgreSQL (CNPG) dual-engine support.
-  - Chi-based lightweight, high-throughput REST API with full CORS support.
-  - Multi-stage minimal Dockerfile (~25MB Alpine runner image).
-- [x] **Docker Compose (`docker-compose.yml`)**:
-  - Multi-container orchestration for `web` (Next.js), `backend` (Go CTI Engine), and `db` (Postgres 16), connecting to external Tor SOCKS5 proxy via `TOR_PROXY_URL`.
+  - High-performance Go 1.22+ CTI Engine (`backend/`) and Next.js 14 Cyber SOC Dashboard (`web/`).
+- [x] **Hybrid AI Engine & Async Article Scraper**:
+  - LiteLLM (`Qwen2.5-3B-Instruct`) primary analysis with automatic Gemini escalation (`gemini-3.5-flash-lite`) for long-context and Critical/Japan-Direct incidents.
+  - Background worker pools for Clearnet and Tor (`.onion`) full-text article scraping.
 - [x] **Next.js 14 Cyber SOC Web Dashboard (`web/`)**:
-  - Pure English user interface.
-  - Reactive incident feeds, real-time filtering, detailed intelligence modal.
-  - GUI threat intelligence source management with toggle, add, and delete.
-  - Live YAML preview and downloadable `config.yaml`.
-  - System health probes and test dispatch triggers.
-- [x] **Notion MCP Knowledge Base Integration**:
-  - Created dedicated Notion Database `Cyber Threat Intelligence (CTI) Feed` (`3ef6bf4bdc72815c94a9e28f7ebf56c4`) via Notion MCP.
-  - Verified Go backend Notion sink integration and page generation (`bin/harvester test-notion`).
-- [x] **OSS Commercial Compliance & 4-Tier Source Control**:
-  - Established 4 compliance tiers: `Commercial Ready`, `Commercial via Official API`, `Non-Commercial: ToS Scraping`, and `Non-Commercial: Dark Web`.
-  - Added preset profiles (`commercial_only`, `official_api_ready`, `all`, `custom`) and tier-level killswitches.
-  - Implemented dynamic filtering in Go CTI engine, REST API, and full GUI management in Next.js SOC Dashboard.
-- [x] **Gemini API Request Optimization & Cost Reduction**:
-  - Implemented batch threat analysis (`AnalyzeBatch`) in chunks of 5, reducing enrichment API calls by up to 80%.
-  - Added 12-hour TTL in-memory caching for natural language directives in `GenerateSearchQueries`, eliminating repetitive hourly query generation calls.
-  - Upgraded model configuration to lighter `gemini-3.5-flash-lite`.
+  - Bilingual (`/en` and `/ja`) incident feed, kill-chain grouping, STIX 2.1 bundle export, and RSS 2.0 feeds (`/rss`).
+  - Session-authenticated admin operations and API route protection.
+  - Custom brand SVG/ICO favicons and footer legal/non-commercial usage disclaimer.
 
-### Phase 6: Cluster Deployment & Live Verification (Next Steps)
-- [ ] Run `docker compose up -d` to verify local multi-container stack.
-- [ ] Deploy Helm chart onto k3s cluster with CloudNativePG PostgreSQL.
-- [ ] Verify Web Dashboard UI access and Tor SOCKS5 proxy connectivity in live cluster.
-
----
-
-## Action Items (Prioritized Backlog)
-
-### [P0] Immediate Next Steps
-1. **Docker Compose Verification**:
-   - Run `docker compose up -d --build` to confirm all 4 containers boot up and communicate cleanly.
-2. **Cluster Deployment on k3s**:
-   - Deploy Helm chart (`helm upgrade --install`) referencing CloudNativePG cluster.
-
-### [P1] Live Source Validation
-1. Verify Gemini Grounded Search response with live API key.
-2. Verify Tor proxy routing against live .onion endpoints.
-3. Test Telegram and RSS collection in production environment.
+### Phase 6: Release Packaging & CI/CD Automation (`v0.1.0`)
+- [x] **GHCR Container Publishing Workflow (`.github/workflows/docker-publish.yml`)**:
+  - Automated quality checks (Go tests, Next.js production build, Helm lint).
+  - Publishes separated `backend-<version>` and `web-<version>` images to `ghcr.io/al17091/threat_harvester`.
+  - Automatically appends `-preview` suffix for builds from the `develop` branch.
+- [x] **Unified Helper Scripts (`scripts/`)**:
+  - `scripts/build_and_push.sh` and `scripts/harvester.sh`.

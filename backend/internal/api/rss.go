@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 type rssFeed struct {

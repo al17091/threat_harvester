@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-dashboard
+  name: {{ include "threat-harvester.fullname" . }}-dashboard
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: dashboard
   {{- with .Values.dashboard.ingress.annotations }}
   annotations:
@@ -34,7 +34,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "information-harvester.fullname" $ }}
+                name: {{ include "threat-harvester.fullname" $ }}
                 port:
                   number: {{ $.Values.dashboard.service.port }}
           {{- end }}

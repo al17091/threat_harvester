@@ -1,10 +1,10 @@
 apiVersion: v2
-name: information-harvester
+name: threat-harvester
 description: Cyber Threat Intelligence Harvester & Next.js SOC Dashboard focusing on Japan-targeted threats with Hybrid AI (LiteLLM/Gemini), SearXNG, and Tor.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-icon: https://raw.githubusercontent.com/al17091/information_harvester/main/web/public/favicon.ico
+icon: https://raw.githubusercontent.com/al17091/threat_harvester/main/web/public/favicon.ico
 keywords:
   - security
   - threat-intelligence

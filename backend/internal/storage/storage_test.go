@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 func TestStorageOperations(t *testing.T) {

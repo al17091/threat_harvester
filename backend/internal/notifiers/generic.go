@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type GenericNotifier struct {

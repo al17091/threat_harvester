@@ -1,4 +1,4 @@
-module github.com/dapt/information_harvester/backend
+module github.com/al17091/threat_harvester/backend
 
 go 1.26.0
 

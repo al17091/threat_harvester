@@ -27,5 +27,5 @@ We take the security of this project seriously. If you discover a security vulne
 
 | Version | Supported          |
 | :---    | :---               |
-| 0.2.x   | :white_check_mark: |
-| < 0.2.0 | :x:                |
+| 0.1.x   | :white_check_mark: |
+| < 0.1.0 | :x:                |

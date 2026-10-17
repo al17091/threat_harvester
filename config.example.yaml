@@ -23,7 +23,7 @@ database:
   url: "${DATABASE_URL:-}"
   host: "${DB_HOST:-postgres-cluster-rw}"
   port: 5432
-  name: "${DB_NAME:-information_harvester}"
+  name: "${DB_NAME:-threat_harvester}"
   user: "${DB_USER:-postgres}"
   password: "${DB_PASSWORD:-}"
   sslmode: "${DB_SSLMODE:-prefer}"

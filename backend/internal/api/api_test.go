@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 func TestAPIRoutes(t *testing.T) {

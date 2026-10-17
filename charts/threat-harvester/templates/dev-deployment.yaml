@@ -2,20 +2,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-dev
+  name: {{ include "threat-harvester.fullname" . }}-dev
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: dev-cli
 spec:
   replicas: {{ .Values.devContainer.replicas }}
   selector:
     matchLabels:
-      {{- include "information-harvester.selectorLabels" . | nindent 6 }}
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: dev-cli
   template:
     metadata:
       labels:
-        {{- include "information-harvester.selectorLabels" . | nindent 8 }}
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: dev-cli
     spec:
       containers:
@@ -35,15 +35,15 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "information-harvester.fullname" . }}-db-app
+                  name: {{ include "threat-harvester.fullname" . }}-db-app
                   key: uri
             {{- end }}
           {{- end }}
           envFrom:
             - configMapRef:
-                name: {{ include "information-harvester.fullname" . }}-config
+                name: {{ include "threat-harvester.fullname" . }}-config
             - secretRef:
-                name: {{ include "information-harvester.secretName" . }}
+                name: {{ include "threat-harvester.secretName" . }}
           {{- if .Values.persistence.enabled }}
           volumeMounts:
             - name: data
@@ -55,6 +55,6 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: {{ include "information-harvester.fullname" . }}-data
+            claimName: {{ include "threat-harvester.fullname" . }}-data
       {{- end }}
 {{- end }}

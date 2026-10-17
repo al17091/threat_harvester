@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-backend
+  name: {{ include "threat-harvester.fullname" . }}-backend
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
   type: {{ .Values.backend.service.type }}
@@ -14,7 +14,7 @@ spec:
       protocol: TCP
       name: http
   selector:
-    {{- include "information-harvester.selectorLabels" . | nindent 4 }}
+    {{- include "threat-harvester.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 {{- end }}
 

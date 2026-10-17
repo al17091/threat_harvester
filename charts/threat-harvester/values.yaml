@@ -1,15 +1,15 @@
-# Default values for information-harvester.
+# Default values for threat-harvester.
 
 # Base repository & version (shared across backend, web, and cronjob)
 image:
-  repository: ghcr.io/al17091/information_harvester
+  repository: ghcr.io/al17091/threat_harvester
   version: "0.1.0"
   tag: "backend-0.1.0"
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
 devImage:
-  repository: ghcr.io/al17091/information_harvester
+  repository: ghcr.io/al17091/threat_harvester
   tag: "dev-0.1.0"
   pullPolicy: IfNotPresent
 
@@ -21,7 +21,7 @@ backend:
   enabled: true
   replicas: 1
   image:
-    repository: ghcr.io/al17091/information_harvester
+    repository: ghcr.io/al17091/threat_harvester
     tag: "backend-0.1.0"
     pullPolicy: IfNotPresent
   port: 8000
@@ -40,8 +40,9 @@ backend:
 dashboard:
   enabled: true
   replicas: 1
+  basePath: "/thhv"
   image:
-    repository: ghcr.io/al17091/information_harvester
+    repository: ghcr.io/al17091/threat_harvester
     tag: "web-0.1.0"
     pullPolicy: IfNotPresent
   port: 3000
@@ -69,12 +70,12 @@ dashboard:
 # Database Configuration (PostgreSQL / CloudNativePG or SQLite fallback)
 database:
   type: "postgres"  # "postgres" (recommended for k3s CNPG) or "sqlite"
-  # Existing secret name from CNPG cluster (e.g. "information-harvester-db-app")
+  # Existing secret name from CNPG cluster (e.g. "threat-harvester-db-app")
   # When set, DATABASE_URL will be mounted from the Secret's "uri" key
   existingSecret: ""
-  host: "information-harvester-db-rw"
+  host: "threat-harvester-db-rw"
   port: 5432
-  name: "information_harvester"
+  name: "threat_harvester"
   user: "harvester"
   password: ""
   sslmode: "prefer"

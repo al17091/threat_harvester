@@ -12,8 +12,8 @@ import (
 
 	"github.com/mmcdole/gofeed"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type VendorRSSHarvester struct {
@@ -173,7 +173,7 @@ func (h *VendorRSSHarvester) harvestCISAKEV(ctx context.Context, feedCfg config.
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/al17091/threat_harvester)")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -256,7 +256,7 @@ func (h *VendorRSSHarvester) harvestGitHubAdvisories(ctx context.Context, feedCf
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/al17091/threat_harvester)")
 
 	resp, err := h.client.Do(req)
 	if err != nil {

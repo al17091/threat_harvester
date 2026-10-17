@@ -16,7 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type HistoryFilter struct {
@@ -85,7 +85,7 @@ func NewStore(dbURL, sqlitePath string) (Store, error) {
 		}
 		name := os.Getenv("DB_NAME")
 		if name == "" {
-			name = "information_harvester"
+			name = "threat_harvester"
 		}
 		ssl := os.Getenv("DB_SSLMODE")
 		if ssl == "" {

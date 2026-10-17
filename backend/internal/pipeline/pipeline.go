@@ -6,13 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/analyzer"
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/harvesters"
-	"github.com/dapt/information_harvester/backend/internal/models"
-	"github.com/dapt/information_harvester/backend/internal/notifiers"
-	"github.com/dapt/information_harvester/backend/internal/reporters"
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/analyzer"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/harvesters"
+	"github.com/al17091/threat_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/notifiers"
+	"github.com/al17091/threat_harvester/backend/internal/reporters"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 type PipelineSummary struct {

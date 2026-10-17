@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-config
+  name: {{ include "threat-harvester.fullname" . }}-config
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
 data:
   PORT: {{ .Values.backend.port | default 8000 | quote }}
   COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
@@ -22,7 +22,7 @@ data:
   DB_USER: {{ .Values.database.user | quote }}
   DB_SSLMODE: {{ .Values.database.sslmode | quote }}
   {{- if .Values.tor.enabled }}
-  TOR_PROXY_URL: "socks5h://{{ include "information-harvester.fullname" . }}-tor:{{ .Values.tor.port }}"
+  TOR_PROXY_URL: "socks5h://{{ include "threat-harvester.fullname" . }}-tor:{{ .Values.tor.port }}"
   {{- else if .Values.tor.externalProxyUrl }}
   TOR_PROXY_URL: {{ .Values.tor.externalProxyUrl | quote }}
   {{- else }}

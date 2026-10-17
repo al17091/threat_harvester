@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type DiscordNotifier struct {

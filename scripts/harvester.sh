@@ -4,7 +4,7 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BIN="${ROOT_DIR}/bin/information-harvester"
+BIN="${ROOT_DIR}/bin/threat-harvester"
 
 # Load local environment variables if .env exists
 if [ -f "${ROOT_DIR}/.env" ]; then
@@ -16,7 +16,7 @@ fi
 
 build_container() {
     mkdir -p "${ROOT_DIR}/bin"
-    echo "==> Building information-harvester inside Docker container (golang:alpine)..." >&2
+    echo "==> Building threat-harvester inside Docker container (golang:alpine)..." >&2
     docker run --rm \
         -u "$(id -u):$(id -g)" \
         -v "${ROOT_DIR}:/workspace" \
@@ -26,8 +26,8 @@ build_container() {
         -e GOPATH=/tmp/go-pkg \
         -e CGO_ENABLED=0 \
         golang:alpine \
-        go build -ldflags="-s -w" -o /workspace/bin/information-harvester ./cmd/harvester
-    echo "==> Compiled binary: bin/information-harvester" >&2
+        go build -ldflags="-s -w" -o /workspace/bin/threat-harvester ./cmd/harvester
+    echo "==> Compiled binary: bin/threat-harvester" >&2
 }
 
 test_container() {

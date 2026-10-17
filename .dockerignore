@@ -32,7 +32,7 @@ web/out/
 *.tsbuildinfo
 
 # Local compiled binaries
-bin/information-harvester
+bin/threat-harvester
 *.exe
 *.test
 

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 	"github.com/mmcdole/gofeed"
 )
 
@@ -42,7 +42,7 @@ func (h *RansomwareTrackerHarvester) TestConnection(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+	req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/al17091/threat_harvester)")
 
 	resp, err := h.client.Do(req)
 	if err != nil {

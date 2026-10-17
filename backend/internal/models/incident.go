@@ -584,3 +584,47 @@ type EntityStats struct {
 	TopVictims         []VictimStat `json:"top_victims"`
 }
 
+// ExtractActorSnippet finds a concise snippet around an actor name inside text.
+func ExtractActorSnippet(text, actor string, maxRunes int) string {
+	text = strings.TrimSpace(text)
+	actor = strings.TrimSpace(actor)
+	if text == "" || actor == "" {
+		return ""
+	}
+	if maxRunes <= 0 {
+		maxRunes = 160
+	}
+
+	lowerText := strings.ToLower(text)
+	lowerActor := strings.ToLower(actor)
+	idx := strings.Index(lowerText, lowerActor)
+	if idx < 0 {
+		return ""
+	}
+
+	runes := []rune(text)
+	// Find rune index corresponding to byte index safely
+	prefixRunes := []rune(text[:idx])
+	actorRunes := []rune(actor)
+	startRune := len(prefixRunes) - 55
+	if startRune < 0 {
+		startRune = 0
+	}
+	endRune := len(prefixRunes) + len(actorRunes) + 85
+	if endRune > len(runes) {
+		endRune = len(runes)
+	}
+
+	snippet := strings.TrimSpace(string(runes[startRune:endRune]))
+	snippet = strings.ReplaceAll(snippet, "\n", " ")
+	snippet = strings.Join(strings.Fields(snippet), " ")
+	if startRune > 0 {
+		snippet = "..." + snippet
+	}
+	if endRune < len(runes) {
+		snippet = snippet + "..."
+	}
+	return snippet
+}
+
+

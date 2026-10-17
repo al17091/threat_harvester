@@ -11,6 +11,23 @@ async function handleProxy(req: NextRequest, { params }: { params: { path: strin
   const search = req.nextUrl.search;
   const targetUrl = `${getBackendUrl()}/api/${path}${search}`;
 
+  // Protect mutating requests and admin-only endpoints when deployed publicly
+  const isReadMethod = req.method === "GET" || req.method === "HEAD";
+  const isAdminOnlyGet =
+    path.startsWith("config/export") ||
+    path.startsWith("config/raw") ||
+    path.startsWith("pipeline/");
+
+  if (!isReadMethod || isAdminOnlyGet) {
+    const session = req.cookies.get("admin_session")?.value;
+    if (session !== "authenticated") {
+      return NextResponse.json(
+        { error: "Unauthorized: Administrator authentication required" },
+        { status: 401 }
+      );
+    }
+  }
+
   const headers = new Headers(req.headers);
   headers.delete("host");
 

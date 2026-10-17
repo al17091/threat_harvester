@@ -15,16 +15,16 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/dapt/information_harvester/backend/internal/analyzer"
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/harvesters"
-	"github.com/dapt/information_harvester/backend/internal/logger"
-	"github.com/dapt/information_harvester/backend/internal/models"
-	"github.com/dapt/information_harvester/backend/internal/notifiers"
-	"github.com/dapt/information_harvester/backend/internal/pipeline"
-	"github.com/dapt/information_harvester/backend/internal/reporters"
-	"github.com/dapt/information_harvester/backend/internal/scraper"
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/analyzer"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/harvesters"
+	"github.com/al17091/threat_harvester/backend/internal/logger"
+	"github.com/al17091/threat_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/notifiers"
+	"github.com/al17091/threat_harvester/backend/internal/pipeline"
+	"github.com/al17091/threat_harvester/backend/internal/reporters"
+	"github.com/al17091/threat_harvester/backend/internal/scraper"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 type Server struct {

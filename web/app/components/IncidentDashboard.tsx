@@ -47,6 +47,7 @@ import {
   Building2,
 } from "lucide-react";
 import { TerminalConsole } from "./TerminalConsole";
+import { withBasePath, isAdminPath } from "./basePath";
 
 interface ActorStat {
   name: string;
@@ -106,6 +107,8 @@ interface Incident {
   cves?: string[];
   affected_product?: string;
   threat_actors?: string[];
+  threat_actor_reasons?: Record<string, string>;
+  threat_actor_reasons_ja?: Record<string, string>;
   report_count?: number;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -130,6 +133,8 @@ interface Incident {
     impact_analysis_ja?: string;
     victim_orgs?: string[];
     threat_actors?: string[];
+    threat_actor_reasons?: Record<string, string>;
+    threat_actor_reasons_ja?: Record<string, string>;
     attack_type?: string;
     cves?: string[];
     affected_products?: string[];
@@ -343,7 +348,7 @@ export interface IncidentDashboardProps {
 
 export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProps) {
   const pathname = usePathname();
-  const isAdmin = pathname ? pathname.startsWith("/admin") : false;
+  const isAdmin = isAdminPath(pathname);
   const [currentLang, setCurrentLang] = useState<"en" | "ja">(lang);
 
   useEffect(() => {
@@ -397,7 +402,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const fetchEntityStats = async () => {
     setLoadingEntityStats(true);
     try {
-      const res = await fetch(`/api/stats/entities?limit=30`);
+      const res = await fetch(withBasePath(`/api/stats/entities?limit=30`, pathname));
       if (res.ok) {
         const data = await res.json();
         setEntityStats(data);
@@ -412,7 +417,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const fetchAllEntities = async () => {
     setLoadingAllEntities(true);
     try {
-      const res = await fetch(`/api/stats/entities?limit=500`);
+      const res = await fetch(withBasePath(`/api/stats/entities?limit=500`, pathname));
       if (res.ok) {
         const data = await res.json();
         setAllEntityStats(data);
@@ -425,7 +430,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   useEffect(() => {
-    fetch("/api/auth/verify")
+    fetch(withBasePath("/api/auth/verify", pathname))
       .then((res) => res.json())
       .then((data) => {
         if (data.authenticated) {
@@ -441,7 +446,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setAuthLoading(true);
     setAuthError("");
     try {
-      const res = await fetch("/api/auth/verify", {
+      const res = await fetch(withBasePath("/api/auth/verify", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: adminPasswordInput }),
@@ -461,7 +466,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   const handleAdminLogout = async () => {
-    await fetch("/api/auth/verify", { method: "DELETE" });
+    await fetch(withBasePath("/api/auth/verify", pathname), { method: "DELETE" });
     setIsAdminAuthenticated(false);
     setAdminPasswordInput("");
     showToast("Logged out from Admin Console");
@@ -475,7 +480,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setSelectedIncident(item);
     setShowRawInModal(false);
     try {
-      const res = await fetch(`/api/incidents/${encodeURIComponent(item.id)}?lang=${currentLang}`);
+      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(item.id)}?lang=${currentLang}`, pathname));
       if (res.ok) {
         const full = await res.json();
         setSelectedIncident(full);
@@ -528,7 +533,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     if (!selectedIncident) return;
     setSavingLabels(true);
     try {
-      const res = await fetch(`/api/incidents/${encodeURIComponent(selectedIncident.id)}/update`, {
+      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(selectedIncident.id)}/update`, pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -656,7 +661,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
     setGeneratingQueries(true);
     try {
-      const res = await fetch("/api/ai/generate-queries", {
+      const res = await fetch(withBasePath("/api/ai/generate-queries", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ directive, target_type: targetType, count: 3 }),
@@ -691,7 +696,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch("/api/status");
+      const res = await fetch(withBasePath("/api/status", pathname));
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -703,7 +708,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch("/api/config");
+      const res = await fetch(withBasePath("/api/config", pathname));
       if (res.ok) {
         const data = await res.json();
         setConfig(data);
@@ -778,7 +783,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       params.append("offset", offset.toString());
       params.append("lang", currentLang);
 
-      const res = await fetch(`/api/incidents?${params.toString()}`);
+      const res = await fetch(withBasePath(`/api/incidents?${params.toString()}`, pathname));
       if (res.ok) {
         const data = await res.json();
         setIncidents(data.items || []);
@@ -829,7 +834,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setTerminalOpen(true);
     showToast("Threat intelligence harvest started.");
     try {
-      const res = await fetch("/api/pipeline/run", { method: "POST" });
+      const res = await fetch(withBasePath("/api/pipeline/run", pathname), { method: "POST" });
       const data = await res.json();
       if (data.status !== "started") {
         showToast(data.message || "A job is already running", "error");
@@ -843,7 +848,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleToggleSource = async (sourceType: string, identifier: string, enabled: boolean) => {
     try {
-      const res = await fetch("/api/config/sources", {
+      const res = await fetch(withBasePath("/api/config/sources", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: sourceType, action: "toggle", identifier, enabled }),
@@ -861,7 +866,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleDeleteSource = async (sourceType: string, identifier: string) => {
     if (!window.confirm(`Delete source (${identifier})?`)) return;
     try {
-      const res = await fetch("/api/config/sources", {
+      const res = await fetch(withBasePath("/api/config/sources", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: sourceType, action: "delete", identifier }),
@@ -878,7 +883,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleSetComplianceMode = async (mode: string) => {
     try {
-      const res = await fetch("/api/config/compliance", {
+      const res = await fetch(withBasePath("/api/config/compliance", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
@@ -898,7 +903,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleToggleComplianceTier = async (tier: string, enabled: boolean) => {
     try {
-      const res = await fetch("/api/config/sources", {
+      const res = await fetch(withBasePath("/api/config/sources", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle_compliance_tier", identifier: tier, enabled }),
@@ -1060,7 +1065,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
 
     try {
-      const res = await fetch("/api/config/sources", {
+      const res = await fetch(withBasePath("/api/config/sources", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: type, action: "add", data }),
@@ -1123,7 +1128,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
 
     try {
-      const res = await fetch("/api/config/sources", {
+      const res = await fetch(withBasePath("/api/config/sources", pathname), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1149,7 +1154,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleSaveConfig = async () => {
     try {
-      const res = await fetch("/api/config/save", { method: "POST" });
+      const res = await fetch(withBasePath("/api/config/save", pathname), { method: "POST" });
       if (res.ok) {
         showToast("Configuration saved to config.yaml");
       } else {
@@ -1163,7 +1168,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleTestNotify = async () => {
     setTestingNotify(true);
     try {
-      const res = await fetch("/api/test/notify", { method: "POST" });
+      const res = await fetch(withBasePath("/api/test/notify", pathname), { method: "POST" });
       if (res.ok) {
         showToast("Test alert dispatched to configured Webhooks.");
       }
@@ -1177,7 +1182,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleTestNotion = async () => {
     setTestingNotion(true);
     try {
-      const res = await fetch("/api/test/notion", { method: "POST" });
+      const res = await fetch(withBasePath("/api/test/notion", pathname), { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         showToast(`Notion page created successfully (ID: ${data.page_id.slice(0, 8)}...)`);
@@ -1329,7 +1334,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
             {/* Language Switcher */}
             <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700 text-xs shadow-sm">
               <a
-                href={isAdmin ? "#" : "/en"}
+                href={isAdmin ? "#" : withBasePath("/en", pathname)}
                 onClick={(e) => {
                   if (isAdmin) {
                     e.preventDefault();
@@ -1347,7 +1352,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               </a>
               <span className="text-slate-600 px-0.5">|</span>
               <a
-                href={isAdmin ? "#" : "/ja"}
+                href={isAdmin ? "#" : withBasePath("/ja", pathname)}
                 onClick={(e) => {
                   if (isAdmin) {
                     e.preventDefault();
@@ -1367,7 +1372,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
             {/* RSS Feed is available to both Public and Admin */}
             <a
-              href="/api/feed.xml"
+              href={withBasePath("/api/feed.xml", pathname)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
@@ -1398,7 +1403,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </button>
 
                 <a
-                  href="/api/config/export"
+                  href={withBasePath("/api/config/export", pathname)}
                   download="config.yaml"
                   className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
                 >
@@ -2223,7 +2228,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </button>
 
                 <a
-                  href="/api/config/export"
+                  href={withBasePath("/api/config/export", pathname)}
                   download="config.yaml"
                   className="inline-flex items-center px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
                 >
@@ -3070,14 +3075,14 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               </div>
               <div className="flex space-x-2">
                 <a
-                  href="/api/config/export?mask_secrets=true"
+                  href={withBasePath("/api/config/export?mask_secrets=true", pathname)}
                   download="config.yaml"
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
                 >
                   Download with Masked Secrets
                 </a>
                 <a
-                  href="/api/config/export?mask_secrets=false"
+                  href={withBasePath("/api/config/export?mask_secrets=false", pathname)}
                   download="config.yaml"
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow transition"
                 >
@@ -3285,6 +3290,35 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
         )}
 
       </main>
+
+      {/* Subtle Footer: Copyright & Non-Commercial / Corporate Usage Disclaimer */}
+      <footer className="border-t border-slate-800/70 bg-slate-950/60 mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-slate-500 leading-relaxed">
+          <div className="space-y-1 max-w-4xl">
+            <p className="text-slate-400/90 font-medium">
+              {currentLang === "ja"
+                ? "【免責事項・商用利用に関するご注意】本ツールおよび公開サイトには商用利用できない収集機能（X / Telegram / ダークウェブ等）が含まれているため、そのまま商用利用することはできません。"
+                : "Notice & Disclaimer: This tool and public site include non-commercial collection features (e.g., X, Telegram, Dark Web) and cannot be used for commercial purposes as-is."}
+            </p>
+            <p>
+              {currentLang === "ja"
+                ? "法人・商用環境でご利用になる場合は、本リポジトリを Fork の上、X・Telegram・ダークウェブ等の収集モジュールを商用利用可能な公式 API 等へ変換してご利用ください。掲載情報の正確性・完全性について一切の保証を行いません。"
+                : "For corporate or commercial use, please fork this repository and replace X, Telegram, and Dark Web collectors with commercially licensed APIs. Provided \"AS IS\" without warranty of any kind."}
+            </p>
+          </div>
+          <div className="flex flex-col sm:items-end shrink-0 text-slate-500 font-mono text-[11px] space-y-0.5">
+            <a
+              href="https://github.com/al17091/threat_harvester"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 hover:text-cyan-400 transition"
+            >
+              GitHub: al17091/threat_harvester
+            </a>
+            <span>&copy; {new Date().getFullYear()} Threat Harvester. MIT License (Code).</span>
+          </div>
+        </div>
+      </footer>
 
       {/* INCIDENT DETAIL MODAL */}
       {selectedIncident && (
@@ -3648,9 +3682,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       if (validModalActors.length === 0) {
                         return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None identified"}</span>;
                       }
+                      const reasonsMap =
+                        currentLang === "ja"
+                          ? selectedIncident.threat_actor_reasons_ja ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons_ja ||
+                            selectedIncident.threat_actor_reasons ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons
+                          : selectedIncident.threat_actor_reasons ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons;
                       return validModalActors.map((a) => (
                         <span
                           key={a}
+                          title={reasonsMap?.[a] || undefined}
                           className="px-2 py-0.5 rounded text-xs bg-purple-950 text-purple-300 border border-purple-800 font-mono"
                         >
                           {a}
@@ -3695,6 +3738,97 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                 </div>
               </div>
+
+              {/* Threat Actor Attribution Basis / Evidence */}
+              {(() => {
+                const validModalActors = filterValidThreatActors(
+                  selectedIncident.enriched_parsed?.threat_actors || selectedIncident.threat_actors
+                );
+                if (validModalActors.length === 0) return null;
+
+                const resolveReason = (actor: string): string => {
+                  const mapJa =
+                    selectedIncident.threat_actor_reasons_ja ||
+                    selectedIncident.enriched_parsed?.threat_actor_reasons_ja ||
+                    {};
+                  const mapEn =
+                    selectedIncident.threat_actor_reasons ||
+                    selectedIncident.enriched_parsed?.threat_actor_reasons ||
+                    {};
+                  const primaryMap = currentLang === "ja" ? mapJa : mapEn;
+                  const fallbackMap = currentLang === "ja" ? mapEn : mapJa;
+
+                  for (const [k, v] of Object.entries(primaryMap)) {
+                    if (k.toLowerCase() === actor.toLowerCase() && v) return v;
+                  }
+                  for (const [k, v] of Object.entries(fallbackMap)) {
+                    if (k.toLowerCase() === actor.toLowerCase() && v) return v;
+                  }
+
+                  // Client-side snippet fallback if reason map isn't populated yet
+                  const extractSnip = (txt?: string | null): string | null => {
+                    if (!txt) return null;
+                    const idx = txt.toLowerCase().indexOf(actor.toLowerCase());
+                    if (idx < 0) return null;
+                    const start = Math.max(0, idx - 50);
+                    const end = Math.min(txt.length, idx + actor.length + 80);
+                    const s = txt.slice(start, end).replace(/\s+/g, " ").trim();
+                    return `${start > 0 ? "..." : ""}${s}${end < txt.length ? "..." : ""}`;
+                  };
+
+                  const srcLabel =
+                    selectedIncident.sources_detail?.[0]?.source_name ||
+                    selectedIncident.source_name ||
+                    "Report";
+                  const titleSnip = extractSnip(selectedIncident.title) || extractSnip(selectedIncident.title_ja);
+                  if (titleSnip) {
+                    return currentLang === "ja"
+                      ? `情報源「${srcLabel}」のタイトルに記載: 「${titleSnip}」`
+                      : `Mentioned in [${srcLabel}] title: "${titleSnip}"`;
+                  }
+                  const rawSnip = extractSnip(selectedIncident.raw_content);
+                  if (rawSnip) {
+                    return currentLang === "ja"
+                      ? `情報源「${srcLabel}」の本文に記載: 「${rawSnip}」`
+                      : `Mentioned in [${srcLabel}] article body: "${rawSnip}"`;
+                  }
+                  const sumSnip = extractSnip(selectedIncident.summary) || extractSnip(selectedIncident.summary_ja);
+                  if (sumSnip) {
+                    return currentLang === "ja"
+                      ? `AI要約・レポート概要に記載: 「${sumSnip}」`
+                      : `Mentioned in intelligence summary: "${sumSnip}"`;
+                  }
+                  return currentLang === "ja"
+                    ? `情報源「${srcLabel}」のメタデータまたはAI脅威分析により特定`
+                    : `Attributed via [${srcLabel}] feed metadata or AI threat correlation`;
+                };
+
+                return (
+                  <div className="bg-purple-950/20 border border-purple-900/50 rounded-lg p-3.5 space-y-2">
+                    <h4 className="text-xs font-semibold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Skull className="w-3.5 h-3.5 text-purple-400" />
+                      {currentLang === "ja"
+                        ? "脅威アクター特定の根拠・記載箇所"
+                        : "Threat Actor Attribution & Source Evidence"}
+                    </h4>
+                    <div className="space-y-1.5">
+                      {validModalActors.map((actor) => (
+                        <div
+                          key={actor}
+                          className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-2.5 text-xs bg-slate-950/70 border border-purple-900/30 rounded px-2.5 py-2"
+                        >
+                          <span className="px-2 py-0.5 rounded text-[11px] bg-purple-950 text-purple-300 border border-purple-800 font-mono font-semibold shrink-0 self-start">
+                            {actor}
+                          </span>
+                          <span className="text-slate-300 leading-relaxed break-words">
+                            {resolveReason(actor)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Preserved Sources & Child Reports Timeline */}
               <div className="pt-2 border-t border-slate-800 space-y-3">

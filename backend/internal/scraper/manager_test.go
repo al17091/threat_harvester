@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 func TestScraperManagerClearnet(t *testing.T) {

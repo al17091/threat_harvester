@@ -1,251 +1,207 @@
-# SearXNG連携 & 非同期記事スクレイピング基盤（Tor/.onion対応）および ハイブリッドAI分析（Qwen2.5-3B on k3s × Gemini）実装計画
+# Architecture Plan: SearXNG Integration, Async Article Scraping (Tor/.onion & Clearnet), and Hybrid AI Analysis (Qwen2.5-3B × Gemini)
 
-## 1. 概要と目的
+## 1. Overview & Objectives
 
-### 現状の背景と課題
-- **探索エンジン（SearXNG）の主軸化**:
-  社内/ラボ環境の **SearXNG インスタンス**（`https://searxng.lab.internal/search?q=...&format=json`）を横断探索プロバイダーとして高頻度巡回に利用します。SearXNG はバックエンドで **Ahmia や Torch 等のダークウェブ検索エンジン**および Web 検索エンジンを統合し、構造化された JSON で結果を返却します。
-- **課題1: 出力リンク先への未アクセス**:
-  現状は検索結果に含まれるスニペット（抜粋・概要）のみをインシデント化しており、出力された個別の `.onion` サイトや Web 記事への本文アクセス（ディープフェッチ）は行われていません。
-- **課題2: Tor通信および外部検索のレイテンシ**:
-  SearXNG 自体のメタサーチ処理、および個別の `.onion` ドメインへのアクセスはどちらも Tor 回線や外部依存のため、15秒〜45秒以上のレイテンシや一時的なタイムアウト（Gateway Timeout 等）が発生し得ます。これをパイプライン同期処理で行うと全体がスタックします。
-- **課題3: AI 利用コストと精度の両立（ハイブリッドAI設計）**:
-  全件を外部商用 AI API（Gemini等）で解析するとコストが嵩みます。そこで、ラボ内 k3s 上で提供される **LiteLLM 経由の Qwen2.5-3B-Instruct**（`https://litellm.lab.internal/v1/chat/completions`）をメイン（一次トリアージ・通常要約・クエリ生成）としてコストゼロでフル稼働させます。
-  一方、**Gemini は「長文コンテキスト溢れ」「最重要インシデントの深層精査」「4hごとの緩やかなWeb Search補完」という要所のみに限定投入**し、コスト90%以上削減と最高精度の両立を図ります。
+### Background & Challenges
+- **Primary Discovery Engine (SearXNG)**:
+  An internal/self-hosted **SearXNG instance** (`https://searxng.lab.internal/search?q=...&format=json`) serves as the high-frequency cross-search provider. SearXNG aggregates **dark web search engines (Ahmia, Torch)** and clearnet web search engines into structured JSON responses.
+- **Challenge 1: Deep Fetching of Linked Articles**:
+  Previously, only search result snippets were ingested as incidents without fetching the full body text of individual `.onion` sites or clearnet articles.
+- **Challenge 2: Tor & External Search Latency**:
+  SearXNG metasearch queries and direct `.onion` domain requests over Tor can incur 15–45+ second latencies or temporary gateway timeouts. Performing these synchronously blocks the ingestion pipeline.
+- **Challenge 3: Balancing AI Cost & Accuracy (Hybrid AI Architecture)**:
+  Analyzing every item via commercial external LLM APIs incurs significant cost. By using a self-hosted **LiteLLM Qwen2.5-3B-Instruct** endpoint (`https://litellm.lab.internal/v1/chat/completions`) as the primary engine (initial triage, standard summarization, and query generation) at zero marginal cost, and **escalating to Gemini only for oversized contexts, Critical/High Japan-direct incidents, and 4-hour periodic web search grounding**, the platform reduces API costs by over 90% while maintaining high analytical accuracy.
 
-### 目的
-1. **SearXNG JSON API クライアントの実装**:
-   - `https://searxng.lab.internal/search?q=...&format=json` を叩き、Ahmia / Torch 等から集約された検索結果（タイトル、スニペット、URL、エンジン情報）を安定して取得・パース。
-   - 内部 TLS 自己署名証明書の許容、タイムアウト耐性（緩和設定）とエラーハンドリングを強化。
-2. **二段階アーキテクチャの確立**:
-   - **第1段階（即時速報）**: SearXNG のスニペットや RSS 抜粋で即座にインシデント登録・ローカル AI（Qwen2.5-3B）による一次判定・アラート通知を行う（速報性を100%維持）。
-   - **第2段階（非同期本文フェッチ）**: 検索結果から得られた `.onion` ドメインや Web 記事 URL を専用キューに積み、バックグラウンドの常駐ワーカーが Tor / Clearnet 経由で非同期に全文をスクレイピング・保管。
-3. **Tor / Clearnet 分離ワーカーの実装**:
-   - `.onion` URL は Tor SOCKS5h プロキシ経由の Tor 専用ワーカーで取得。
-   - 一般の Web URL は Clearnet 専用ワーカーで取得。
-4. **ハイブリッド AI アーキテクチャの確立（Qwen2.5-3B × Gemini）**:
-   - **メイン（日常・大量処理: コスト0）**: LiteLLM（Qwen2.5-3B-Instruct）で一次トリアージ、短〜中長文要約、クエリ生成。
-   - **エスカレーション（要所のみ）**: Gemini を「長文コンテキスト溢れ時（フォールバック）」および「Critical/High×日本直撃の重要案件」に限定投入。
-   - **探索の頻度分離**: 検索の主軸は SearXNG（高頻度・常時）とし、Gemini の Google Web Search は 4 時間に 1 回程度の低頻度補完とする。
-5. **`config.yaml` による完全なパラメータ制御**:
-   - SearXNG のエンドポイント、スクレイパーの並行数/タイムアウト/リトライ、AI エスカレーション条件等をすべて YAML で一元管理。
-6. **UI & レポートの英語統一（English-First）**:
-   - Web UI、アラート通知（Discord/Slack）、AI 分析結果（タイトル、要約、影響分析、推奨アクション）をすべて英語で統一。
-   - ブラウザの Google 翻訳等で簡単に多言語対応できるようにしつつ、Qwen2.5-3B の英語プロンプトによる推論精度・語彙力向上と多言語混入（中国語リーク）リスクを徹底排除。
+### Objectives
+1. **SearXNG JSON API Client**:
+   - Query `https://searxng.lab.internal/search?q=...&format=json` to reliably parse aggregated search results (title, snippet, URL, engine metadata) from Ahmia, Torch, and clearnet engines.
+   - Support internal self-signed TLS certificates, configurable timeouts, and resilient error handling.
+2. **Two-Stage Ingestion & Enrichment Architecture**:
+   - **Stage 1 (Immediate Triage)**: Register incidents immediately from SearXNG snippets or RSS summaries, run primary triage via local AI (Qwen2.5-3B), and dispatch immediate alerts.
+   - **Stage 2 (Async Full-Text Scraping)**: Enqueue discovered `.onion` and clearnet article URLs into a persistent database queue processed asynchronously by background workers.
+3. **Isolated Tor & Clearnet Worker Pools**:
+   - Route `.onion` URLs through dedicated Tor workers via a SOCKS5h proxy.
+   - Route standard web URLs through dedicated Clearnet workers.
+4. **Hybrid AI Architecture (Qwen2.5-3B × Gemini)**:
+   - **Primary (High-Volume / Zero Cost)**: LiteLLM (`Qwen2.5-3B-Instruct`) handles initial triage, short-to-medium article summarization, and search query generation.
+   - **Escalation (Targeted High-Impact)**: Escalate to Gemini when article length exceeds local context thresholds or when an incident is classified as `Critical` or `High` with `Direct` Japan relevance.
+   - **Decoupled Discovery Cadence**: Run SearXNG continuously at short intervals, while throttling Gemini Google Web Search Grounding to once every 4 hours.
+5. **Declarative Configuration via `config.yaml`**:
+   - Manage SearXNG endpoints, scraper concurrency/timeouts/retries, and AI escalation rules centrally in `config.yaml`.
+6. **Bilingual & English-First Intelligence Standardization**:
+   - Standardize structured AI outputs and notifications while supporting `/en` and `/ja` views in the Next.js Cyber SOC Web Dashboard.
 
 ---
 
-## 2. システムアーキテクチャ設計
+## 2. System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Discovery_Layer["探索層（頻度分離）"]
-        S_URL["SearXNG (Ahmia, Torch, Web)\n高頻度巡回 (常時/短間隔) コスト0"]
-        G_Search["Gemini Web Search Grounding\n低頻度補完 (4時間ごと)"]
+    subgraph Discovery_Layer["Discovery Layer (Decoupled Cadence)"]
+        S_URL["SearXNG (Ahmia, Torch, Web)\nHigh-Frequency Polling (Zero Cost)"]
+        G_Search["Gemini Web Search Grounding\nLow-Frequency Supplement (Every 4h)"]
     end
 
-    subgraph LLM_Layer["AI 推論基盤 (ハイブリッド)"]
-        LiteLLM["LiteLLM (k3s)\nQwen2.5-3B-Instruct (コスト0)"]
-        GeminiAPI["Gemini API\n(長文溢れ / 重大案件 / 4h WebSearch)"]
+    subgraph LLM_Layer["Hybrid AI Inference Layer"]
+        LiteLLM["LiteLLM (k3s)\nQwen2.5-3B-Instruct (Zero Cost)"]
+        GeminiAPI["Gemini API\n(Long-Context Fallback / Critical Escalation / 4h Search)"]
     end
 
-    subgraph Ingestion["即時収集パイプライン（同期）"]
+    subgraph Ingestion["Stage 1: Synchronous Ingestion Pipeline"]
         Harvester["SearXNG / Tor Harvester"]
-        RSS["Vendor RSS Harvester"]
+        RSS["Vendor & CERT RSS Harvester"]
         
-        S_URL -->|"JSON レスポンス"| Harvester
-        Harvester --> Pipe["収集パイプライン"]
+        S_URL -->|"JSON Response"| Harvester
+        Harvester --> Pipe["Ingestion Pipeline"]
         RSS --> Pipe
         G_Search --> Pipe
 
-        Pipe --> AI_Quick["Qwen2.5-3B 即時トリアージ\n(スニペットベース / コスト0)"]
+        Pipe --> AI_Quick["Qwen2.5-3B Rapid Triage\n(Snippet-Based / Zero Cost)"]
         AI_Quick <--> LiteLLM
-        AI_Quick --> DB_Quick[("threat_items / incidents\n(一次保管: fetch_status=PENDING)")]
-        DB_Quick -.-> Alert["Discord / Slack 即時通知"]
+        AI_Quick --> DB_Quick[("threat_items / incidents\n(Initial Storage: fetch_status=pending)")]
+        DB_Quick -.-> Alert["Discord / Slack / Webhook Alert"]
     end
 
-    subgraph QueueSystem["非同期スクレイピング・キュー基盤"]
-        Q[("記事フェッチキュー (DB永続化)\npending / fetching / completed / failed")]
-        DB_Quick ==>|"未フェッチURLをキュー投入"| Q
+    subgraph QueueSystem["Stage 2: Async Scraping Queue"]
+        Q[("Persistent Article Fetch Queue\npending / fetching / completed / failed")]
+        DB_Quick ==>|"Enqueue Unfetched URLs"| Q
         Dispatcher["Queue Dispatcher / Worker Pool"]
         Q --> Dispatcher
 
-        subgraph Workers["分離された非同期ワーカープール"]
-            W_Tor["Tor / Onion ワーカー (並行度: 1〜2)\nTimeout: 45s\nSOCKS5h Proxy 経由"]
-            W_Clear["Clearnet ワーカー (並行度: 4〜6)\nTimeout: 15s\nDirect HTTP"]
+        subgraph Workers["Isolated Async Worker Pools"]
+            W_Tor["Tor / Onion Workers (Concurrency: 1-2)\nTimeout: 45s via SOCKS5h Proxy"]
+            W_Clear["Clearnet Workers (Concurrency: 4-6)\nTimeout: 15s Direct HTTP"]
         end
 
-        Dispatcher -->|".onion (Ahmia/Torch等)"| W_Tor
-        Dispatcher -->|"一般Web URL"| W_Clear
+        Dispatcher -->|".onion (Ahmia/Torch)"| W_Tor
+        Dispatcher -->|"Standard Web URL"| W_Clear
     end
 
-    subgraph PostProcessing["データ統合 & 後続更新"]
-        DB_Update[("threat_items.raw_content 更新\nfetch_status=COMPLETED")]
-        IncSync["親インシデント (STIX) の raw_content 統合"]
+    subgraph PostProcessing["Data Consolidation & Re-Analysis"]
+        DB_Update[("Update threat_items.raw_content\nfetch_status=completed")]
+        IncSync["Sync raw_content to Parent STIX Incident"]
         
         W_Tor --> DB_Update
         W_Clear --> DB_Update
         DB_Update --> IncSync
 
-        IncSync --> Branch{"AI 詳細再要約判定"}
-        Branch -->|"通常長文 (<= 6000文字)"| AI_Local["Qwen2.5-3B 詳細要約 (コスト0)"]
+        IncSync --> Branch{"Hybrid AI Re-Analysis Check"}
+        Branch -->|"Standard Length (<= 6000 runes)"| AI_Local["Qwen2.5-3B Detailed Summary (Zero Cost)"]
         AI_Local <--> LiteLLM
-        Branch -->|"長文溢れ (> 6000文字) または\nCritical / High×日本直撃"| AI_Gemini["Gemini エスカレーション再解析\n(深層推論 / 巨大コンテキスト)"]
+        Branch -->|"Oversized (> 6000 runes) OR\nCritical / High + Japan Direct"| AI_Gemini["Gemini Escalation Deep Analysis"]
         AI_Gemini <--> GeminiAPI
     end
 ```
 
 ---
 
-## 3. 詳細仕様と設定設計
-
-### 3.1. `config.yaml` 設定仕様（完全制御）
-
-`config.yaml` に以下の設定セクションを追加・拡張します：
+## 3. Configuration Specification (`config.yaml`)
 
 ```yaml
 # -------------------------------------------------------------
-# AI 分析基盤設定 (ハイブリッド: Qwen2.5-3B on k3s × Gemini)
+# AI Analysis Engine (Hybrid: Qwen2.5-3B on k3s × Gemini)
 # -------------------------------------------------------------
 ai:
-  # メインエンジン (LiteLLM / k3s: コスト0)
+  # Primary Engine (LiteLLM / k3s: Zero Cost)
   primary_provider: "openai_compatible"
   endpoint: "https://litellm.lab.internal/v1/chat/completions"
   model: "qwen2.5-3b-instruct"
   temperature: 0.1
-  insecure_skip_verify: true           # 社内自己署名証明書 (-k) 許容
+  insecure_skip_verify: true
   timeout_seconds: 60
 
-  # エスカレーションエンジン (Gemini: 要所のみ投入)
+  # Escalation Engine (Gemini: Targeted High-Impact / Long Context)
   escalation:
-    enabled: true                      # 要所での Gemini 活用を有効化
+    enabled: true
     gemini_api_key: "${GEMINI_API_KEY}"
     gemini_model: "gemini-3.5-flash-lite"
     
-    # トリガー条件1: コンテキスト溢れ時の長文フォールバック
-    max_local_content_runes: 6000      # 6,000文字を超える巨大記事は Gemini で要約
+    # Trigger 1: Long-context fallback when article exceeds rune threshold
+    max_local_content_runes: 6000
     
-    # トリガー条件2: 重大インシデントの深層精査
+    # Trigger 2: High-severity & Japan-direct deep inspection
     trigger_severities: ["Critical"]
-    trigger_japan_direct: true         # High かつ 日本直撃（Direct）なら Gemini 精査
+    trigger_japan_direct: true
 
 # -------------------------------------------------------------
-# 横断探索設定 (SearXNG 主軸 / Gemini Web Search 補完)
+# Discovery Sources (SearXNG Primary / Gemini Grounding Supplement)
 # -------------------------------------------------------------
 sources:
-  # 【主軸】SearXNG (常時・短間隔で実行)
   darkweb_onion:
-    - name: "SearXNG横断探索: 日本関連組織ランサムウェア・データ侵害"
+    - name: "SearXNG Cross-Search: Japan Ransomware & Data Breaches"
       url: "https://searxng.lab.internal/search"
       type: "searxng"
       engines: "ahmia,torch"
       categories: "onions"
-      directive: "日本国内の企業や組織を標的としたランサムウェアリークサイト（DLS）の暴露情報やデータ侵害"
+      directive: "Ransomware data leak sites (DLS) and data breaches targeting Japanese organizations"
       query: "japan ransomware leak breach"
       timeout_seconds: 30
       enabled: true
 
-    - name: "SearXNG横断探索: 未修正ゼロデイ・悪用PoC・初期アクセス販売"
+    - name: "SearXNG Cross-Search: Zero-Day Exploits & Initial Access Brokers"
       url: "https://searxng.lab.internal/search"
       type: "searxng"
       engines: "ahmia,torch"
-      directive: "ゼロデイ脆弱性の悪用PoC、エクスプロイトコード、VPNや境界機器の初期アクセス販売"
+      directive: "Zero-day exploit PoCs, vulnerability brokers, and VPN/edge initial access listings"
       query: "0day exploit poc vulnerability broker"
       timeout_seconds: 30
       enabled: true
 
-  # 【低頻度補完】Gemini Web Search Grounding (4時間ごとに実行)
   web_search:
-    - name: "Google Grounding定期補完探索"
-      directive: "日本国内組織を標的とする最新のサイバー攻撃・重大インシデント動向"
-      interval_minutes: 240          # 4時間 (240分) ごとに実行
+    - name: "Google Grounding Periodic Supplement"
+      directive: "Latest cyber attacks and high-impact security incidents targeting Japanese organizations"
+      interval_minutes: 240
       enabled: true
 
 # -------------------------------------------------------------
-# 非同期記事スクレイパー設定 (Async Article Content Scraper)
+# Async Article Content Scraper
 # -------------------------------------------------------------
 scraper:
-  enabled: true                      # 非同期スクレイピング全体の有効/無効
-  clearnet_enabled: true             # 一般Webサイト（RSS、ニュース等）のスクレイピング有効/無効
-  tor_enabled: true                  # .onion ドメインのスクレイピング有効/無効
+  enabled: true
+  clearnet_enabled: true
+  tor_enabled: true
 
-  # ワーカー並行度設定
-  clearnet_concurrency: 5            # 一般Web向けワーカー並行数 (デフォルト: 5)
-  tor_concurrency: 2                 # Tor/.onion 向けワーカー並行数 (デフォルト: 2)
+  clearnet_concurrency: 5
+  tor_concurrency: 2
 
-  # タイムアウト設定（秒）
-  clearnet_timeout_seconds: 15       # 一般Web向けHTTPタイムアウト
-  tor_timeout_seconds: 45            # Tor/.onion 向けHTTPタイムアウト
+  clearnet_timeout_seconds: 15
+  tor_timeout_seconds: 45
 
-  # キュー・リトライ制御
-  worker_interval_seconds: 10        # キュー監視ポーリング間隔 (秒)
-  batch_size: 20                     # 1回のポーリングで取得する最大件数
-  max_attempts: 2                    # 失敗時の最大試行回数 (404/タイムアウト等)
+  worker_interval_seconds: 10
+  batch_size: 20
+  max_attempts: 2
 
-  # AI再解析・後続連携
-  auto_re_analyze: true              # 本文取得完了時に自動再要約を実行 (Qwen2.5/Geminiハイブリッド)
+  auto_re_analyze: true
 ```
 
-### 3.2. 役割分担マトリクス
+### Responsibility Matrix
 
-| 処理項目 | 実行頻度 | 担当エンジン | コスト・特徴 |
+| Processing Stage | Execution Cadence | Responsible Engine | Cost & Characteristics |
 | :--- | :--- | :---: | :--- |
-| **SearXNG 横断探索** | 毎回収集（常時/15〜30分） | **SearXNG API** | **コスト0**。Ahmia/Torch/Clearnet のメタサーチ |
-| **スニペット即時判定** | 毎回収集（1日数千件） | **Qwen2.5-3B (LiteLLM)** | **コスト0**。高速トリアージ・分類・CVE抽出 |
-| **通常本文の再要約** | キュー取得時（本文 <= 6000文字） | **Qwen2.5-3B (LiteLLM)** | **コスト0**。標準的な記事要約 |
-| **長文本文の再要約** | キュー取得時（本文 > 6000文字） | **Gemini API** | コンテキスト溢れ防止。巨大レポートを精確に読解 |
-| **重大インシデント深層精査**| 発生時（Critical または High×日本直撃） | **Gemini API** | 最高品質の影響分析・サプライチェーン評価 |
-| **Web Search 探索補完** | **4時間ごと (240分)** | **Gemini Web Search** | 低頻度で Google リアルタイム検索の網羅性を補完 |
+| **SearXNG Cross-Search** | Every collection cycle (15–30m) | **SearXNG API** | **Zero cost**. Metasearch across Ahmia, Torch, and Clearnet |
+| **Snippet Rapid Triage** | Every collection cycle | **Qwen2.5-3B (LiteLLM)** | **Zero cost**. Fast triage, classification, and CVE extraction |
+| **Standard Full-Text Summary** | On queue fetch (`<= 6000` runes) | **Qwen2.5-3B (LiteLLM)** | **Zero cost**. Detailed article summarization |
+| **Long-Context Summary** | On queue fetch (`> 6000` runes) | **Gemini API** | Prevents context overflow on long technical reports |
+| **Critical Incident Deep Audit** | On `Critical` or `High` + Japan Direct | **Gemini API** | High-precision impact analysis & supply-chain assessment |
+| **Web Search Grounding** | **Every 4 hours (240m)** | **Gemini Web Search** | Low-frequency real-time Google Search coverage |
 
 ---
 
-## 4. 実装ステップ
+## 4. Implementation Milestones
 
-```mermaid
-flowchart LR
-    S1["Step 1\nSearXNGクライアント実装"] --> S2["Step 2\nLiteLLMアナライザー実装"]
-    S2 --> S3["Step 3\nハイブリッドエスカレーション連携"]
-    S3 --> S4["Step 4\nTor/Clearnetスクレイパー"]
-    S4 --> S5["Step 5\nconfig&DBスキーマ拡張"]
-    S5 --> S6["Step 6\n非同期キュー&ワーカー"]
-    S6 --> S7["Step 7\n4h探索間隔制御&結合テスト"]
-    S7 --> S8["Step 8\nWeb UI&通知の完全英語化"]
-```
-
-### Step 1: SearXNG JSON API クライアントの実装
-- [`darkweb.go`](file:///home/dapt/projects/information_harvester/backend/internal/harvesters/darkweb.go) に SearXNG API（`format=json`）呼び出し処理を実装。
-- `https://searxng.lab.internal/search` への TLS 自己署名/内部証明書対応、タイムアウト緩和設定、クエリ・パラメータ付与。
-- Ahmia / Torch 等のエンジン情報やスニペット、`.onion` URL を抽出するパース処理を実装。
-
-### Step 2: LiteLLM / OpenAI 互換 AI アナライザーの実装
-- `backend/internal/analyzer` に OpenAI 互換クライアントを実装。
-- `https://litellm.lab.internal/v1/chat/completions` へ `qwen2.5-3b-instruct` でリクエストを送信。
-- 英語プロンプト・英語 JSON 出力（TitleEn, SummaryEn, ImpactAnalysisEn, RecommendedActionsEn）に対応。
-- 自己署名証明書（`InsecureSkipVerify: true`）対応。
-- 単一アイテム分析（`Analyze`）、バッチ分析（`AnalyzeBatch`）、検索クエリ生成（`GenerateSearchQueries`）に対応。
-
-### Step 3: ハイブリッド・エスカレーション制御の実装
-- 本文文字数判定（`> max_local_content_runes`）による Gemini への自動フォールバック。
-- `severity == "Critical"` または `severity == "High" && japan_relevance == "Direct"` 判定時の Gemini 深層分析エスカレーションロジックを実装。
-
-### Step 4: Tor / Clearnet 記事スクレイパーの実装
-- [`article.go`](file:///home/dapt/projects/information_harvester/backend/internal/harvesters/article.go) に `FetchOnionArticleContent`（Tor プロキシ経由）を追加。
-- 既存の Clearnet 用 `FetchArticleContent` と共通の HTML 本文抽出ロジック（`ExtractArticleTextFromHTML`）を適用。
-
-### Step 5: `config.yaml` & `config.go` 設定構造体の拡張 & DB スキーマ拡張
-- `config.go` に `ScraperConfig` および `ai.escalation`, `web_search.interval_minutes` を追加。
-- PostgreSQL / SQLite の `threat_items` に `fetch_status`, `fetch_attempts`, `fetch_error`, `fetched_at` を追加。
-
-### Step 6: 非同期キューマネージャー & ワーカーエンジンの実装
-- バックグラウンドで常駐するキューディスパッチャーを実装。
-- `pending` なアイテムを定期取得し、Clearnet / Tor 各ワーカープールへ振り分けて本文フェッチを実行。
-- 取得成功時に `raw_content` を上書き更新し、ハイブリッド再要約を実行して親インシデントへ同期。
-
-### Step 7: Web Search 4h 実行間隔制御 & パイプライン結合テスト
-- `websearch.go` の巡回実行間隔を `interval_minutes`（4時間 = 240分）に基づきスキップ判定するロジックを実装。
-- 全体の結合テストで「SearXNG 高頻度取得 → Qwen2.5 一次判定 → 非同期フェッチ → ハイブリッド再要約」および「4hごとの Gemini Web Search 補完」の連携を検証。
-
-### Step 8: Web UI & 通知の完全英語化（English-First）
-- `web/app/page.tsx`: 日本語のラベル、トースト通知、プレースホルダー、モーダル等の UI テキストを英語に統一。
-- `backend/internal/notifiers`: Discord / Slack / Webhook 通知メッセージを英語フォーマットに刷新。
-- `backend/internal/models`: インシデントのサマリー・影響分析表示を英語対応。
+1. **Step 1: SearXNG JSON API Client (`backend/internal/harvesters/darkweb.go`)**
+   - Query SearXNG (`format=json`), support internal TLS (`InsecureSkipVerify`), and extract Ahmia/Torch `.onion` results.
+2. **Step 2: LiteLLM / OpenAI-Compatible Analyzer (`backend/internal/analyzer`)**
+   - Support single-item analysis, batch analysis (`AnalyzeBatch`), and search query generation via `qwen2.5-3b-instruct`.
+3. **Step 3: Hybrid Escalation Controller**
+   - Automatically escalate to Gemini when rune length exceeds `max_local_content_runes` or when severity/relevance matches escalation triggers.
+4. **Step 4: Tor & Clearnet Article Scrapers (`backend/internal/harvesters/article.go`)**
+   - Implement `FetchOnionArticleContent` via Tor SOCKS5h proxy and `FetchArticleContent` for clearnet URLs with shared HTML text extraction.
+5. **Step 5: Config & Database Schema Expansion**
+   - Add `ScraperConfig`, `ai.escalation`, and `fetch_status` / `fetch_attempts` / `fetch_error` / `fetched_at` tracking columns.
+6. **Step 6: Async Queue Manager & Worker Pool (`backend/internal/scraper`)**
+   - Poll `pending` items, dispatch to isolated Clearnet/Tor worker pools, update `raw_content`, and trigger hybrid re-analysis.
+7. **Step 7: 4-Hour Web Search Throttling & Integration Testing**
+   - Enforce `interval_minutes` throttling for Gemini Grounded Search and verify end-to-end pipeline execution.
+8. **Step 8: Cyber SOC Dashboard & Bilingual Support (`web/`)**
+   - Provide `/en` and `/ja` dashboard views, RSS feeds (`/rss`), and protected admin operations.

@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/api"
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/logger"
-	"github.com/dapt/information_harvester/backend/internal/pipeline"
-	"github.com/dapt/information_harvester/backend/internal/storage"
+	"github.com/al17091/threat_harvester/backend/internal/api"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/logger"
+	"github.com/al17091/threat_harvester/backend/internal/pipeline"
+	"github.com/al17091/threat_harvester/backend/internal/storage"
 )
 
 func main() {

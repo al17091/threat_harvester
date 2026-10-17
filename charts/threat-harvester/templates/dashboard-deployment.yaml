@@ -2,20 +2,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "information-harvester.fullname" . }}-dashboard
+  name: {{ include "threat-harvester.fullname" . }}-dashboard
   labels:
-    {{- include "information-harvester.labels" . | nindent 4 }}
+    {{- include "threat-harvester.labels" . | nindent 4 }}
     app.kubernetes.io/component: dashboard
 spec:
   replicas: {{ .Values.dashboard.replicas }}
   selector:
     matchLabels:
-      {{- include "information-harvester.selectorLabels" . | nindent 6 }}
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: dashboard
   template:
     metadata:
       labels:
-        {{- include "information-harvester.selectorLabels" . | nindent 8 }}
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: dashboard
     spec:
       containers:
@@ -32,10 +32,12 @@ spec:
             - name: HOSTNAME
               value: "0.0.0.0"
             - name: BACKEND_URL
-              value: "http://{{ include "information-harvester.fullname" . }}-backend:{{ .Values.backend.service.port }}"
+              value: "http://{{ include "threat-harvester.fullname" . }}-backend:{{ .Values.backend.service.port }}"
+            - name: BASE_PATH
+              value: {{ .Values.dashboard.basePath | default "/thhv" | quote }}
           envFrom:
             - secretRef:
-                name: {{ include "information-harvester.secretName" . }}
+                name: {{ include "threat-harvester.secretName" . }}
           livenessProbe:
             httpGet:
               path: /

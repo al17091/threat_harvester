@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dapt/information_harvester/backend/internal/config"
-	"github.com/dapt/information_harvester/backend/internal/models"
+	"github.com/al17091/threat_harvester/backend/internal/config"
+	"github.com/al17091/threat_harvester/backend/internal/models"
 )
 
 type queryCacheEntry struct {
@@ -75,13 +75,14 @@ type analysisOutput struct {
 	SummaryJa            string   `json:"summary_ja"`
 	ImpactAnalysis       string   `json:"impact_analysis"`
 	ImpactAnalysisJa     string   `json:"impact_analysis_ja"`
-	VictimOrgs           []string `json:"victim_orgs"`
-	ThreatActors         []string `json:"threat_actors"`
-	AttackType           string   `json:"attack_type"`
-	CVEs                 []string `json:"cves,omitempty"`
-	AffectedProducts     []string `json:"affected_products,omitempty"`
-	RecommendedActions   []string `json:"recommended_actions,omitempty"`
-	RecommendedActionsJa []string `json:"recommended_actions_ja,omitempty"`
+	VictimOrgs           []string          `json:"victim_orgs"`
+	ThreatActors         []string          `json:"threat_actors"`
+	ThreatActorReasons   map[string]string `json:"threat_actor_reasons,omitempty"`
+	AttackType           string            `json:"attack_type"`
+	CVEs                 []string          `json:"cves,omitempty"`
+	AffectedProducts     []string          `json:"affected_products,omitempty"`
+	RecommendedActions   []string          `json:"recommended_actions,omitempty"`
+	RecommendedActionsJa []string          `json:"recommended_actions_ja,omitempty"`
 }
 
 func cleanJSONFences(raw string) string {
@@ -182,6 +183,9 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		}
 	}
 
+	cleanActors := models.CleanThreatActors(out.ThreatActors)
+	actorReasons := ResolveThreatActorReasons(item, cleanActors, out.ThreatActorReasons)
+
 	return &models.EnrichedThreat{
 		ItemID:               item.ID,
 		Item:                 item,
@@ -194,7 +198,8 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     out.ImpactAnalysisJa,
 		VictimOrgs:           out.VictimOrgs,
-		ThreatActors:         out.ThreatActors,
+		ThreatActors:         cleanActors,
+		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
 		AffectedProducts:     affectedProducts,
@@ -298,6 +303,7 @@ URL: %s
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["Identified victim organization names"],
     "threat_actors": ["Identified threat actors / cybercrime groups"],
+    "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["CVE identifiers e.g. CVE-2026-88771"],
     "affected_products": ["Affected product/software names e.g. FortiMail, NetScaler ADC, WordPress"],
@@ -462,6 +468,7 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["被害組織名（判明している場合）"],
     "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
+    "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
     "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],

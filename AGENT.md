@@ -10,11 +10,11 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
    - Code must remain fully compatible with the MIT License (commercial and non-commercial use allowed).
    - Only dependencies with permissive open-source licenses (MIT, Apache 2.0, BSD) are allowed. Avoid copyleft licenses (e.g., AGPL/GPL).
 2. **Project Structure**:
-   - `backend/`: High-performance Go CTI Engine (`information-harvester`), Gemini AI analyzer, and concurrent threat harvesters.
+   - `backend/`: High-performance Go CTI Engine (`threat-harvester`), Gemini AI analyzer, and concurrent threat harvesters.
    - `web/`: Next.js 14 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
-   - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/information-harvester/` for k3s).
+   - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/threat-harvester/` for k3s).
 3. **Container Image Naming**:
-   - The Docker image name is strictly `information_harvester` (underscored, e.g., `ghcr.io/dapt/information_harvester`). Never use `threat-harvester` or other aliases.
+   - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated service tags (`backend-<version>` and `web-<version>`). Never use `threat-harvester` or other aliases.
 4. **Database & Architecture Target**:
    - Deployment target is k3s with PostgreSQL provided by CloudNativePG (CNPG), falling back to SQLite for local development.
    - All database operations in `backend/internal/storage/` must remain dialect-aware (PostgreSQL + SQLite).
@@ -48,7 +48,7 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 
 ## 3. Interaction & Task Tracking Protocol
 
-- **Next Steps Inquiries**: When the user asks "What should we do next?" (「次は何をすればいい？」), consult [`docs/task_tracker.md`](docs/task_tracker.md), evaluate priorities, and propose concrete, prioritized actions in Japanese.
+- **Next Steps Inquiries**: When the user asks "What should we do next?", consult [`docs/task_tracker.md`](docs/task_tracker.md), evaluate priorities, and propose concrete, prioritized actions.
 - **Task Tracking Updates**: Keep [`docs/task_tracker.md`](docs/task_tracker.md) synchronized when completing milestones or establishing new backlog items.
 
 ---
@@ -60,9 +60,8 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
    - Node.js 20+ / Next.js for the `web/` dashboard.
 2. **Quality Gates**:
    - **Go Tests**: `go test -v ./...` in `backend/` must pass completely.
-   - **Linter & Python Tests** (for compatibility): `ruff check .` and `.venv/bin/pytest tests/` must pass.
    - **Frontend Build**: `npm --prefix web run build` must compile cleanly without errors.
-   - **Helm Lint**: `helm lint charts/information-harvester` must report 0 failures when chart manifests are modified.
+   - **Helm Lint**: `helm lint charts/threat-harvester` must report 0 failures when chart manifests are modified.
 3. **Resilience & Fault Tolerance**:
    - Threat collectors (`backend/internal/harvesters/`) must never crash the pipeline on external timeouts or HTTP errors. Handle exceptions gracefully with informative logging.
    - Sinks (`backend/internal/notifiers/`, `backend/internal/reporters/`) must fail safely without interrupting data collection.
