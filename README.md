@@ -1,4 +1,4 @@
-# Threat Harvester (Japan Cyber Threat Intelligence Feeds Collector)
+# Threat Harvester 
 
 [![CI / Quality Gates](https://github.com/al17091/threat_harvester/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/al17091/threat_harvester/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -7,6 +7,8 @@
 [![Next.js: 16+](https://img.shields.io/badge/Next.js-16+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/threat-harvester)
+
+## Japan Cyber Threat Intelligence Feeds Collector
 
 Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLLM Qwen2.5-3B + Gemini Escalation), Cyber SOC Dashboard, and notification platform focusing on **Japan-targeted threats and domestic incidents**.
 
