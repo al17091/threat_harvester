@@ -23,13 +23,15 @@ import (
 	"github.com/dapt/information_harvester/backend/internal/notifiers"
 	"github.com/dapt/information_harvester/backend/internal/pipeline"
 	"github.com/dapt/information_harvester/backend/internal/reporters"
+	"github.com/dapt/information_harvester/backend/internal/scraper"
 	"github.com/dapt/information_harvester/backend/internal/storage"
 )
 
 type Server struct {
-	store    storage.Store
-	pipeline *pipeline.Pipeline
-	router   *chi.Mux
+	store      storage.Store
+	pipeline   *pipeline.Pipeline
+	scraperMgr *scraper.ScraperManager
+	router     *chi.Mux
 
 	pipeMu           sync.Mutex
 	isPipeRunning    bool
@@ -41,14 +43,21 @@ type Server struct {
 	torMu        sync.Mutex
 	lastTorCheck time.Time
 	lastTorState bool
+
+	llmMu        sync.Mutex
+	lastLLMCheck time.Time
+	lastLLMState bool
 }
 
 func NewServer(store storage.Store) *Server {
 	logger.InitGlobalLogger()
+	cfg := config.GetSettings().GetConfig()
+	pipe := pipeline.NewPipeline(store)
 	s := &Server{
-		store:    store,
-		pipeline: pipeline.NewPipeline(store),
-		router:   chi.NewRouter(),
+		store:      store,
+		pipeline:   pipe,
+		scraperMgr: scraper.NewScraperManager(store, pipe.Analyzer(), cfg.Scraper, cfg.Network),
+		router:     chi.NewRouter(),
 	}
 	s.setupRoutes()
 	return s
@@ -80,8 +89,10 @@ func (s *Server) setupRoutes() {
 		r.Get("/rss", s.handleRSSFeed)
 		r.Get("/feed.xml", s.handleRSSFeed)
 		r.Get("/status", s.handleStatus)
+		r.Get("/stats/entities", s.handleGetEntityStats)
 		r.Get("/incidents", s.handleListIncidents)
 		r.Get("/incidents/{id}", s.handleGetIncident)
+		r.Post("/incidents/{id}/update", s.handleUpdateIncidentLabels)
 
 		r.Get("/config", s.handleGetConfig)
 		r.Get("/config/raw", s.handleGetRawConfig)
@@ -93,6 +104,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/pipeline/run", s.handleTriggerPipeline)
 		r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
 		r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
+		r.Post("/pipeline/translate-incidents", s.handleTranslateIncidents)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
 		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
@@ -142,6 +154,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	torOnline := s.lastTorState
 	s.torMu.Unlock()
+
+	s.llmMu.Lock()
+	if time.Since(s.lastLLMCheck) > 60*time.Second {
+		llmAnalyzer := analyzer.NewOpenAICompatibleAnalyzer(
+			cfg.AI.Endpoint,
+			cfg.AI.Model,
+			cfg.AI.APIKey,
+			cfg.AI.Temperature,
+			cfg.AI.InsecureSkipVerify,
+			5,
+		)
+		s.lastLLMState = llmAnalyzer.TestConnection(ctx)
+		s.lastLLMCheck = time.Now()
+	}
+	llmOnline := s.lastLLMState
+	s.llmMu.Unlock()
 
 	mgr := config.GetSettings()
 
@@ -222,8 +250,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"url":    cfg.Network.TorProxyURL,
 		},
 		"ai": map[string]interface{}{
-			"configured": cfg.AI.GeminiAPIKey != "",
-			"model":      cfg.AI.GeminiModel,
+			"configured":       cfg.AI.GeminiAPIKey != "",
+			"model":            cfg.AI.GeminiModel,
+			"primary_provider": cfg.AI.PrimaryProvider,
+			"local_llm": map[string]interface{}{
+				"online":   llmOnline,
+				"model":    cfg.AI.Model,
+				"endpoint": cfg.AI.Endpoint,
+			},
 		},
 		"sinks": map[string]interface{}{
 			"discord":         cfg.Sinks.Discord.Enabled && cfg.Sinks.Discord.WebhookURL != "",
@@ -244,6 +278,27 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	jsonResponse(w, http.StatusOK, res)
+}
+
+func (s *Server) handleGetEntityStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+
+	limit := 100
+	if l := q.Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	japanOnly := q.Get("japan_only") == "true" || q.Get("japan_only") == "1"
+
+	stats, err := s.store.GetEntityStats(ctx, limit, japanOnly)
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, stats)
 }
 
 func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +373,11 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		items = []map[string]interface{}{}
 	}
 
+	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang")))
+	for _, inc := range items {
+		formatIncidentForLang(inc, lang)
+	}
+
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"count":  len(items),
 		"total":  total,
@@ -329,9 +389,95 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang")))
 	// Try clustered incident first
 	inc, err := s.store.GetIncident(r.Context(), id)
 	if err == nil && inc != nil {
+		// If incident contains Japanese text, translate to English on the fly and cache in DB
+		title, _ := inc["title"].(string)
+		summary, _ := inc["summary"].(string)
+		impact, _ := inc["impact_analysis"].(string)
+		victimOrg, _ := inc["victim_org"].(string)
+		affProduct, _ := inc["affected_product"].(string)
+		var actions []string
+		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+			if ra, ok := ep["recommended_actions"].([]string); ok {
+				actions = ra
+			} else if rai, ok := ep["recommended_actions"].([]interface{}); ok {
+				for _, a := range rai {
+					if as, ok := a.(string); ok && as != "" {
+						actions = append(actions, as)
+					}
+				}
+			}
+			if len(actions) == 0 {
+				if raja, ok := ep["recommended_actions_ja"].([]string); ok {
+					actions = raja
+				} else if raja, ok := ep["recommended_actions_ja"].([]interface{}); ok {
+					for _, a := range raja {
+						if as, ok := a.(string); ok && as != "" {
+							actions = append(actions, as)
+						}
+					}
+				}
+			}
+		}
+
+		if isJapaneseText(title) || isJapaneseText(summary) || isJapaneseText(impact) || isJapaneseText(victimOrg) || hasJapaneseItem(actions) {
+			if s.pipeline != nil && s.pipeline.Analyzer() != nil {
+				transOut, transErr := s.pipeline.Analyzer().TranslateIncident(r.Context(), analyzer.IncidentTranslationInput{
+					ID:                 id,
+					Title:              title,
+					Summary:            summary,
+					ImpactAnalysis:     impact,
+					VictimOrg:          victimOrg,
+					AffectedProduct:    affProduct,
+					RecommendedActions: actions,
+				})
+				if transErr == nil && transOut != nil {
+					inc["title"] = transOut.Title
+					if isJapaneseText(title) && (inc["title_ja"] == nil || inc["title_ja"] == "") {
+						inc["title_ja"] = title
+					}
+					inc["summary"] = transOut.Summary
+					inc["summary_ja"] = transOut.Summary
+					inc["impact_analysis"] = transOut.ImpactAnalysis
+					inc["impact_analysis_ja"] = transOut.ImpactAnalysis
+					if transOut.VictimOrgEn != "" {
+						inc["victim_org_en"] = transOut.VictimOrgEn
+					}
+					if isJapaneseText(victimOrg) && (inc["victim_org_ja"] == nil || inc["victim_org_ja"] == "") {
+						inc["victim_org_ja"] = victimOrg
+					}
+					if transOut.AffectedProductEn != "" {
+						inc["affected_product_en"] = transOut.AffectedProductEn
+					}
+					if isJapaneseText(affProduct) && (inc["affected_product_ja"] == nil || inc["affected_product_ja"] == "") {
+						inc["affected_product_ja"] = affProduct
+					}
+					if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+						ep["title"] = transOut.Title
+						ep["summary"] = transOut.Summary
+						ep["impact_analysis"] = transOut.ImpactAnalysis
+						if transOut.VictimOrgEn != "" {
+							ep["victim_org_en"] = transOut.VictimOrgEn
+						}
+						if isJapaneseText(victimOrg) && ep["victim_org_ja"] == nil {
+							ep["victim_org_ja"] = victimOrg
+						}
+						if transOut.AffectedProductEn != "" {
+							ep["affected_product_en"] = transOut.AffectedProductEn
+						}
+						if len(transOut.RecommendedActions) > 0 {
+							ep["recommended_actions"] = transOut.RecommendedActions
+						}
+					}
+					_ = s.store.UpdateIncidentTranslations(r.Context(), id, transOut.Title, transOut.Summary, transOut.ImpactAnalysis, transOut.VictimOrgEn, transOut.AffectedProductEn, transOut.RecommendedActions)
+				}
+			}
+		}
+
+		formatIncidentForLang(inc, lang)
 		jsonResponse(w, http.StatusOK, inc)
 		return
 	}
@@ -347,6 +493,181 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, http.StatusOK, item)
+}
+
+func (s *Server) handleUpdateIncidentLabels(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		errorResponse(w, http.StatusBadRequest, "Incident ID required")
+		return
+	}
+
+	var req struct {
+		ThreatActors   []string `json:"threat_actors"`
+		Severity       string   `json:"severity"`
+		JapanRelevance string   `json:"japan_relevance"`
+		AttackType     string   `json:"attack_type"`
+		VictimOrg      string   `json:"victim_org"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if err := s.store.UpdateIncidentLabels(r.Context(), id, req.ThreatActors, req.Severity, req.JapanRelevance, req.AttackType, req.VictimOrg); err != nil {
+		errorResponse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	inc, err := s.store.GetIncident(r.Context(), id)
+	if err != nil || inc == nil {
+		jsonResponse(w, http.StatusOK, map[string]interface{}{"status": "updated", "id": id})
+		return
+	}
+	jsonResponse(w, http.StatusOK, inc)
+}
+
+func (s *Server) handleTranslateIncidents(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		ctx := context.Background()
+		s.RunIncidentBatchTranslation(ctx, 200)
+	}()
+	jsonResponse(w, http.StatusOK, map[string]string{
+		"status":  "started",
+		"message": "Background incident translation started",
+	})
+}
+
+// RunIncidentBatchTranslation translates Japanese incidents in batches using Gemini/Qwen and persists results.
+func (s *Server) RunIncidentBatchTranslation(ctx context.Context, maxItems int) int {
+	if maxItems <= 0 {
+		maxItems = 200
+	}
+	incidents, err := s.store.GetIncidentsNeedingTranslation(ctx, maxItems)
+	if err != nil || len(incidents) == 0 {
+		return 0
+	}
+
+	log.Printf("[Translator] Found %d incidents needing English translation. Starting batch translation...", len(incidents))
+	translatedCount := 0
+	batchSize := 15
+	for i := 0; i < len(incidents); i += batchSize {
+		end := i + batchSize
+		if end > len(incidents) {
+			end = len(incidents)
+		}
+		chunk := incidents[i:end]
+
+		var items []analyzer.BatchTranslateItem
+		for _, inc := range chunk {
+			sum := inc.SummaryJa
+			if sum == "" {
+				sum = inc.Summary
+			}
+			imp := inc.ImpactAnalysisJa
+			if imp == "" {
+				imp = inc.ImpactAnalysis
+			}
+			items = append(items, analyzer.BatchTranslateItem{
+				ID:              inc.ID,
+				Title:           inc.Title,
+				Summary:         sum,
+				ImpactAnalysis:  imp,
+				VictimOrg:       inc.VictimOrg,
+				AffectedProduct: inc.AffectedProduct,
+			})
+		}
+
+		results, err := s.pipeline.Analyzer().TranslateBatch(ctx, items)
+		if err != nil {
+			log.Printf("[Translator] Batch translation failed: %v", err)
+			continue
+		}
+
+		for _, res := range results {
+			if res.Title != "" || res.Summary != "" || res.ImpactAnalysis != "" || res.VictimOrgEn != "" {
+				_ = s.store.UpdateIncidentTranslations(ctx, res.ID, res.Title, res.Summary, res.ImpactAnalysis, res.VictimOrgEn, res.AffectedProductEn, res.RecommendedActions)
+				translatedCount++
+			}
+		}
+	}
+	log.Printf("[Translator] Successfully translated and updated %d incidents in English", translatedCount)
+	return translatedCount
+}
+
+func formatIncidentForLang(inc map[string]interface{}, lang string) {
+	if lang == "ja" {
+		// JA VIEW:
+		if tJa, ok := inc["title_ja"].(string); ok && tJa != "" {
+			inc["title"] = tJa
+		}
+		if sJa, ok := inc["summary_ja"].(string); ok && sJa != "" {
+			inc["summary"] = sJa
+		}
+		if iJa, ok := inc["impact_analysis_ja"].(string); ok && iJa != "" {
+			inc["impact_analysis"] = iJa
+		}
+		if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
+			inc["victim_org"] = vJa
+		}
+		if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" {
+			inc["affected_product"] = pJa
+		}
+		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+			if raja, ok := ep["recommended_actions_ja"].([]string); ok && len(raja) > 0 {
+				ep["recommended_actions"] = raja
+			} else if rajai, ok := ep["recommended_actions_ja"].([]interface{}); ok && len(rajai) > 0 {
+				ep["recommended_actions"] = rajai
+			}
+			if tJa, ok := inc["title_ja"].(string); ok && tJa != "" {
+				ep["title"] = tJa
+			}
+			if sJa, ok := inc["summary_ja"].(string); ok && sJa != "" {
+				ep["summary"] = sJa
+			}
+			if iJa, ok := inc["impact_analysis_ja"].(string); ok && iJa != "" {
+				ep["impact_analysis"] = iJa
+			}
+			if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
+				ep["victim_orgs"] = []string{vJa}
+			}
+			if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" {
+				ep["affected_products"] = []string{pJa}
+			}
+		}
+	} else {
+		// EN VIEW (default):
+		if vEn, ok := inc["victim_org_en"].(string); ok && vEn != "" {
+			inc["victim_org"] = vEn
+			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+				ep["victim_orgs"] = []string{vEn}
+			}
+		}
+		if pEn, ok := inc["affected_product_en"].(string); ok && pEn != "" {
+			inc["affected_product"] = pEn
+			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+				ep["affected_products"] = []string{pEn}
+			}
+		}
+	}
+}
+
+func isJapaneseText(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) || (r >= 0x4E00 && r <= 0x9FAF) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasJapaneseItem(items []string) bool {
+	for _, it := range items {
+		if isJapaneseText(it) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleBackfillIncidents(w http.ResponseWriter, r *http.Request) {
@@ -593,13 +914,49 @@ func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 	s.pipeMu.Unlock()
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
 		log.Printf("[%s] Starting threat intelligence harvest cycle...", triggerSource)
 		cfg := config.GetSettings().GetConfig()
 		lookback := cfg.Pipeline.CheckIntervalHours
 		directOnly := cfg.Pipeline.NotifyDirectOnly
+
+		// Automatic Lookback Expansion:
+		// If triggered manually from WebUI, or if the system was stopped / last harvest was long ago,
+		// dynamically expand lookbackHours so uncollected RSS/Telegram/Tracker feeds are not skipped.
+		latestHarvest, _ := s.store.GetLatestHarvestTime(ctx)
+		if latestHarvest != nil {
+			elapsedHours := int(time.Since(*latestHarvest).Hours()) + 1
+			if triggerSource == "Manual-WebUI" {
+				// Manual trigger: ensure at least 72 hours, or the full elapsed downtime up to 7 days (168h)
+				if elapsedHours < 72 {
+					elapsedHours = 72
+				}
+				if elapsedHours > 168 {
+					elapsedHours = 168
+				}
+				if elapsedHours > lookback {
+					lookback = elapsedHours
+					log.Printf("[Manual-WebUI] Expanded lookback to %d hours (last harvest: %s)", lookback, latestHarvest.Format(time.RFC3339))
+				}
+			} else {
+				// Scheduled run: if downtime occurred, automatically expand lookback to cover unharvested gap
+				if elapsedHours > lookback {
+					if elapsedHours > 168 {
+						elapsedHours = 168 // cap at 7 days
+					}
+					log.Printf("[%s] Expanded lookback to %d hours to cover downtime (last harvest: %s)", triggerSource, elapsedHours, latestHarvest.Format(time.RFC3339))
+					lookback = elapsedHours
+				}
+			}
+		} else {
+			// Initial run when DB is empty: look back 72 hours by default
+			if lookback < 72 {
+				lookback = 72
+				log.Printf("[%s] Initial harvest detected: expanded lookback to %d hours", triggerSource, lookback)
+			}
+		}
 
 		summary, err := s.pipeline.RunAll(ctx, lookback, directOnly)
 
@@ -622,6 +979,10 @@ func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 
 // StartScheduler launches an in-process background ticker that runs harvest cycles periodically.
 func (s *Server) StartScheduler(ctx context.Context) {
+	if s.scraperMgr != nil {
+		s.scraperMgr.Start(ctx)
+	}
+
 	cfg := config.GetSettings().GetConfig()
 	intervalHours := cfg.Pipeline.CheckIntervalHours
 	if intervalHours <= 0 {
@@ -863,7 +1224,7 @@ func (s *Server) handleGenerateQueries(w http.ResponseWriter, r *http.Request) {
 		req.Count = 3
 	}
 
-	az := analyzer.NewGeminiThreatAnalyzer()
+	az := analyzer.NewDefaultThreatAnalyzer()
 	queries, err := az.GenerateSearchQueries(r.Context(), req.Directive, req.TargetType, req.Count)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to generate queries: %v", err))

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dapt/information_harvester/backend/internal/analyzer"
@@ -17,8 +18,10 @@ import (
 )
 
 type WebSearchHarvester struct {
-	client   *http.Client
-	analyzer *analyzer.GeminiThreatAnalyzer
+	client     *http.Client
+	analyzer   analyzer.ThreatAnalyzer
+	lastRunMu  sync.Mutex
+	lastRunMap map[string]time.Time
 }
 
 func NewWebSearchHarvester() *WebSearchHarvester {
@@ -26,7 +29,8 @@ func NewWebSearchHarvester() *WebSearchHarvester {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		analyzer: analyzer.NewGeminiThreatAnalyzer(),
+		analyzer:   analyzer.NewDefaultThreatAnalyzer(),
+		lastRunMap: make(map[string]time.Time),
 	}
 }
 
@@ -61,11 +65,6 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 		model = "gemini-3.5-flash-lite"
 	}
 
-	if apiKey == "" {
-		log.Println("[WebSearch] Gemini API key not configured. Skipping WebSearchHarvester.")
-		return nil, nil
-	}
-
 	var items []models.ThreatItem
 
 	for _, qCfg := range cfg.Sources.WebSearch {
@@ -75,6 +74,40 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 		}
 		if !qCfg.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
+		}
+
+		provider := strings.ToLower(strings.TrimSpace(qCfg.Type))
+		if provider == "" {
+			if strings.Contains(qCfg.URL, "searxng") {
+				provider = "searxng"
+			} else if apiKey != "" {
+				provider = "gemini"
+			} else {
+				provider = "searxng"
+			}
+		}
+
+		// Interval handling
+		intervalMin := qCfg.IntervalMinutes
+		if intervalMin <= 0 {
+			if provider == "gemini" {
+				intervalMin = 240 // 4 hours default for Gemini Grounding
+			} else {
+				intervalMin = 0 // SearXNG can run every cycle by default
+			}
+		}
+
+		if intervalMin > 0 {
+			targetKey := qCfg.Name + ":" + qCfg.Directive + ":" + qCfg.Query
+			h.lastRunMu.Lock()
+			lastRun, ok := h.lastRunMap[targetKey]
+			if ok && time.Since(lastRun) < time.Duration(intervalMin)*time.Minute {
+				h.lastRunMu.Unlock()
+				log.Printf("[WebSearch] Skipping '%s': interval %dm not yet elapsed (last ran %s ago)", qCfg.Name, intervalMin, time.Since(lastRun).Round(time.Minute))
+				continue
+			}
+			h.lastRunMap[targetKey] = time.Now().UTC()
+			h.lastRunMu.Unlock()
 		}
 
 		var jobs []searchJob
@@ -107,9 +140,148 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 			continue
 		}
 
-		for _, job := range jobs {
-			query := job.query
-			log.Printf("[WebSearch] Executing Grounded Search for query: %s", query)
+		if provider == "searxng" {
+			searxItems, err := h.harvestSearXNGWeb(ctx, qCfg, jobs, since)
+			if err != nil {
+				log.Printf("[WebSearch] SearXNG web search error for %s: %v", qCfg.Name, err)
+			} else {
+				items = append(items, searxItems...)
+			}
+			continue
+		}
+
+		// Provider is Gemini
+		if apiKey == "" {
+			log.Printf("[WebSearch] Gemini API key not configured. Skipping Gemini search for '%s'.", qCfg.Name)
+			continue
+		}
+
+		geminiItems, err := h.harvestGeminiGrounded(ctx, qCfg, jobs, model, apiKey, since)
+		if err != nil {
+			log.Printf("[WebSearch] Gemini search error for %s: %v", qCfg.Name, err)
+		} else {
+			items = append(items, geminiItems...)
+		}
+	}
+
+	log.Printf("[WebSearch] WebSearchHarvester collected %d items", len(items))
+	return items, nil
+}
+
+// harvestSearXNGWeb executes clearnet meta-search via SearXNG format=json API (zero cost, no darkweb)
+func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.QuerySourceConfig, jobs []searchJob, since *time.Time) ([]models.ThreatItem, error) {
+	baseURL := qCfg.URL
+	if baseURL == "" {
+		baseURL = "https://searxng.lab.internal/search"
+	}
+	timeoutSec := qCfg.TimeoutSeconds
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+
+	client := &http.Client{
+		Transport: defaultSearxngTransport,
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+	}
+
+	categories := qCfg.Categories
+	if categories == "" {
+		categories = "general,news"
+	}
+
+	var items []models.ThreatItem
+	seenURLs := make(map[string]bool)
+
+	for _, job := range jobs {
+		log.Printf("[WebSearch] Executing SearXNG web search query: '%s' (Source: %s, Engines: %s, Categories: %s)", job.query, qCfg.Name, qCfg.Engines, categories)
+		results, err := QuerySearXNGAPI(ctx, client, baseURL, job.query, qCfg.Engines, categories)
+		if err != nil {
+			log.Printf("[WebSearch] SearXNG query '%s' failed: %v", job.query, err)
+			continue
+		}
+
+		for _, res := range results {
+			if strings.TrimSpace(res.URL) == "" {
+				continue
+			}
+			// Exclude .onion (this is clearnet web_search without darkweb)
+			if strings.Contains(res.URL, ".onion") {
+				continue
+			}
+			if seenURLs[res.URL] {
+				continue
+			}
+			seenURLs[res.URL] = true
+
+			// Parse publication date if present
+			var pubDate *time.Time
+			if res.PublishedDate != "" {
+				layouts := []string{
+					time.RFC3339,
+					"2006-01-02T15:04:05Z07:00",
+					"2006-01-02 15:04:05",
+					"2006-01-02",
+				}
+				for _, layout := range layouts {
+					if t, err := time.Parse(layout, strings.TrimSpace(res.PublishedDate)); err == nil {
+						utc := t.UTC()
+						pubDate = &utc
+						break
+					}
+				}
+			}
+
+			if since != nil && pubDate != nil && pubDate.Before(*since) {
+				continue
+			}
+
+			// Validate CTI relevance
+			if !isCTIRelevant(res.Title + " " + res.Content) {
+				continue
+			}
+
+			rawContent := fmt.Sprintf("%s\n\n[SearXNG Query: %s]\n[Engine: %s]\n[URL: %s]", res.Content, job.query, res.Engine, res.URL)
+			meta := map[string]interface{}{
+				"is_onion":      false,
+				"fetch_status":  "pending",
+				"engine":        res.Engine,
+				"searxng_query": job.query,
+				"source_engine": res.Engine,
+			}
+			if len(res.Engines) > 0 {
+				meta["engines"] = res.Engines
+			}
+
+			sourceName := qCfg.Name
+			if sourceName == "" {
+				sourceName = "SearXNG Web"
+			}
+
+			item := models.NewThreatItem(
+				models.SourceTypeWebSearch,
+				sourceName,
+				res.Title,
+				res.URL,
+				res.Content,
+				rawContent,
+				pubDate,
+				meta,
+			)
+			items = append(items, item)
+		}
+	}
+
+	log.Printf("[WebSearch] SearXNG harvested %d clearnet web items for %s", len(items), qCfg.Name)
+	return items, nil
+}
+
+// harvestGeminiGrounded executes search grounding via Gemini API
+func (h *WebSearchHarvester) harvestGeminiGrounded(ctx context.Context, qCfg config.QuerySourceConfig, jobs []searchJob, model, apiKey string, since *time.Time) ([]models.ThreatItem, error) {
+	var items []models.ThreatItem
+
+	for _, job := range jobs {
+		query := job.query
+		log.Printf("[WebSearch] Executing Grounded Search for query: %s", query)
 
 		currentDate := time.Now().UTC().Format("2006-01-02")
 		prompt := fmt.Sprintf(`
@@ -272,14 +444,28 @@ Only return valid JSON array without Markdown code block formatting.
 			)
 			items = append(items, item)
 		}
-		}
 	}
 
-	log.Printf("[WebSearch] WebSearchHarvester collected %d items", len(items))
 	return items, nil
 }
 
 func (h *WebSearchHarvester) TestConnection(ctx context.Context) bool {
 	cfg := config.GetSettings().GetConfig()
-	return cfg.AI.GeminiAPIKey != ""
+	if cfg.AI.GeminiAPIKey != "" {
+		return true
+	}
+	// Check if SearXNG is configured/reachable
+	testCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(testCtx, http.MethodGet, "https://searxng.lab.internal/search?q=test&format=json", nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{Transport: defaultSearxngTransport, Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		resp.Body.Close()
+		return true
+	}
+	return false
 }

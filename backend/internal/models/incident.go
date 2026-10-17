@@ -23,15 +23,24 @@ type SourceDetail struct {
 
 // Incident represents a STIX 2.1 compliant clustered cyber threat incident (incident--<UUIDv4>).
 type Incident struct {
-	ID                  string         `json:"id"`
-	VictimOrg           string         `json:"victim_org"`
-	NormalizedVictimOrg string         `json:"normalized_victim_org"`
-	CVEs                []string       `json:"cves,omitempty"`
-	AffectedProduct     string         `json:"affected_product,omitempty"`
-	Title               string         `json:"title"`
-	SummaryJa           string         `json:"summary_ja"`
-	ImpactAnalysisJa    string         `json:"impact_analysis_ja"`
-	Severity            Severity       `json:"severity"`
+	ID                   string         `json:"id"`
+	VictimOrg            string         `json:"victim_org"`
+	VictimOrgEn          string         `json:"victim_org_en,omitempty"`
+	VictimOrgJa          string         `json:"victim_org_ja,omitempty"`
+	NormalizedVictimOrg  string         `json:"normalized_victim_org"`
+	CVEs                 []string       `json:"cves,omitempty"`
+	AffectedProduct      string         `json:"affected_product,omitempty"`
+	AffectedProductEn    string         `json:"affected_product_en,omitempty"`
+	AffectedProductJa    string         `json:"affected_product_ja,omitempty"`
+	Title                string         `json:"title"`
+	TitleJa              string         `json:"title_ja,omitempty"`
+	Summary              string         `json:"summary,omitempty"`
+	SummaryJa            string         `json:"summary_ja,omitempty"`
+	ImpactAnalysis       string         `json:"impact_analysis,omitempty"`
+	ImpactAnalysisJa     string         `json:"impact_analysis_ja,omitempty"`
+	RecommendedActions   []string       `json:"recommended_actions,omitempty"`
+	RecommendedActionsJa []string       `json:"recommended_actions_ja,omitempty"`
+	Severity             Severity       `json:"severity"`
 	JapanRelevance      JapanRelevance `json:"japan_relevance"`
 	AttackType          string         `json:"attack_type,omitempty"`
 	RawContent          string         `json:"raw_content,omitempty"`
@@ -66,6 +75,83 @@ func IsGenericVictimOrg(name string) bool {
 		return true
 	}
 	return genericVictimWords[cleaned]
+}
+
+var invalidActorSubstrings = []string{
+	"not specified", "not explicitly", "not identified", "not provided", "not named", "not known",
+	"likely cybercrime", "likely a cybercrime", "targeting japanese", "targeting corporate",
+	"unknown threat actor", "unknown/third-party", "unknown chinese", "unknown (",
+	"threat actor", "cybercrime group", "initial access broker",
+	"aiを使用した", "aiエージェント", "ai-driven", "rogue openai", "openai agents",
+	"state-sponsored", "state sponsored", "国家支援型", "国家背景", "サイバーエスピオナージ",
+	"中国系", "中国国家", "北朝鮮国家", "北朝鮮系", "campaign", "vx-underground",
+	"related actor", "関連の攻撃者", "に関連する", "operator", "運用グループ",
+	"未確認", "未特定", "不特定", "未詳", "特定なし",
+	"未知", "未提及", "未确认", "未确定", "威胁行为者", "犯罪集团",
+	"不正アクセスの攻撃者", "悪意のある第三者",
+	"it労働者", "it workers", "associated groups", "linked actors", "関連グループ",
+	"傘下サイバー部隊", "配下グループ", "関連懸念", "国家安全部", "通用技術研究院",
+	"darknet army", "darknetarmy",
+}
+
+var invalidActorExact = map[string]bool{
+	"unknown": true, "unspecified": true, "unidentified": true, "unnamed": true,
+	"none": true, "n/a": true, "hackers": true, "hacker": true,
+	"cybercriminals": true, "cybercriminal": true,
+	"attackers": true, "attacker": true, "adversary": true, "adversaries": true,
+	"automated attack tools": true, "unauthorized access perpetrators": true,
+	"third-party external server provider": true, "microsoft (for publishing updates)": true,
+	"openai（エージェントの不正動作）": true, "chaotic eclipse (researcher)": true,
+	"nightmare eclipse (研究者)": true, "chaotic eclipse": true, "nightmare eclipse": true,
+	"black kite": true, "darknet army": true, "darknetarmy": true,
+	"ghostwire": true,
+	"world leaks": true, "leakeddata": true, "contagious interview": true,
+	"未特定": true, "未確認": true, "不明": true,
+	"外部攻撃者": true, "攻撃者": true, "サイバー犯罪者": true, "サイバー攻撃者": true, "ハッカー": true,
+	"侵入者": true, "第三者": true, "悪意のある第三者": true,
+	"不特定のサイバー攻撃者群": true, "不特定のサイバー犯罪者群": true,
+	"未提及具体威胁行为者或犯罪集团": true, "未知威胁行为者": true, "未特定脅威アクター": true,
+	"複数の未特定脅威アクター": true, "none identified": true, "none specified": true, "not available": true,
+	"黑客": true, "犯罪集团": true,
+	"dprk threat actors": true, "chinese apt": true, "china-nexus threat actor": true,
+	"north korean state-sponsored actors": true,
+	"北朝鮮it労働者": true, "dprk it workers": true, "dprk it workers (北朝鮮it労働者)": true,
+	"北朝鮮it労働者 (north korean it workers)": true,
+}
+
+// IsValidThreatActor determines if a threat actor name is a legitimate specific entity rather than a generic or unknown disclaimer.
+func IsValidThreatActor(actor string) bool {
+	s := strings.TrimSpace(actor)
+	if s == "" || len([]rune(s)) < 2 || len(s) > 40 {
+		return false
+	}
+	low := strings.ToLower(s)
+	if invalidActorExact[low] || strings.HasPrefix(low, "not ") || strings.HasPrefix(low, "unknown") {
+		return false
+	}
+	for _, sub := range invalidActorSubstrings {
+		if strings.Contains(low, sub) {
+			return false
+		}
+	}
+	return true
+}
+
+// CleanThreatActors filters out generic, speculative, or 'unknown' threat actor strings.
+func CleanThreatActors(actors []string) []string {
+	var valid []string
+	seen := make(map[string]bool)
+	for _, a := range actors {
+		if !IsValidThreatActor(a) {
+			continue
+		}
+		low := strings.ToLower(strings.TrimSpace(a))
+		if !seen[low] {
+			seen[low] = true
+			valid = append(valid, strings.TrimSpace(a))
+		}
+	}
+	return valid
 }
 
 // NormalizeVictimOrg normalizes an organization name for clustering.
@@ -470,5 +556,31 @@ func ExtractAffectedProduct(item ThreatItem, enriched *EnrichedThreat) (string, 
 	}
 
 	return "", ""
+}
+
+// ActorStat represents aggregated intelligence for an observed threat actor.
+type ActorStat struct {
+	Name       string `json:"name"`
+	Count      int    `json:"count"`
+	JapanCount int    `json:"japan_count"`
+	LastSeenAt string `json:"last_seen_at"`
+}
+
+// VictimStat represents aggregated intelligence for an observed victim or targeted organization.
+type VictimStat struct {
+	Name       string `json:"name"`
+	NameJa     string `json:"name_ja,omitempty"`
+	NameEn     string `json:"name_en,omitempty"`
+	Count      int    `json:"count"`
+	JapanCount int    `json:"japan_count"`
+	LastSeenAt string `json:"last_seen_at"`
+}
+
+// EntityStats represents the aggregated summary of all observed threat actors and victims.
+type EntityStats struct {
+	TotalUniqueActors  int          `json:"total_unique_actors"`
+	TotalUniqueVictims int          `json:"total_unique_victims"`
+	TopActors          []ActorStat  `json:"top_actors"`
+	TopVictims         []VictimStat `json:"top_victims"`
 }
 

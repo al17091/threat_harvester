@@ -195,3 +195,100 @@ func TestDarkwebSourceType(t *testing.T) {
 	}
 }
 
+func TestSearXNGHarvest(t *testing.T) {
+	// Mock SearXNG server returning JSON results
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		format := r.URL.Query().Get("format")
+		engines := r.URL.Query().Get("engines")
+
+		if format != "json" {
+			http.Error(w, "format must be json", http.StatusBadRequest)
+			return
+		}
+		if q != "japan ransomware breach" {
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+			return
+		}
+		if engines != "ahmia,torch" {
+			http.Error(w, "unexpected engines", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"query": "japan ransomware breach",
+			"results": [
+				{
+					"url": "http://leak7x9vmn2...onion/post/101",
+					"title": "Tokyo Logistics Data Breach",
+					"content": "Confidential internal documents leaked online by ransomware group.",
+					"engine": "ahmia",
+					"engines": ["ahmia", "torch"],
+					"publishedDate": "2026-10-15T12:00:00Z"
+				},
+				{
+					"url": "https://threatpost.example.com/japan-breach-2026",
+					"title": "ClearWeb Threat Report on Japan",
+					"content": "Analysis of recent cyber attacks targeting Japanese entities.",
+					"engine": "google",
+					"engines": ["google"],
+					"publishedDate": "2026-10-14T08:30:00Z"
+				}
+			]
+		}`))
+	}))
+	defer ts.Close()
+
+	harvester := NewDarkwebOnionHarvester()
+	target := config.DarkwebSourceConfig{
+		Name:           "Test SearXNG Source",
+		URL:            ts.URL,
+		Type:           "searxng",
+		Query:          "japan ransomware breach",
+		Engines:        "ahmia,torch",
+		Categories:     "onions",
+		TimeoutSeconds: 5,
+		Enabled:        true,
+	}
+
+	items, err := harvester.harvestSearXNG(context.Background(), target, nil)
+	if err != nil {
+		t.Fatalf("harvestSearXNG failed: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+
+	// Verify onion item
+	onionItem := items[0]
+	if onionItem.Title != "Tokyo Logistics Data Breach" {
+		t.Errorf("expected title 'Tokyo Logistics Data Breach', got %s", onionItem.Title)
+	}
+	if onionItem.URL != "http://leak7x9vmn2...onion/post/101" {
+		t.Errorf("expected onion url, got %s", onionItem.URL)
+	}
+	if onionItem.Metadata["is_onion"] != true {
+		t.Errorf("expected is_onion=true, got %v", onionItem.Metadata["is_onion"])
+	}
+	if onionItem.Metadata["fetch_status"] != "pending" {
+		t.Errorf("expected fetch_status=pending, got %v", onionItem.Metadata["fetch_status"])
+	}
+	if onionItem.Metadata["engine"] != "ahmia" {
+		t.Errorf("expected engine=ahmia, got %v", onionItem.Metadata["engine"])
+	}
+	if onionItem.PublishedAt == nil {
+		t.Error("expected PublishedAt to be parsed")
+	}
+
+	// Verify clearnet item
+	clearItem := items[1]
+	if clearItem.Title != "ClearWeb Threat Report on Japan" {
+		t.Errorf("expected title 'ClearWeb Threat Report on Japan', got %s", clearItem.Title)
+	}
+	if clearItem.Metadata["is_onion"] != false {
+		t.Errorf("expected is_onion=false, got %v", clearItem.Metadata["is_onion"])
+	}
+}
+

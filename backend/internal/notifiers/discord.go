@@ -45,43 +45,60 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 
 	badges := ""
 	if threat.JapanRelevance == models.JapanRelevanceDirect {
-		badges += "🇯🇵 [日本標的 / 関連] "
+		badges += "🇯🇵 [Targeting Japan] "
 	} else if threat.JapanRelevance == models.JapanRelevanceIndirect {
-		badges += "🌐 [日本波及 / 警戒] "
+		badges += "🌐 [Global / Indirect] "
 	}
 	badges += fmt.Sprintf("[%s]", threat.Severity)
 
 	content := ""
 	if threat.JapanRelevance == models.JapanRelevanceDirect && (threat.Severity == models.SeverityCritical || threat.Severity == models.SeverityHigh) {
-		content = "🚨 @here **日本国内を標的とした重大インシデントを検知しました**"
+		content = "🚨 @here **Critical Threat Incident Alert - Targeted Attack Detected**"
 	} else if threat.Severity == models.SeverityCritical {
 		content = "🚨 @here **Critical Threat Incident Alert**"
 	}
 
+	titleText := threat.Title
+	if titleText == "" {
+		titleText = threat.TitleJa
+	}
+	summaryText := threat.Summary
+	if summaryText == "" {
+		summaryText = threat.SummaryJa
+	}
+	impactText := threat.ImpactAnalysis
+	if impactText == "" {
+		impactText = threat.ImpactAnalysisJa
+	}
+	actions := threat.RecommendedActions
+	if len(actions) == 0 {
+		actions = threat.RecommendedActionsJa
+	}
+
 	fields := []map[string]interface{}{
-		{"name": "情報源", "value": fmt.Sprintf("%s (%s)", threat.Item.SourceType, threat.Item.SourceName), "inline": true},
-		{"name": "日本への関連性", "value": string(threat.JapanRelevance), "inline": true},
-		{"name": "攻撃分類", "value": orDefault(threat.AttackType, "未特定"), "inline": true},
+		{"name": "Source", "value": fmt.Sprintf("%s (%s)", threat.Item.SourceType, threat.Item.SourceName), "inline": true},
+		{"name": "Japan Relevance", "value": string(threat.JapanRelevance), "inline": true},
+		{"name": "Attack Type", "value": orDefault(threat.AttackType, "Unspecified"), "inline": true},
 	}
 
 	if len(threat.VictimOrgs) > 0 {
-		fields = append(fields, map[string]interface{}{"name": "被害組織", "value": strings.Join(threat.VictimOrgs, ", "), "inline": true})
+		fields = append(fields, map[string]interface{}{"name": "Victim Organization", "value": strings.Join(threat.VictimOrgs, ", "), "inline": true})
 	}
 	if len(threat.ThreatActors) > 0 {
-		fields = append(fields, map[string]interface{}{"name": "脅威グループ", "value": strings.Join(threat.ThreatActors, ", "), "inline": true})
+		fields = append(fields, map[string]interface{}{"name": "Threat Actor", "value": strings.Join(threat.ThreatActors, ", "), "inline": true})
 	}
-	if threat.ImpactAnalysisJa != "" {
-		fields = append(fields, map[string]interface{}{"name": "日本への影響分析", "value": truncate(threat.ImpactAnalysisJa, 1000), "inline": false})
+	if impactText != "" {
+		fields = append(fields, map[string]interface{}{"name": "Impact Analysis", "value": truncate(impactText, 1000), "inline": false})
 	}
-	if len(threat.RecommendedActionsJa) > 0 {
+	if len(actions) > 0 {
 		var acts []string
-		for _, a := range threat.RecommendedActionsJa {
+		for _, a := range actions {
 			acts = append(acts, "• "+a)
 		}
-		fields = append(fields, map[string]interface{}{"name": "推奨対策", "value": truncate(strings.Join(acts, "\n"), 1000), "inline": false})
+		fields = append(fields, map[string]interface{}{"name": "Recommended Actions", "value": truncate(strings.Join(acts, "\n"), 1000), "inline": false})
 	}
 	if threat.Item.URL != "" {
-		fields = append(fields, map[string]interface{}{"name": "参照元リンク", "value": fmt.Sprintf("[詳細を見る](%s)", threat.Item.URL), "inline": false})
+		fields = append(fields, map[string]interface{}{"name": "Reference Link", "value": fmt.Sprintf("[View Source](%s)", threat.Item.URL), "inline": false})
 	}
 
 	shortID := threat.ItemID
@@ -90,17 +107,17 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 	}
 
 	payload := map[string]interface{}{
-		"username": "Threat Harvester (Japan CTI)",
+		"username": "Threat Harvester CTI",
 		"content":  content,
 		"embeds": []map[string]interface{}{
 			{
-				"title":       fmt.Sprintf("%s %s", badges, truncate(threat.TitleJa, 200)),
-				"description": truncate(threat.SummaryJa, 2000),
+				"title":       fmt.Sprintf("%s %s", badges, truncate(titleText, 200)),
+				"description": truncate(summaryText, 2000),
 				"url":         threat.Item.URL,
 				"color":       color,
 				"fields":      fields,
 				"footer": map[string]string{
-					"text": fmt.Sprintf("Harvester ID: %s | Powered by Gemini & Tor CTI", shortID),
+					"text": fmt.Sprintf("Harvester ID: %s | Threat Harvester Bot", shortID),
 				},
 				"timestamp": threat.AnalyzedAt.Format(time.RFC3339),
 			},

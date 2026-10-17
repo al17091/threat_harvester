@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Threat Harvester - Japan Cyber Threat Intelligence",
+  title: "Threat Harvester - Japan Cyber Threat Intelligence Feeds Collector",
   description: "Automated Cyber Threat Intelligence monitoring platform specialized for Japan-targeted threats.",
 };
 

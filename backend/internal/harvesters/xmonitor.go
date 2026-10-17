@@ -18,7 +18,7 @@ import (
 
 type XMonitorHarvester struct {
 	client   *http.Client
-	analyzer *analyzer.GeminiThreatAnalyzer
+	analyzer analyzer.ThreatAnalyzer
 }
 
 func NewXMonitorHarvester() *XMonitorHarvester {
@@ -26,7 +26,7 @@ func NewXMonitorHarvester() *XMonitorHarvester {
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		analyzer: analyzer.NewGeminiThreatAnalyzer(),
+		analyzer: analyzer.NewDefaultThreatAnalyzer(),
 	}
 }
 

@@ -132,9 +132,12 @@ type TelegramSourceConfig struct {
 type DarkwebSourceConfig struct {
 	Name           string `yaml:"name" json:"name"`
 	URL            string `yaml:"url,omitempty" json:"url,omitempty"`
-	Type           string `yaml:"type" json:"type"` // "search", "html", "api", "rss", or "onion"
+	Type           string `yaml:"type" json:"type"` // "searxng", "search", "html", "api", "rss", or "onion"
 	Query          string `yaml:"query,omitempty" json:"query,omitempty"`
 	Directive      string `yaml:"directive,omitempty" json:"directive,omitempty"`
+	Engines        string `yaml:"engines,omitempty" json:"engines,omitempty"`
+	Categories     string `yaml:"categories,omitempty" json:"categories,omitempty"`
+	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
 	ComplianceTier string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
 	Enabled        bool   `yaml:"enabled" json:"enabled"`
 }
@@ -148,11 +151,17 @@ type RansomwareSourceConfig struct {
 }
 
 type QuerySourceConfig struct {
-	Name           string `yaml:"name,omitempty" json:"name,omitempty"`
-	Directive      string `yaml:"directive,omitempty" json:"directive,omitempty"`
-	Query          string `yaml:"query,omitempty" json:"query,omitempty"`
-	ComplianceTier string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
-	Enabled        bool   `yaml:"enabled" json:"enabled"`
+	Name            string `yaml:"name,omitempty" json:"name,omitempty"`
+	Directive       string `yaml:"directive,omitempty" json:"directive,omitempty"`
+	Query           string `yaml:"query,omitempty" json:"query,omitempty"`
+	Type            string `yaml:"type,omitempty" json:"type,omitempty"` // "searxng" (SearXNG Web) or "gemini" (Gemini Google Grounding)
+	URL             string `yaml:"url,omitempty" json:"url,omitempty"`   // custom searxng url
+	Engines         string `yaml:"engines,omitempty" json:"engines,omitempty"` // e.g. "google,bing,duckduckgo,yahoo"
+	Categories      string `yaml:"categories,omitempty" json:"categories,omitempty"` // e.g. "general,news"
+	TimeoutSeconds  int    `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+	IntervalMinutes int    `yaml:"interval_minutes,omitempty" json:"interval_minutes,omitempty"`
+	ComplianceTier  string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
+	Enabled         bool   `yaml:"enabled" json:"enabled"`
 }
 
 type SourcesConfig struct {
@@ -176,7 +185,26 @@ type DatabaseConfig struct {
 	SQLitePath string `yaml:"sqlite_path" json:"sqlite_path"`
 }
 
+type EscalationConfig struct {
+	Enabled              bool     `yaml:"enabled" json:"enabled"`
+	GeminiAPIKey         string   `yaml:"gemini_api_key" json:"gemini_api_key"`
+	GeminiModel          string   `yaml:"gemini_model" json:"gemini_model"`
+	MaxLocalContentRunes int      `yaml:"max_local_content_runes" json:"max_local_content_runes"`
+	TriggerSeverities    []string `yaml:"trigger_severities" json:"trigger_severities"`
+	TriggerJapanDirect   bool     `yaml:"trigger_japan_direct" json:"trigger_japan_direct"`
+}
+
 type AiConfig struct {
+	PrimaryProvider    string           `yaml:"primary_provider" json:"primary_provider"` // "openai_compatible" or "gemini"
+	Endpoint           string           `yaml:"endpoint" json:"endpoint"`
+	Model              string           `yaml:"model" json:"model"`
+	APIKey             string           `yaml:"api_key" json:"api_key"`
+	Temperature        float64          `yaml:"temperature" json:"temperature"`
+	InsecureSkipVerify bool             `yaml:"insecure_skip_verify" json:"insecure_skip_verify"`
+	TimeoutSeconds     int              `yaml:"timeout_seconds" json:"timeout_seconds"`
+	Escalation         EscalationConfig `yaml:"escalation" json:"escalation"`
+
+	// Backward compatibility
 	GeminiAPIKey string `yaml:"gemini_api_key" json:"gemini_api_key"`
 	GeminiModel  string `yaml:"gemini_model" json:"gemini_model"`
 }
@@ -204,6 +232,20 @@ type NetworkConfig struct {
 	RequestTimeout int    `yaml:"request_timeout" json:"request_timeout"`
 }
 
+type ScraperConfig struct {
+	Enabled                bool `yaml:"enabled" json:"enabled"`
+	ClearnetEnabled        bool `yaml:"clearnet_enabled" json:"clearnet_enabled"`
+	TorEnabled             bool `yaml:"tor_enabled" json:"tor_enabled"`
+	ClearnetConcurrency    int  `yaml:"clearnet_concurrency" json:"clearnet_concurrency"`
+	TorConcurrency         int  `yaml:"tor_concurrency" json:"tor_concurrency"`
+	ClearnetTimeoutSeconds int  `yaml:"clearnet_timeout_seconds" json:"clearnet_timeout_seconds"`
+	TorTimeoutSeconds      int  `yaml:"tor_timeout_seconds" json:"tor_timeout_seconds"`
+	WorkerIntervalSeconds  int  `yaml:"worker_interval_seconds" json:"worker_interval_seconds"`
+	BatchSize              int  `yaml:"batch_size" json:"batch_size"`
+	MaxAttempts            int  `yaml:"max_attempts" json:"max_attempts"`
+	AutoReAnalyze          bool `yaml:"auto_re_analyze" json:"auto_re_analyze"`
+}
+
 type PipelineConfig struct {
 	CheckIntervalHours int  `yaml:"check_interval_hours" json:"check_interval_hours"`
 	NotifyDirectOnly   bool `yaml:"notify_direct_only" json:"notify_direct_only"`
@@ -214,6 +256,7 @@ type AppConfig struct {
 	Compliance ComplianceConfig `yaml:"compliance" json:"compliance"`
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	AI         AiConfig         `yaml:"ai" json:"ai"`
+	Scraper    ScraperConfig    `yaml:"scraper" json:"scraper"`
 	Sinks      SinksConfig      `yaml:"sinks" json:"sinks"`
 	Network    NetworkConfig    `yaml:"network" json:"network"`
 	Pipeline   PipelineConfig   `yaml:"pipeline" json:"pipeline"`
@@ -584,6 +627,23 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 		directive, _ := data["directive"].(string)
 		q, _ := data["query"].(string)
 		name, _ := data["name"].(string)
+		srcType, _ := data["type"].(string)
+		srcURL, _ := data["url"].(string)
+		engines, _ := data["engines"].(string)
+		categories, _ := data["categories"].(string)
+		var timeoutSec int
+		if tVal, ok := data["timeout_seconds"].(float64); ok {
+			timeoutSec = int(tVal)
+		} else if tVal, ok := data["timeout_seconds"].(int); ok {
+			timeoutSec = tVal
+		}
+		var intervalMin int
+		if iVal, ok := data["interval_minutes"].(float64); ok {
+			intervalMin = int(iVal)
+		} else if iVal, ok := data["interval_minutes"].(int); ok {
+			intervalMin = iVal
+		}
+
 		if strings.TrimSpace(directive) == "" && strings.TrimSpace(q) == "" {
 			return fmt.Errorf("directive or query is required")
 		}
@@ -591,11 +651,17 @@ func (s *SettingsManager) AddSource(sourceType string, data map[string]interface
 			tier = TierCommercialViaOfficialAPI
 		}
 		s.Config.Sources.WebSearch = append(s.Config.Sources.WebSearch, QuerySourceConfig{
-			Name:           strings.TrimSpace(name),
-			Directive:      strings.TrimSpace(directive),
-			Query:          strings.TrimSpace(q),
-			ComplianceTier: tier,
-			Enabled:        true,
+			Name:            strings.TrimSpace(name),
+			Directive:       strings.TrimSpace(directive),
+			Query:           strings.TrimSpace(q),
+			Type:            strings.TrimSpace(srcType),
+			URL:             strings.TrimSpace(srcURL),
+			Engines:         strings.TrimSpace(engines),
+			Categories:      strings.TrimSpace(categories),
+			TimeoutSeconds:  timeoutSec,
+			IntervalMinutes: intervalMin,
+			ComplianceTier:  tier,
+			Enabled:         true,
 		})
 	default:
 		return fmt.Errorf("unsupported source type: %s", sourceType)
@@ -742,6 +808,28 @@ func (s *SettingsManager) UpdateSource(sourceType, identifier string, data map[s
 				}
 				if n, ok := data["name"].(string); ok {
 					item.Name = strings.TrimSpace(n)
+				}
+				if t, ok := data["type"].(string); ok {
+					item.Type = strings.TrimSpace(t)
+				}
+				if u, ok := data["url"].(string); ok {
+					item.URL = strings.TrimSpace(u)
+				}
+				if e, ok := data["engines"].(string); ok {
+					item.Engines = strings.TrimSpace(e)
+				}
+				if c, ok := data["categories"].(string); ok {
+					item.Categories = strings.TrimSpace(c)
+				}
+				if tVal, ok := data["timeout_seconds"].(float64); ok {
+					item.TimeoutSeconds = int(tVal)
+				} else if tVal, ok := data["timeout_seconds"].(int); ok {
+					item.TimeoutSeconds = tVal
+				}
+				if iVal, ok := data["interval_minutes"].(float64); ok {
+					item.IntervalMinutes = int(iVal)
+				} else if iVal, ok := data["interval_minutes"].(int); ok {
+					item.IntervalMinutes = iVal
 				}
 				if tier != "" {
 					item.ComplianceTier = tier

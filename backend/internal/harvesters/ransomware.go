@@ -76,11 +76,17 @@ func (h *RansomwareTrackerHarvester) Harvest(ctx context.Context, since *time.Ti
 			if err != nil {
 				continue
 			}
-			req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 			resp, err := h.client.Do(req)
 			if err != nil {
 				log.Printf("[RansomwareTracker] Failed to fetch RSS %s: %v", target.Name, err)
+				continue
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("[RansomwareTracker] Target %s returned HTTP %d, skipping", target.Name, resp.StatusCode)
+				_ = resp.Body.Close()
 				continue
 			}
 
@@ -130,7 +136,7 @@ func (h *RansomwareTrackerHarvester) Harvest(ctx context.Context, since *time.Ti
 			if err != nil {
 				continue
 			}
-			req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 			resp, err := h.client.Do(req)
 			if err != nil {
@@ -138,10 +144,16 @@ func (h *RansomwareTrackerHarvester) Harvest(ctx context.Context, since *time.Ti
 				continue
 			}
 
-			if resp.StatusCode == http.StatusOK {
-				var posts []map[string]interface{}
-				if err := json.NewDecoder(resp.Body).Decode(&posts); err == nil {
-					_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				log.Printf("[RansomwareTracker] Target %s returned HTTP %d, skipping", target.Name, resp.StatusCode)
+				_ = resp.Body.Close()
+				continue
+			}
+
+			var posts []map[string]interface{}
+			err = json.NewDecoder(resp.Body).Decode(&posts)
+			_ = resp.Body.Close()
+			if err == nil {
 					for i, post := range posts {
 						if i >= 30 {
 							break
@@ -196,8 +208,16 @@ func (h *RansomwareTrackerHarvester) Harvest(ctx context.Context, since *time.Ti
 						upperDesc := strings.ToUpper(description)
 						isJapan := upperCountry == "JP" || strings.Contains(upperVictim, "JAPAN") || strings.Contains(upperDesc, "JAPAN")
 
-						title := fmt.Sprintf("[%s DLS] Victim: %s (%s)", groupName, victimName, country)
-						summary := fmt.Sprintf("Group: %s\nVictim: %s\nCountry: %s\nDetails: %s", groupName, victimName, country, description)
+						countrySuffix := ""
+						if country != "" {
+							countrySuffix = fmt.Sprintf(" [%s]", country)
+						}
+						title := fmt.Sprintf("%s Ransomware: %s Listed on Data Leak Site%s", groupName, victimName, countrySuffix)
+						summaryText := fmt.Sprintf("The %s ransomware group published %s on its dark web leak site.", groupName, victimName)
+						if strings.TrimSpace(description) != "" {
+							summaryText += fmt.Sprintf(" Details: %s", strings.TrimSpace(description))
+						}
+						summary := summaryText
 
 						item := models.NewThreatItem(
 							models.SourceTypeRansomwareTracker,
@@ -217,14 +237,9 @@ func (h *RansomwareTrackerHarvester) Harvest(ctx context.Context, since *time.Ti
 						)
 						items = append(items, item)
 					}
-				} else {
-					_ = resp.Body.Close()
 				}
-			} else {
-				_ = resp.Body.Close()
 			}
 		}
-	}
 
 	log.Printf("[RansomwareTracker] Collected %d items", len(items))
 	return items, nil

@@ -45,6 +45,14 @@ type Store interface {
 	GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error)
 	BackfillIncidents(ctx context.Context, windowDays int) (int, error)
 	BackfillArticleContents(ctx context.Context, fetcher func(ctx context.Context, url string) (string, error)) (int, error)
+	GetLatestHarvestTime(ctx context.Context) (*time.Time, error)
+	UpdateIncidentTranslations(ctx context.Context, id, title, summary, impact, victimEn, productEn string, actions []string) error
+	UpdateIncidentLabels(ctx context.Context, id string, threatActors []string, severity, japanRelevance, attackType, victimOrg string) error
+	GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error)
+	GetEntityStats(ctx context.Context, limit int, japanOnly bool) (*models.EntityStats, error)
+
+	GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error)
+	UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error
 
 	Close() error
 }
@@ -177,7 +185,11 @@ func (s *SQLStore) initSchema() error {
 		severity VARCHAR(32),
 		japan_relevance VARCHAR(32),
 		notified_at TEXT,
-		enriched_data TEXT
+		enriched_data TEXT,
+		fetch_status VARCHAR(32) DEFAULT 'none',
+		fetch_attempts INT DEFAULT 0,
+		fetch_error TEXT,
+		fetched_at TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_harvested_at ON threat_items(harvested_at);
 	CREATE INDEX IF NOT EXISTS idx_published_at ON threat_items(published_at);
@@ -221,19 +233,42 @@ func (s *SQLStore) initSchema() error {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN raw_content TEXT")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN incident_id VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN content_hash VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN fetch_status VARCHAR(32) DEFAULT 'none'")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN fetch_attempts INT DEFAULT 0")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN fetch_error TEXT")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN fetched_at TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN cves TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN affected_product VARCHAR(255)")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN raw_content TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN title_ja VARCHAR(512)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN victim_org_en VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN victim_org_ja VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN affected_product_en VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN affected_product_ja VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN summary TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN impact_analysis TEXT")
 	} else {
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS raw_content TEXT")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS incident_id VARCHAR(64)")
 		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS fetch_status VARCHAR(32) DEFAULT 'none'")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS fetch_attempts INT DEFAULT 0")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS fetch_error TEXT")
+		_, _ = s.db.Exec("ALTER TABLE threat_items ADD COLUMN IF NOT EXISTS fetched_at TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS cves TEXT")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS affected_product VARCHAR(255)")
 		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS raw_content TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS title_ja VARCHAR(512)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS victim_org_en VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS victim_org_ja VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS affected_product_en VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS affected_product_ja VARCHAR(255)")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS summary TEXT")
+		_, _ = s.db.Exec("ALTER TABLE incidents ADD COLUMN IF NOT EXISTS impact_analysis TEXT")
 	}
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_incident ON threat_items(incident_id)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_content_hash ON threat_items(content_hash)")
+	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_threat_items_fetch_status ON threat_items(fetch_status)")
 	_, _ = s.db.Exec("CREATE INDEX IF NOT EXISTS idx_incidents_affected_product ON incidents(affected_product)")
 
 	// Backfill existing records if raw_content is NULL
@@ -471,13 +506,24 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		rawStr = &item.Summary
 	}
 
+	fetchStatus := item.FetchStatus
+	if fetchStatus == "" {
+		if fs, ok := item.Metadata["fetch_status"].(string); ok && fs != "" {
+			fetchStatus = fs
+		} else if item.URL != "" {
+			fetchStatus = "pending"
+		} else {
+			fetchStatus = "none"
+		}
+	}
+
 	var query string
 	if s.isSQLite {
 		query = `
 		INSERT INTO threat_items (
 			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
-			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash, fetch_status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			summary = excluded.summary,
@@ -488,14 +534,15 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			notified_at = excluded.notified_at,
 			enriched_data = excluded.enriched_data,
 			incident_id = CASE WHEN excluded.severity = 'Info' THEN NULL ELSE COALESCE(NULLIF(excluded.incident_id, ''), threat_items.incident_id) END,
-			content_hash = COALESCE(NULLIF(excluded.content_hash, ''), threat_items.content_hash)
+			content_hash = COALESCE(NULLIF(excluded.content_hash, ''), threat_items.content_hash),
+			fetch_status = CASE WHEN threat_items.fetch_status IN ('completed', 'fetching') THEN threat_items.fetch_status ELSE excluded.fetch_status END
 		`
 	} else {
 		query = `
 		INSERT INTO threat_items (
 			id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
-			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			severity, japan_relevance, notified_at, enriched_data, incident_id, content_hash, fetch_status
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT(id) DO UPDATE SET
 			title = EXCLUDED.title,
 			summary = EXCLUDED.summary,
@@ -506,7 +553,8 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 			notified_at = EXCLUDED.notified_at,
 			enriched_data = EXCLUDED.enriched_data,
 			incident_id = CASE WHEN EXCLUDED.severity = 'Info' THEN NULL ELSE COALESCE(NULLIF(EXCLUDED.incident_id, ''), threat_items.incident_id) END,
-			content_hash = COALESCE(NULLIF(EXCLUDED.content_hash, ''), threat_items.content_hash)
+			content_hash = COALESCE(NULLIF(EXCLUDED.content_hash, ''), threat_items.content_hash),
+			fetch_status = CASE WHEN threat_items.fetch_status IN ('completed', 'fetching') THEN threat_items.fetch_status ELSE EXCLUDED.fetch_status END
 		`
 	}
 
@@ -526,6 +574,7 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		enrichedJSON,
 		item.IncidentID,
 		item.ContentHash,
+		fetchStatus,
 	)
 	return err
 }
@@ -553,6 +602,29 @@ func (s *SQLStore) GetStats(ctx context.Context) (map[string]interface{}, error)
 		"database_url":       maskedURL,
 		"db_path":            s.dbURL,
 	}, nil
+}
+
+func (s *SQLStore) GetLatestHarvestTime(ctx context.Context) (*time.Time, error) {
+	var maxHarvested sql.NullString
+	err := s.db.QueryRowContext(ctx, "SELECT MAX(harvested_at) FROM threat_items WHERE harvested_at IS NOT NULL AND harvested_at != ''").Scan(&maxHarvested)
+	if err != nil || !maxHarvested.Valid || maxHarvested.String == "" {
+		return nil, err
+	}
+
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, fmtStr := range formats {
+		if t, err := time.Parse(fmtStr, strings.TrimSpace(maxHarvested.String)); err == nil {
+			utc := t.UTC()
+			return &utc, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unable to parse harvested_at timestamp: %s", maxHarvested.String)
 }
 
 func (s *SQLStore) maskURL(url string) string {
@@ -616,7 +688,7 @@ func (s *SQLStore) GetHistoryTotal(ctx context.Context, f HistoryFilter) (int, e
 
 func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
 	whereClause, args := s.buildHistoryConditions(f)
-	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items" + whereClause
+	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data, fetch_status, fetch_attempts, fetch_error, fetched_at FROM threat_items" + whereClause
 	if f.OrderBy == "harvested_at" {
 		query += " ORDER BY harvested_at DESC"
 	} else {
@@ -638,10 +710,16 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 	var items []map[string]interface{}
 	for rows.Next() {
 		var (
-			id, srcType, srcName, title, harvestedAt string
+			id, srcType, srcName, title, harvestedAt                          string
 			url, summary, rawContent, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
+			fetchStatus, fetchError, fetchedAt                               sql.NullString
+			fetchAttempts                                                    sql.NullInt64
 		)
-		if err := rows.Scan(&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData); err != nil {
+		if err := rows.Scan(
+			&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt,
+			&sev, &jrel, &notifAt, &enrichedData,
+			&fetchStatus, &fetchAttempts, &fetchError, &fetchedAt,
+		); err != nil {
 			continue
 		}
 
@@ -659,6 +737,10 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 			"japan_relevance": nullStringVal(jrel),
 			"notified_at":     nullStringVal(notifAt),
 			"enriched_data":   nullStringVal(enrichedData),
+			"fetch_status":    nullStringVal(fetchStatus),
+			"fetch_attempts":  fetchAttempts.Int64,
+			"fetch_error":     nullStringVal(fetchError),
+			"fetched_at":      nullStringVal(fetchedAt),
 		}
 
 		if enrichedData.Valid && enrichedData.String != "" {
@@ -675,19 +757,25 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 }
 
 func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]interface{}, error) {
-	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = ? OR id LIKE ? LIMIT 1"
+	query := "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data, fetch_status, fetch_attempts, fetch_error, fetched_at FROM threat_items WHERE id = ? OR id LIKE ? LIMIT 1"
 	prefix := itemID + "%"
 	args := []interface{}{itemID, prefix}
 	if !s.isSQLite {
-		query = "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data FROM threat_items WHERE id = $1 OR id LIKE $2 LIMIT 1"
+		query = "SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at, severity, japan_relevance, notified_at, enriched_data, fetch_status, fetch_attempts, fetch_error, fetched_at FROM threat_items WHERE id = $1 OR id LIKE $2 LIMIT 1"
 	}
 
 	var (
-		id, srcType, srcName, title, harvestedAt string
+		id, srcType, srcName, title, harvestedAt                          string
 		url, summary, rawContent, pubAt, sev, jrel, notifAt, enrichedData sql.NullString
+		fetchStatus, fetchError, fetchedAt                               sql.NullString
+		fetchAttempts                                                    sql.NullInt64
 	)
 
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt, &sev, &jrel, &notifAt, &enrichedData)
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(
+		&id, &srcType, &srcName, &title, &url, &summary, &rawContent, &pubAt, &harvestedAt,
+		&sev, &jrel, &notifAt, &enrichedData,
+		&fetchStatus, &fetchAttempts, &fetchError, &fetchedAt,
+	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -709,6 +797,10 @@ func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]inter
 		"japan_relevance": nullStringVal(jrel),
 		"notified_at":     nullStringVal(notifAt),
 		"enriched_data":   nullStringVal(enrichedData),
+		"fetch_status":    nullStringVal(fetchStatus),
+		"fetch_attempts":  fetchAttempts.Int64,
+		"fetch_error":     nullStringVal(fetchError),
+		"fetched_at":      nullStringVal(fetchedAt),
 	}
 
 	if enrichedData.Valid && enrichedData.String != "" {
@@ -814,6 +906,180 @@ func (s *SQLStore) BackfillArticleContents(ctx context.Context, fetcher func(ctx
 
 	log.Printf("[Backfill] Completed article backfill: successfully enriched %d/%d articles", updatedCount, len(targets))
 	return updatedCount, nil
+}
+
+func (s *SQLStore) GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = 2
+	}
+
+	var query string
+	if s.isSQLite {
+		if torOnly {
+			query = `
+			SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+			       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+			FROM threat_items
+			WHERE fetch_status IN ('pending', 'failed')
+			  AND fetch_attempts < ?
+			  AND url IS NOT NULL AND url != ''
+			  AND url LIKE '%.onion%'
+			ORDER BY harvested_at DESC LIMIT ?
+			`
+		} else {
+			query = `
+			SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+			       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+			FROM threat_items
+			WHERE fetch_status IN ('pending', 'failed')
+			  AND fetch_attempts < ?
+			  AND url IS NOT NULL AND url != ''
+			  AND url NOT LIKE '%.onion%'
+			ORDER BY harvested_at DESC LIMIT ?
+			`
+		}
+	} else {
+		if torOnly {
+			query = `
+			SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+			       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+			FROM threat_items
+			WHERE fetch_status IN ('pending', 'failed')
+			  AND fetch_attempts < $1
+			  AND url IS NOT NULL AND url != ''
+			  AND url LIKE '%.onion%'
+			ORDER BY harvested_at DESC LIMIT $2
+			`
+		} else {
+			query = `
+			SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+			       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+			FROM threat_items
+			WHERE fetch_status IN ('pending', 'failed')
+			  AND fetch_attempts < $1
+			  AND url IS NOT NULL AND url != ''
+			  AND url NOT LIKE '%.onion%'
+			ORDER BY harvested_at DESC LIMIT $2
+			`
+		}
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, maxAttempts, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.ThreatItem
+	for rows.Next() {
+		var (
+			id, sourceType, sourceName, title string
+			url, summary, rawContent          sql.NullString
+			pubAt, harvAt                     sql.NullString
+			fetchStatus                       sql.NullString
+			fetchAttempts                     int
+			fetchError, fetchedAt             sql.NullString
+			incidentID                        sql.NullString
+		)
+
+		if err := rows.Scan(
+			&id, &sourceType, &sourceName, &title,
+			&url, &summary, &rawContent, &pubAt, &harvAt,
+			&fetchStatus, &fetchAttempts, &fetchError, &fetchedAt, &incidentID,
+		); err != nil {
+			continue
+		}
+
+		var parsedPub *time.Time
+		if pubAt.Valid && pubAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, pubAt.String); err == nil {
+				parsedPub = &t
+			}
+		}
+
+		var parsedHarv time.Time
+		if harvAt.Valid && harvAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, harvAt.String); err == nil {
+				parsedHarv = t
+			}
+		}
+		if parsedHarv.IsZero() {
+			parsedHarv = time.Now().UTC()
+		}
+
+		var parsedFetched *time.Time
+		if fetchedAt.Valid && fetchedAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, fetchedAt.String); err == nil {
+				parsedFetched = &t
+			}
+		}
+
+		fStatus := "pending"
+		if fetchStatus.Valid && fetchStatus.String != "" {
+			fStatus = fetchStatus.String
+		}
+
+		item := models.ThreatItem{
+			ID:            id,
+			IncidentID:    incidentID.String,
+			SourceType:    models.SourceType(sourceType),
+			SourceName:    sourceName,
+			Title:         title,
+			URL:           url.String,
+			Summary:       summary.String,
+			RawContent:    rawContent.String,
+			FetchStatus:   fStatus,
+			FetchAttempts: fetchAttempts,
+			FetchError:    fetchError.String,
+			FetchedAt:     parsedFetched,
+			PublishedAt:   parsedPub,
+			HarvestedAt:   parsedHarv,
+			Metadata: map[string]interface{}{
+				"is_onion": strings.Contains(url.String, ".onion"),
+			},
+		}
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+func (s *SQLStore) UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error {
+	var query string
+	var fetchedAtStr *string
+	if status == "completed" {
+		now := time.Now().UTC().Format(time.RFC3339)
+		fetchedAtStr = &now
+	}
+
+	if s.isSQLite {
+		query = `
+		UPDATE threat_items
+		SET fetch_status = ?,
+		    fetch_attempts = ?,
+		    fetch_error = ?,
+		    raw_content = COALESCE(NULLIF(?, ''), raw_content),
+		    fetched_at = COALESCE(?, fetched_at)
+		WHERE id = ?
+		`
+		_, err := s.db.ExecContext(ctx, query, status, attempts, fetchError, rawContent, fetchedAtStr, itemID)
+		return err
+	}
+
+	query = `
+	UPDATE threat_items
+	SET fetch_status = $1,
+	    fetch_attempts = $2,
+	    fetch_error = $3,
+	    raw_content = COALESCE(NULLIF($4, ''), raw_content),
+	    fetched_at = COALESCE($5, fetched_at)
+	WHERE id = $6
+	`
+	_, err := s.db.ExecContext(ctx, query, status, attempts, fetchError, rawContent, fetchedAtStr, itemID)
+	return err
 }
 
 func (s *SQLStore) Close() error {

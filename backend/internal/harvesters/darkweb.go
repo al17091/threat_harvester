@@ -2,6 +2,7 @@ package harvesters
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -41,13 +42,13 @@ type ahmiaResult struct {
 
 type DarkwebOnionHarvester struct {
 	parser   *gofeed.Parser
-	analyzer *analyzer.GeminiThreatAnalyzer
+	analyzer analyzer.ThreatAnalyzer
 }
 
 func NewDarkwebOnionHarvester() *DarkwebOnionHarvester {
 	return &DarkwebOnionHarvester{
 		parser:   gofeed.NewParser(),
-		analyzer: analyzer.NewGeminiThreatAnalyzer(),
+		analyzer: analyzer.NewDefaultThreatAnalyzer(),
 	}
 }
 
@@ -131,6 +132,17 @@ func (h *DarkwebOnionHarvester) Harvest(ctx context.Context, since *time.Time) (
 			tier = config.TierDarkwebAccess
 		}
 		if !target.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
+			continue
+		}
+
+		// 0. SearXNG unified meta-search exploration
+		if target.Type == "searxng" {
+			searxItems, err := h.harvestSearXNG(ctx, target, since)
+			if err != nil {
+				log.Printf("[DarkWeb] SearXNG exploration error for %s: %v", target.Name, err)
+			} else {
+				items = append(items, searxItems...)
+			}
 			continue
 		}
 
@@ -628,7 +640,7 @@ func (h *DarkwebOnionHarvester) harvestHTML(ctx context.Context, torClient *http
 	return items, nil
 }
 
-// isCTIRelevant determines whether a darkweb text snippet has cybersecurity threat context.
+// isCTIRelevant determines whether a text snippet has cybersecurity threat context.
 func isCTIRelevant(text string) bool {
 	lower := strings.ToLower(text)
 	keywords := []string{
@@ -637,6 +649,9 @@ func isCTIRelevant(text string) bool {
 		"compromis", "payload", "cve", "dls", "extortion", "attack", "malware",
 		"cyber", "pwned", "darknet", "threat", "gang", "target", "proof", "corp",
 		"japan", "japanese", "tokyo", "data leak",
+		// Japanese CTI keywords
+		"ランサムウェア", "身代金", "不正アクセス", "情報漏洩", "漏洩", "データ侵害",
+		"脆弱性", "ゼロデイ", "サイバー攻撃", "標的型", "侵害", "マルウェア", "暴露", "二重脅迫",
 	}
 	for _, kw := range keywords {
 		if strings.Contains(lower, kw) {
@@ -644,4 +659,175 @@ func isCTIRelevant(text string) bool {
 		}
 	}
 	return false
+}
+
+type searxngResult struct {
+	URL           string   `json:"url"`
+	Title         string   `json:"title"`
+	Content       string   `json:"content"`
+	Engine        string   `json:"engine"`
+	Engines       []string `json:"engines,omitempty"`
+	PublishedDate string   `json:"publishedDate,omitempty"`
+}
+
+type searxngResponse struct {
+	Query   string          `json:"query"`
+	Results []searxngResult `json:"results"`
+}
+
+var defaultSearxngTransport = &http.Transport{
+	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+}
+
+// harvestSearXNG executes unified meta-search via SearXNG API (format=json)
+func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target config.DarkwebSourceConfig, since *time.Time) ([]models.ThreatItem, error) {
+	var queries []string
+	if strings.TrimSpace(target.Directive) != "" {
+		directive := strings.TrimSpace(target.Directive)
+		aiQueries, err := h.analyzer.GenerateSearchQueries(ctx, directive, "darkweb_onion", 3)
+		if err == nil && len(aiQueries) > 0 {
+			queries = aiQueries
+		} else {
+			queries = []string{directive}
+		}
+	} else if strings.TrimSpace(target.Query) != "" {
+		queries = []string{strings.TrimSpace(target.Query)}
+	} else {
+		return nil, nil
+	}
+
+	timeoutSec := target.TimeoutSeconds
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+
+	client := &http.Client{
+		Transport: defaultSearxngTransport,
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+	}
+
+	var items []models.ThreatItem
+	seenURLs := make(map[string]bool)
+
+	baseURL := target.URL
+	if baseURL == "" {
+		baseURL = "https://searxng.lab.internal/search"
+	}
+
+	for _, q := range queries {
+		log.Printf("[DarkWeb] Executing SearXNG query: '%s' (Target: %s, URL: %s)", q, target.Name, baseURL)
+		results, err := h.querySearXNG(ctx, client, baseURL, q, target.Engines, target.Categories)
+		if err != nil {
+			log.Printf("[DarkWeb] SearXNG search query '%s' failed: %v", q, err)
+			continue
+		}
+
+		for _, res := range results {
+			if strings.TrimSpace(res.URL) == "" {
+				continue
+			}
+			if seenURLs[res.URL] {
+				continue
+			}
+			seenURLs[res.URL] = true
+
+			var pubDate *time.Time
+			if res.PublishedDate != "" {
+				layouts := []string{
+					time.RFC3339,
+					"2006-01-02T15:04:05Z07:00",
+					"2006-01-02 15:04:05",
+					"2006-01-02",
+				}
+				for _, layout := range layouts {
+					if t, err := time.Parse(layout, strings.TrimSpace(res.PublishedDate)); err == nil {
+						utc := t.UTC()
+						pubDate = &utc
+						break
+					}
+				}
+			}
+
+			if since != nil && pubDate != nil && pubDate.Before(*since) {
+				continue
+			}
+
+			isOnion := strings.Contains(res.URL, ".onion")
+			rawContent := fmt.Sprintf("%s\n\n[SearXNG Query: %s]\n[Engine: %s]\n[URL: %s]", res.Content, q, res.Engine, res.URL)
+
+			meta := map[string]interface{}{
+				"is_onion":       isOnion,
+				"engine":         res.Engine,
+				"searxng_query":  q,
+				"fetch_status":   "pending",
+				"source_engine":  res.Engine,
+			}
+			if len(res.Engines) > 0 {
+				meta["engines"] = res.Engines
+			}
+
+			item := models.NewThreatItem(
+				models.SourceTypeDarkwebOnion,
+				target.Name,
+				res.Title,
+				res.URL,
+				res.Content,
+				rawContent,
+				pubDate,
+				meta,
+			)
+			items = append(items, item)
+		}
+	}
+
+	log.Printf("[DarkWeb] SearXNG harvested %d items for target %s", len(items), target.Name)
+	return items, nil
+}
+
+// querySearXNG calls SearXNG format=json API
+func (h *DarkwebOnionHarvester) querySearXNG(ctx context.Context, client *http.Client, endpoint, query, engines, categories string) ([]searxngResult, error) {
+	return QuerySearXNGAPI(ctx, client, endpoint, query, engines, categories)
+}
+
+// QuerySearXNGAPI calls SearXNG format=json API and returns parsed results
+func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, engines, categories string) ([]searxngResult, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid searxng endpoint: %w", err)
+	}
+
+	qParams := u.Query()
+	qParams.Set("q", query)
+	qParams.Set("format", "json")
+	if strings.TrimSpace(engines) != "" {
+		qParams.Set("engines", strings.TrimSpace(engines))
+	}
+	if strings.TrimSpace(categories) != "" {
+		qParams.Set("categories", strings.TrimSpace(categories))
+	}
+	u.RawQuery = qParams.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create searxng request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0 ThreatHarvesterBot/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("searxng request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("searxng returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var data searxngResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to decode searxng response: %w", err)
+	}
+
+	return data.Results, nil
 }

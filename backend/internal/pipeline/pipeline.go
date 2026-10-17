@@ -27,7 +27,7 @@ type PipelineSummary struct {
 
 type Pipeline struct {
 	store          storage.Store
-	analyzer       *analyzer.GeminiThreatAnalyzer
+	analyzer       analyzer.ThreatAnalyzer
 	notifier       *notifiers.NotificationManager
 	notionReporter *reporters.NotionReporter
 	harvesterList  []harvesters.Harvester
@@ -36,7 +36,7 @@ type Pipeline struct {
 func NewPipeline(store storage.Store) *Pipeline {
 	return &Pipeline{
 		store:          store,
-		analyzer:       analyzer.NewGeminiThreatAnalyzer(),
+		analyzer:       analyzer.NewDefaultThreatAnalyzer(),
 		notifier:       notifiers.NewNotificationManager(),
 		notionReporter: reporters.NewNotionReporter(),
 		harvesterList: []harvesters.Harvester{
@@ -48,6 +48,10 @@ func NewPipeline(store storage.Store) *Pipeline {
 			harvesters.NewXMonitorHarvester(),
 		},
 	}
+}
+
+func (p *Pipeline) Analyzer() analyzer.ThreatAnalyzer {
+	return p.analyzer
 }
 
 func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOnly bool) (PipelineSummary, error) {

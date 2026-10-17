@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"html"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/proxy"
+
 	"github.com/dapt/information_harvester/backend/internal/models"
 )
 
@@ -33,6 +36,11 @@ var (
 
 // FetchArticleContent fetches the given article URL and extracts its main body text.
 func FetchArticleContent(ctx context.Context, targetURL string) (string, error) {
+	return FetchArticleContentWithTimeout(ctx, targetURL, 15)
+}
+
+// FetchArticleContentWithTimeout fetches the given article URL with custom timeout and extracts its main body text.
+func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeoutSec int) (string, error) {
 	trimmedURL := strings.TrimSpace(targetURL)
 	if trimmedURL == "" {
 		return "", fmt.Errorf("empty URL")
@@ -52,11 +60,22 @@ func FetchArticleContent(ctx context.Context, targetURL string) (string, error) 
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Try fetching the URL; if it fails on non-www domain, attempt www prefix fallback
-	body, err := doFetchHTML(ctx, trimmedURL)
+	if timeoutSec <= 0 {
+		timeoutSec = 15
+	}
+	client := &http.Client{
+		Timeout: time.Duration(timeoutSec) * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+
+	body, err := doFetchHTMLWithClient(ctx, client, trimmedURL)
 	if err != nil && !strings.HasPrefix(u.Host, "www.") {
 		u.Host = "www." + u.Host
-		if altBody, altErr := doFetchHTML(ctx, u.String()); altErr == nil {
+		if altBody, altErr := doFetchHTMLWithClient(ctx, client, u.String()); altErr == nil {
 			body = altBody
 			err = nil
 		}
@@ -66,6 +85,119 @@ func FetchArticleContent(ctx context.Context, targetURL string) (string, error) 
 	}
 
 	return ExtractArticleTextFromHTML(body)
+}
+
+// FetchOnionArticleContent fetches the given .onion URL via Tor SOCKS5h proxy and extracts its main body text.
+func FetchOnionArticleContent(ctx context.Context, targetURL string, proxyURLStr string, timeoutSec int) (string, error) {
+	trimmedURL := strings.TrimSpace(targetURL)
+	if trimmedURL == "" {
+		return "", fmt.Errorf("empty URL")
+	}
+
+	if !strings.Contains(trimmedURL, ".onion") {
+		return "", fmt.Errorf("not an onion URL: %s", trimmedURL)
+	}
+
+	if !strings.HasPrefix(trimmedURL, "http://") && !strings.HasPrefix(trimmedURL, "https://") {
+		trimmedURL = "http://" + trimmedURL
+	}
+
+	if proxyURLStr == "" {
+		proxyURLStr = "socks5h://127.0.0.1:9050"
+	}
+	if timeoutSec <= 0 {
+		timeoutSec = 45
+	}
+
+	u, err := url.Parse(proxyURLStr)
+	host := proxyURLStr
+	if err == nil && u.Host != "" {
+		host = u.Host
+	} else {
+		host = strings.TrimPrefix(proxyURLStr, "socks5h://")
+		host = strings.TrimPrefix(host, "socks5://")
+	}
+
+	dialer, err := proxy.SOCKS5("tcp", host, nil, proxy.Direct)
+	if err != nil {
+		return "", fmt.Errorf("failed to create tor SOCKS5 dialer: %w", err)
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.Dial(network, addr)
+		},
+		DisableKeepAlives: true,
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+	}
+
+	torClient := &http.Client{
+		Transport: transport,
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+	}
+
+	body, err := doFetchHTMLWithTorClient(ctx, torClient, trimmedURL)
+	if err != nil {
+		return "", err
+	}
+
+	return ExtractArticleTextFromHTML(body)
+}
+
+func doFetchHTMLWithClient(ctx context.Context, client *http.Client, reqURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 ThreatHarvester/1.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9,ja;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return doc.Html()
+}
+
+func doFetchHTMLWithTorClient(ctx context.Context, client *http.Client, reqURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return doc.Html()
 }
 
 func doFetchHTML(ctx context.Context, reqURL string) (string, error) {

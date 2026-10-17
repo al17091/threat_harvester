@@ -33,9 +33,9 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 
 	headerPrefix := ""
 	if threat.JapanRelevance == models.JapanRelevanceDirect {
-		headerPrefix = "🇯🇵 [日本標的] "
+		headerPrefix = "🇯🇵 [Targeting Japan] "
 	} else if threat.JapanRelevance == models.JapanRelevanceIndirect {
-		headerPrefix = "🌐 [国内波及] "
+		headerPrefix = "🌐 [Global / Indirect] "
 	}
 
 	mention := ""
@@ -45,13 +45,26 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 		mention = "<!here> "
 	}
 
-	victims := "未特定"
+	victims := "Unspecified"
 	if len(threat.VictimOrgs) > 0 {
 		victims = strings.Join(threat.VictimOrgs, ", ")
 	}
-	actors := "未特定"
+	actors := "Unspecified"
 	if len(threat.ThreatActors) > 0 {
 		actors = strings.Join(threat.ThreatActors, ", ")
+	}
+
+	titleText := threat.Title
+	if titleText == "" {
+		titleText = threat.TitleJa
+	}
+	summaryText := threat.Summary
+	if summaryText == "" {
+		summaryText = threat.SummaryJa
+	}
+	impactText := threat.ImpactAnalysis
+	if impactText == "" {
+		impactText = threat.ImpactAnalysisJa
 	}
 
 	blocks := []map[string]interface{}{
@@ -59,7 +72,7 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 			"type": "header",
 			"text": map[string]interface{}{
 				"type":  "plain_text",
-				"text":  fmt.Sprintf("%s[%s] %s", headerPrefix, threat.Severity, truncate(threat.TitleJa, 80)),
+				"text":  fmt.Sprintf("%s[%s] %s", headerPrefix, threat.Severity, truncate(titleText, 80)),
 				"emoji": true,
 			},
 		},
@@ -67,26 +80,26 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 			"type": "section",
 			"text": map[string]interface{}{
 				"type": "mrkdwn",
-				"text": fmt.Sprintf("%s*概要:*\n%s", mention, threat.SummaryJa),
+				"text": fmt.Sprintf("%s*Summary:*\n%s", mention, summaryText),
 			},
 		},
 		{
 			"type": "section",
 			"fields": []map[string]interface{}{
-				{"type": "mrkdwn", "text": fmt.Sprintf("*日本関連性:*\n%s", threat.JapanRelevance)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*情報源:*\n%s (%s)", threat.Item.SourceType, threat.Item.SourceName)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*被害組織:*\n%s", victims)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*攻撃グループ:*\n%s", actors)},
+				{"type": "mrkdwn", "text": fmt.Sprintf("*Japan Relevance:*\n%s", threat.JapanRelevance)},
+				{"type": "mrkdwn", "text": fmt.Sprintf("*Source:*\n%s (%s)", threat.Item.SourceType, threat.Item.SourceName)},
+				{"type": "mrkdwn", "text": fmt.Sprintf("*Victims:*\n%s", victims)},
+				{"type": "mrkdwn", "text": fmt.Sprintf("*Threat Actors:*\n%s", actors)},
 			},
 		},
 	}
 
-	if threat.ImpactAnalysisJa != "" {
+	if impactText != "" {
 		blocks = append(blocks, map[string]interface{}{
 			"type": "section",
 			"text": map[string]interface{}{
 				"type": "mrkdwn",
-				"text": fmt.Sprintf("*国内影響分析:*\n%s", threat.ImpactAnalysisJa),
+				"text": fmt.Sprintf("*Impact Analysis:*\n%s", impactText),
 			},
 		})
 	}
@@ -99,7 +112,7 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 					"type": "button",
 					"text": map[string]interface{}{
 						"type":  "plain_text",
-						"text":  "詳細ソースを見る",
+						"text":  "View Source Link",
 						"emoji": true,
 					},
 					"url": threat.Item.URL,

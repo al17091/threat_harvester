@@ -80,11 +80,17 @@ func (h *VendorRSSHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 			log.Printf("[RSS] Failed to create request for %s: %v", feedCfg.Name, err)
 			continue
 		}
-		req.Header.Set("User-Agent", "ThreatHarvesterBot/1.0 (+https://github.com/dapt/information_harvester)")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 		resp, err := h.client.Do(req)
 		if err != nil {
 			log.Printf("[RSS] Failed to fetch feed %s: %v", feedCfg.Name, err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("[RSS] Feed %s returned HTTP %d, skipping", feedCfg.Name, resp.StatusCode)
+			_ = resp.Body.Close()
 			continue
 		}
 

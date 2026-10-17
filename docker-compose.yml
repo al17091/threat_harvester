@@ -8,6 +8,7 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_URL=http://backend:8000
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-harvester2026}
     depends_on:
       backend:
         condition: service_healthy
@@ -18,14 +19,17 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: harvester-backend
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - PORT=8000
       - DATABASE_URL=postgres://postgres:postgres@db:5432/information_harvester
       - TOR_PROXY_URL=${TOR_PROXY_URL:-socks5h://host.docker.internal:9050}
+      - AI_PRIMARY_PROVIDER=${AI_PRIMARY_PROVIDER:-openai_compatible}
+      - LITELLM_ENDPOINT=${LITELLM_ENDPOINT:-https://litellm.lab.internal/v1/chat/completions}
+      - LITELLM_MODEL=${LITELLM_MODEL:-qwen2.5-3b-instruct}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
@@ -53,8 +57,8 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=information_harvester
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

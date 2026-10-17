@@ -7,11 +7,21 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/dapt/information_harvester/backend/internal/models"
 )
+
+const incidentSelectCols = `
+	id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+	severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
+	first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at,
+	COALESCE(title_ja, ''), COALESCE(victim_org_en, ''), COALESCE(victim_org_ja, ''), COALESCE(affected_product_en, ''), COALESCE(affected_product_ja, ''),
+	COALESCE(summary, ''), COALESCE(impact_analysis, '')
+`
 
 // isWithinWindow checks if itemTime falls within sliding window of the incident.
 func isWithinWindow(inc *models.Incident, itemTime time.Time, windowDuration time.Duration) bool {
@@ -112,9 +122,7 @@ func (s *SQLStore) FindOrCreateIncident(
 		var urlQuery string
 		if s.isSQLite {
 			urlQuery = `
-				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				SELECT ` + incidentSelectCols + `
 				FROM incidents
 				WHERE (primary_url = ? OR source_urls LIKE ?)
 				ORDER BY last_seen_at DESC
@@ -122,9 +130,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			`
 		} else {
 			urlQuery = `
-				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				SELECT ` + incidentSelectCols + `
 				FROM incidents
 				WHERE (primary_url = $1 OR source_urls LIKE $2)
 				ORDER BY last_seen_at DESC
@@ -168,9 +174,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			}
 
 			cveQuery := `
-				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				SELECT ` + incidentSelectCols + `
 				FROM incidents
 				WHERE ` + strings.Join(cveConds, " OR ") + `
 				ORDER BY last_seen_at DESC
@@ -200,9 +204,7 @@ func (s *SQLStore) FindOrCreateIncident(
 		if matched == nil && normProduct != "" {
 			prodPattern := "%" + normProduct + "%"
 			prodQuery := `
-				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				SELECT ` + incidentSelectCols + `
 				FROM incidents
 				WHERE ((affected_product IS NOT NULL AND affected_product != '' AND LOWER(affected_product) LIKE ?) OR LOWER(title) LIKE ?)
 				ORDER BY last_seen_at DESC
@@ -210,9 +212,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			`
 			if !s.isSQLite {
 				prodQuery = `
-					SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-					       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-					       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+					SELECT ` + incidentSelectCols + `
 					FROM incidents
 					WHERE ((affected_product IS NOT NULL AND affected_product != '' AND affected_product ILIKE $1) OR title ILIKE $2)
 					ORDER BY last_seen_at DESC
@@ -243,9 +243,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// TRACK 2: Specific Victim Org Clustering (Targeted Cyberattacks, Ransomware, Data Breaches)
 	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) {
 		query := `
-			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-			       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+			SELECT ` + incidentSelectCols + `
 			FROM incidents
 			WHERE normalized_victim_org = ?
 			ORDER BY last_seen_at DESC
@@ -253,9 +251,7 @@ func (s *SQLStore) FindOrCreateIncident(
 		`
 		if !s.isSQLite {
 			query = `
-				SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-				       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+				SELECT ` + incidentSelectCols + `
 				FROM incidents
 				WHERE normalized_victim_org = $1
 				ORDER BY last_seen_at DESC
@@ -295,17 +291,35 @@ func (s *SQLStore) FindOrCreateIncident(
 		}
 
 		if enriched != nil {
+			if matched.Title == "" || (isJapaneseText(matched.Title) && enriched.Title != "") {
+				if enriched.Title != "" {
+					matched.Title = enriched.Title
+				}
+			}
 			matched.Severity = models.HigherSeverity(matched.Severity, enriched.Severity)
 			matched.JapanRelevance = models.HigherRelevance(matched.JapanRelevance, enriched.JapanRelevance)
-			matched.ThreatActors = mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors)
+			matched.ThreatActors = models.CleanThreatActors(mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors))
 			if matched.AttackType == "" && enriched.AttackType != "" {
 				matched.AttackType = enriched.AttackType
 			}
-			if matched.SummaryJa == "" && enriched.SummaryJa != "" {
-				matched.SummaryJa = enriched.SummaryJa
+			if enriched.TitleJa != "" {
+				matched.TitleJa = enriched.TitleJa
 			}
-			if matched.ImpactAnalysisJa == "" && enriched.ImpactAnalysisJa != "" {
+			if matched.Summary == "" && enriched.Summary != "" {
+				matched.Summary = enriched.Summary
+			}
+			if enriched.SummaryJa != "" {
+				matched.SummaryJa = enriched.SummaryJa
+			} else if matched.SummaryJa == "" && enriched.Summary != "" {
+				matched.SummaryJa = enriched.Summary
+			}
+			if matched.ImpactAnalysis == "" && enriched.ImpactAnalysis != "" {
+				matched.ImpactAnalysis = enriched.ImpactAnalysis
+			}
+			if enriched.ImpactAnalysisJa != "" {
 				matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
+			} else if matched.ImpactAnalysisJa == "" && enriched.ImpactAnalysis != "" {
+				matched.ImpactAnalysisJa = enriched.ImpactAnalysis
 			}
 		}
 
@@ -323,6 +337,23 @@ func (s *SQLStore) FindOrCreateIncident(
 				matched.RawContent += "\n\n---\n\n" + newRaw
 			} else {
 				matched.RawContent = newRaw
+			}
+		}
+		if enriched != nil {
+			if matched.Summary == "" && enriched.Summary != "" {
+				matched.Summary = enriched.Summary
+			}
+			if (matched.SummaryJa == "" || matched.SummaryJa == matched.Summary) && enriched.SummaryJa != "" && enriched.SummaryJa != enriched.Summary {
+				matched.SummaryJa = enriched.SummaryJa
+			}
+			if matched.ImpactAnalysis == "" && enriched.ImpactAnalysis != "" {
+				matched.ImpactAnalysis = enriched.ImpactAnalysis
+			}
+			if (matched.ImpactAnalysisJa == "" || matched.ImpactAnalysisJa == matched.ImpactAnalysis) && enriched.ImpactAnalysisJa != "" && enriched.ImpactAnalysisJa != enriched.ImpactAnalysis {
+				matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
+			}
+			if matched.TitleJa == "" && enriched.TitleJa != "" {
+				matched.TitleJa = enriched.TitleJa
 			}
 		}
 
@@ -371,7 +402,10 @@ func (s *SQLStore) buildNewIncident(
 ) *models.Incident {
 	id := models.NewSTIXIncidentID()
 	title := item.Title
+	titleJa := ""
+	summary := item.Summary
 	summaryJa := item.Summary
+	impact := ""
 	impactJa := ""
 	sev := models.SeverityUnknown
 	jrel := models.JapanRelevanceUnknown
@@ -379,17 +413,38 @@ func (s *SQLStore) buildNewIncident(
 	var threatActors []string
 
 	if enriched != nil {
+		if enriched.Title != "" {
+			title = enriched.Title
+		}
 		if enriched.TitleJa != "" {
-			title = enriched.TitleJa
+			titleJa = enriched.TitleJa
+		} else if strings.TrimSpace(item.Title) != "" && isJapaneseText(item.Title) {
+			titleJa = strings.TrimSpace(item.Title)
+		}
+
+		if enriched.Summary != "" {
+			summary = enriched.Summary
 		}
 		if enriched.SummaryJa != "" {
 			summaryJa = enriched.SummaryJa
+		} else if enriched.Summary != "" {
+			summaryJa = enriched.Summary
+		} else if strings.TrimSpace(item.Summary) != "" {
+			summaryJa = strings.TrimSpace(item.Summary)
 		}
-		impactJa = enriched.ImpactAnalysisJa
+
+		if enriched.ImpactAnalysis != "" {
+			impact = enriched.ImpactAnalysis
+		}
+		if enriched.ImpactAnalysisJa != "" {
+			impactJa = enriched.ImpactAnalysisJa
+		} else if enriched.ImpactAnalysis != "" {
+			impactJa = enriched.ImpactAnalysis
+		}
 		sev = enriched.Severity
 		jrel = enriched.JapanRelevance
 		attackType = enriched.AttackType
-		threatActors = enriched.ThreatActors
+		threatActors = models.CleanThreatActors(enriched.ThreatActors)
 	}
 
 	if attackType == "" && (len(cves) > 0 || rawProduct != "") {
@@ -431,7 +486,10 @@ func (s *SQLStore) buildNewIncident(
 		CVEs:                cves,
 		AffectedProduct:     rawProduct,
 		Title:               title,
+		TitleJa:             titleJa,
+		Summary:             summary,
 		SummaryJa:           summaryJa,
+		ImpactAnalysis:      impact,
 		ImpactAnalysisJa:    impactJa,
 		Severity:            sev,
 		JapanRelevance:      jrel,
@@ -506,16 +564,20 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 			INSERT INTO incidents (
 				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 				severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at,
+				title_ja, victim_org_en, victim_org_ja, affected_product_en, affected_product_ja,
+				summary, impact_analysis
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`
 	} else {
 		query = `
 			INSERT INTO incidents (
 				id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
 				severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+				first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at,
+				title_ja, victim_org_en, victim_org_ja, affected_product_en, affected_product_ja,
+				summary, impact_analysis
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
 		`
 	}
 
@@ -541,6 +603,13 @@ func (s *SQLStore) insertIncident(ctx context.Context, inc *models.Incident) err
 		string(actorsJSON),
 		createdStr,
 		updatedStr,
+		inc.TitleJa,
+		inc.VictimOrgEn,
+		inc.VictimOrgJa,
+		inc.AffectedProductEn,
+		inc.AffectedProductJa,
+		inc.Summary,
+		inc.ImpactAnalysis,
 	)
 	return err
 }
@@ -575,7 +644,14 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 				last_seen_at = ?,
 				report_count = ?,
 				threat_actors = ?,
-				updated_at = ?
+				updated_at = ?,
+				title_ja = COALESCE(NULLIF(?, ''), title_ja),
+				victim_org_en = COALESCE(NULLIF(?, ''), victim_org_en),
+				victim_org_ja = COALESCE(NULLIF(?, ''), victim_org_ja),
+				affected_product_en = COALESCE(NULLIF(?, ''), affected_product_en),
+				affected_product_ja = COALESCE(NULLIF(?, ''), affected_product_ja),
+				summary = COALESCE(NULLIF(?, ''), summary),
+				impact_analysis = COALESCE(NULLIF(?, ''), impact_analysis)
 			WHERE id = ?
 		`
 	} else {
@@ -597,31 +673,76 @@ func (s *SQLStore) updateIncident(ctx context.Context, inc *models.Incident) err
 				last_seen_at = $14,
 				report_count = $15,
 				threat_actors = $16,
-				updated_at = $17
-			WHERE id = $18
+				updated_at = $17,
+				title_ja = COALESCE(NULLIF($18, ''), title_ja),
+				victim_org_en = COALESCE(NULLIF($19, ''), victim_org_en),
+				victim_org_ja = COALESCE(NULLIF($20, ''), victim_org_ja),
+				affected_product_en = COALESCE(NULLIF($21, ''), affected_product_en),
+				affected_product_ja = COALESCE(NULLIF($22, ''), affected_product_ja),
+				summary = COALESCE(NULLIF($23, ''), summary),
+				impact_analysis = COALESCE(NULLIF($24, ''), impact_analysis)
+			WHERE id = $25
 		`
 	}
 
-	_, err := s.db.ExecContext(ctx, query,
-		string(cvesJSON),
-		inc.AffectedProduct,
-		inc.Title,
-		inc.SummaryJa,
-		inc.ImpactAnalysisJa,
-		string(inc.Severity),
-		string(inc.JapanRelevance),
-		inc.AttackType,
-		inc.RawContent,
-		inc.PrimaryURL,
-		string(srcURLsJSON),
-		string(srcDetailJSON),
-		firstStr,
-		lastStr,
-		inc.ReportCount,
-		string(actorsJSON),
-		updatedStr,
-		inc.ID,
-	)
+	var err error
+	if s.isSQLite {
+		_, err = s.db.ExecContext(ctx, query,
+			string(cvesJSON),
+			inc.AffectedProduct,
+			inc.Title,
+			inc.SummaryJa,
+			inc.ImpactAnalysisJa,
+			string(inc.Severity),
+			string(inc.JapanRelevance),
+			inc.AttackType,
+			inc.RawContent,
+			inc.PrimaryURL,
+			string(srcURLsJSON),
+			string(srcDetailJSON),
+			firstStr,
+			lastStr,
+			inc.ReportCount,
+			string(actorsJSON),
+			updatedStr,
+			inc.TitleJa,
+			inc.VictimOrgEn,
+			inc.VictimOrgJa,
+			inc.AffectedProductEn,
+			inc.AffectedProductJa,
+			inc.Summary,
+			inc.ImpactAnalysis,
+			inc.ID,
+		)
+	} else {
+		_, err = s.db.ExecContext(ctx, query,
+			string(cvesJSON),
+			inc.AffectedProduct,
+			inc.Title,
+			inc.SummaryJa,
+			inc.ImpactAnalysisJa,
+			string(inc.Severity),
+			string(inc.JapanRelevance),
+			inc.AttackType,
+			inc.RawContent,
+			inc.PrimaryURL,
+			string(srcURLsJSON),
+			string(srcDetailJSON),
+			firstStr,
+			lastStr,
+			inc.ReportCount,
+			string(actorsJSON),
+			updatedStr,
+			inc.TitleJa,
+			inc.VictimOrgEn,
+			inc.VictimOrgJa,
+			inc.AffectedProductEn,
+			inc.AffectedProductJa,
+			inc.Summary,
+			inc.ImpactAnalysis,
+			inc.ID,
+		)
+	}
 	return err
 }
 
@@ -634,12 +755,16 @@ func scanIncident(scanner interface {
 		sumJa, impJa, attackType, rawContent, primURL, srcURLs, srcDetail, actors sql.NullString
 		sev, jrel                                                    string
 		reportCount                                                  int
+		titleJa, vOrgEn, vOrgJa, affProdEn, affProdJa                sql.NullString
+		sumEn, impEn                                                 sql.NullString
 	)
 
 	err := scanner.Scan(
 		&id, &victimOrg, &normVictim, &cvesRaw, &affProduct, &title, &sumJa, &impJa,
 		&sev, &jrel, &attackType, &rawContent, &primURL, &srcURLs, &srcDetail,
 		&firstSeen, &lastSeen, &reportCount, &actors, &created, &updated,
+		&titleJa, &vOrgEn, &vOrgJa, &affProdEn, &affProdJa,
+		&sumEn, &impEn,
 	)
 	if err != nil {
 		return nil, err
@@ -673,11 +798,18 @@ func scanIncident(scanner interface {
 	return &models.Incident{
 		ID:                  id,
 		VictimOrg:           victimOrg,
+		VictimOrgEn:         vOrgEn.String,
+		VictimOrgJa:         vOrgJa.String,
 		NormalizedVictimOrg: normVictim.String,
 		CVEs:                cves,
 		AffectedProduct:     affProduct.String,
+		AffectedProductEn:   affProdEn.String,
+		AffectedProductJa:   affProdJa.String,
 		Title:               title,
+		TitleJa:             titleJa.String,
+		Summary:             sumEn.String,
 		SummaryJa:           sumJa.String,
+		ImpactAnalysis:      impEn.String,
 		ImpactAnalysisJa:    impJa.String,
 		Severity:            models.Severity(sev),
 		JapanRelevance:      models.JapanRelevance(jrel),
@@ -746,9 +878,7 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 func (s *SQLStore) GetIncidents(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
 	whereClause, args := s.buildIncidentsConditions(f)
 	query := `
-		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-		       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+		SELECT ` + incidentSelectCols + `
 		FROM incidents
 	` + whereClause
 
@@ -794,9 +924,7 @@ func (s *SQLStore) GetIncidentsTotal(ctx context.Context, f HistoryFilter) (int,
 // GetIncident retrieves a single incident by ID along with all attached child reports.
 func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[string]interface{}, error) {
 	query := `
-		SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-		       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-		       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+		SELECT ` + incidentSelectCols + `
 		FROM incidents
 		WHERE id = ? OR id LIKE ?
 		LIMIT 1
@@ -805,9 +933,7 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 	args := []interface{}{incidentID, prefix}
 	if !s.isSQLite {
 		query = `
-			SELECT id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
-			       severity, japan_relevance, attack_type, raw_content, primary_url, source_urls, sources_detail,
-			       first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at
+			SELECT ` + incidentSelectCols + `
 			FROM incidents
 			WHERE id = $1 OR id LIKE $2
 			LIMIT 1
@@ -877,6 +1003,36 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 			}
 		}
 		res["child_items"] = childItems
+
+		// Propagate recommended actions from enriched child items if available
+		var recActions []string
+		var recActionsJa []string
+		for _, c := range childItems {
+			if ep, ok := c["enriched_parsed"].(map[string]interface{}); ok {
+				if ra, ok := ep["recommended_actions"].([]interface{}); ok && len(ra) > 0 {
+					for _, a := range ra {
+						if as, ok := a.(string); ok && strings.TrimSpace(as) != "" {
+							recActions = appendUniqueString(recActions, strings.TrimSpace(as))
+						}
+					}
+				}
+				if raja, ok := ep["recommended_actions_ja"].([]interface{}); ok && len(raja) > 0 {
+					for _, a := range raja {
+						if as, ok := a.(string); ok && strings.TrimSpace(as) != "" {
+							recActionsJa = appendUniqueString(recActionsJa, strings.TrimSpace(as))
+						}
+					}
+				}
+			}
+		}
+		if ep, ok := res["enriched_parsed"].(map[string]interface{}); ok {
+			if len(recActions) > 0 {
+				ep["recommended_actions"] = recActions
+			}
+			if len(recActionsJa) > 0 {
+				ep["recommended_actions_ja"] = recActionsJa
+			}
+		}
 
 		// If incident raw_content is empty, synthesize from child items
 		if rawStr, ok := res["raw_content"].(string); !ok || strings.TrimSpace(rawStr) == "" {
@@ -1019,26 +1175,87 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 	createdStr := inc.CreatedAt.UTC().Format(time.RFC3339)
 	updatedStr := inc.UpdatedAt.UTC().Format(time.RFC3339)
 
+	titleEn := inc.Title
+	titleJa := inc.TitleJa
+	if titleJa == "" && isJapaneseText(inc.Title) {
+		titleJa = inc.Title
+	}
+
+	victimOrgEn := inc.VictimOrgEn
+	if victimOrgEn == "" && !isJapaneseText(inc.VictimOrg) {
+		victimOrgEn = inc.VictimOrg
+	}
+	victimOrgJa := inc.VictimOrgJa
+	if victimOrgJa == "" {
+		victimOrgJa = inc.VictimOrg
+	}
+
+	productEn := inc.AffectedProductEn
+	if productEn == "" && !isJapaneseText(inc.AffectedProduct) {
+		productEn = inc.AffectedProduct
+	}
+	productJa := inc.AffectedProductJa
+	if productJa == "" {
+		productJa = inc.AffectedProduct
+	}
+
+	displayVictim := victimOrgEn
+	if displayVictim == "" {
+		displayVictim = inc.VictimOrg
+	}
+	displayProduct := productEn
+	if displayProduct == "" {
+		displayProduct = inc.AffectedProduct
+	}
+
 	var victimOrgs []string
-	if inc.VictimOrg != "" && inc.VictimOrg != "Unknown" {
-		victimOrgs = []string{inc.VictimOrg}
+	if displayVictim != "" && displayVictim != "Unknown" {
+		victimOrgs = []string{displayVictim}
 	}
 
 	var affProds []string
-	if inc.AffectedProduct != "" {
-		affProds = []string{inc.AffectedProduct}
+	if displayProduct != "" {
+		affProds = []string{displayProduct}
+	}
+
+	cleanActors := models.CleanThreatActors(inc.ThreatActors)
+	if cleanActors == nil {
+		cleanActors = []string{}
+	}
+
+	sumEn := inc.Summary
+	if sumEn == "" {
+		sumEn = inc.SummaryJa
+	}
+	sumJa := inc.SummaryJa
+	if sumJa == "" {
+		sumJa = inc.Summary
+	}
+	impEn := inc.ImpactAnalysis
+	if impEn == "" {
+		impEn = inc.ImpactAnalysisJa
+	}
+	impJa := inc.ImpactAnalysisJa
+	if impJa == "" {
+		impJa = inc.ImpactAnalysis
 	}
 
 	return map[string]interface{}{
 		"id":                    inc.ID,
-		"victim_org":            inc.VictimOrg,
+		"victim_org":            displayVictim,
+		"victim_org_en":         victimOrgEn,
+		"victim_org_ja":         victimOrgJa,
 		"normalized_victim_org": inc.NormalizedVictimOrg,
 		"cves":                  inc.CVEs,
-		"affected_product":      inc.AffectedProduct,
-		"title":                 inc.Title,
-		"summary":               inc.SummaryJa,
-		"summary_ja":            inc.SummaryJa,
-		"impact_analysis_ja":    inc.ImpactAnalysisJa,
+		"affected_product":      displayProduct,
+		"affected_product_en":   productEn,
+		"affected_product_ja":   productJa,
+		"title":                 titleEn,
+		"title_ja":              titleJa,
+		"summary":               sumEn,
+		"summary_ja":            sumJa,
+		"impact_analysis":       impEn,
+		"impact_analysis_ja":    impJa,
 		"severity":              string(inc.Severity),
 		"japan_relevance":       string(inc.JapanRelevance),
 		"attack_type":           inc.AttackType,
@@ -1052,18 +1269,25 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		"published_at":          lastStr,  // compatible with frontend Incident interface
 		"harvested_at":          firstStr, // compatible with frontend Incident interface
 		"report_count":          inc.ReportCount,
-		"threat_actors":         inc.ThreatActors,
+		"threat_actors":         cleanActors,
 		"created_at":            createdStr,
 		"updated_at":            updatedStr,
 		"enriched_parsed": map[string]interface{}{
-			"title_ja":           inc.Title,
-			"summary_ja":         inc.SummaryJa,
-			"impact_analysis_ja": inc.ImpactAnalysisJa,
-			"victim_orgs":        victimOrgs,
-			"threat_actors":      inc.ThreatActors,
-			"attack_type":        inc.AttackType,
-			"cves":               inc.CVEs,
-			"affected_products":  affProds,
+			"title":               titleEn,
+			"title_ja":            titleJa,
+			"summary":             sumEn,
+			"summary_ja":          sumJa,
+			"impact_analysis":     impEn,
+			"impact_analysis_ja":  impJa,
+			"victim_orgs":         victimOrgs,
+			"victim_org_en":       victimOrgEn,
+			"victim_org_ja":       victimOrgJa,
+			"threat_actors":       cleanActors,
+			"attack_type":         inc.AttackType,
+			"cves":                inc.CVEs,
+			"affected_products":   affProds,
+			"affected_product_en": productEn,
+			"affected_product_ja": productJa,
 		},
 	}
 }
@@ -1112,3 +1336,352 @@ func appendSourceDetail(list []models.SourceDetail, d models.SourceDetail) []mod
 	}
 	return append(list, d)
 }
+
+func isJapaneseText(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) || (r >= 0x4E00 && r <= 0x9FAF) {
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateIncidentTranslations updates title, summary, impact analysis, victim_org_en, and affected_product_en of an incident and syncs child threat items.
+func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, summary, impact, victimEn, productEn string, actions []string) error {
+	var query string
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	if s.isSQLite {
+		query = `UPDATE incidents SET title = ?, summary_ja = ?, impact_analysis_ja = ?, victim_org_en = COALESCE(NULLIF(?, ''), victim_org_en), affected_product_en = COALESCE(NULLIF(?, ''), affected_product_en), updated_at = ? WHERE id = ?`
+		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
+		if err != nil {
+			return err
+		}
+	} else {
+		query = `UPDATE incidents SET title = $1, summary_ja = $2, impact_analysis_ja = $3, victim_org_en = COALESCE(NULLIF($4, ''), victim_org_en), affected_product_en = COALESCE(NULLIF($5, ''), affected_product_en), updated_at = $6 WHERE id = $7`
+		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Update child threat_items' enriched_data to include English fields and recommended actions
+	var cQuery string
+	if s.isSQLite {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = ?`
+	} else {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = $1`
+	}
+	rows, err := s.db.QueryContext(ctx, cQuery, id)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cid, edStr sql.NullString
+			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
+				var ed map[string]interface{}
+				if edStr.Valid && edStr.String != "" {
+					_ = json.Unmarshal([]byte(edStr.String), &ed)
+				}
+				if ed == nil {
+					ed = make(map[string]interface{})
+				}
+				ed["title"] = title
+				ed["summary"] = summary
+				ed["impact_analysis"] = impact
+				if victimEn != "" {
+					ed["victim_org_en"] = victimEn
+				}
+				if productEn != "" {
+					ed["affected_product_en"] = productEn
+				}
+				if len(actions) > 0 {
+					ed["recommended_actions"] = actions
+				}
+				newBytes, _ := json.Marshal(ed)
+				if s.isSQLite {
+					_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(newBytes), cid.String)
+				} else {
+					_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(newBytes), cid.String)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, or impact analysis.
+func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var query string
+	if s.isSQLite {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			WHERE (title LIKE '%[あ-ん]%' OR summary_ja LIKE '%[あ-ん]%' OR impact_analysis_ja LIKE '%[あ-ん]%' OR victim_org LIKE '%[あ-ん]%')
+			ORDER BY last_seen_at DESC
+			LIMIT ?
+		`
+	} else {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			WHERE (title ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR impact_analysis_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR victim_org ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+			ORDER BY last_seen_at DESC
+			LIMIT $1
+		`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var incidents []models.Incident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			continue
+		}
+		if s.isSQLite {
+			if isJapaneseText(inc.Title) || isJapaneseText(inc.SummaryJa) || isJapaneseText(inc.ImpactAnalysisJa) {
+				incidents = append(incidents, *inc)
+			}
+		} else {
+			incidents = append(incidents, *inc)
+		}
+	}
+
+	return incidents, nil
+}
+
+// UpdateIncidentLabels allows administrator to override/fix automatic labels for an incident.
+func (s *SQLStore) UpdateIncidentLabels(ctx context.Context, id string, threatActors []string, severity, japanRelevance, attackType, victimOrg string) error {
+	actorsJSON, _ := json.Marshal(models.CleanThreatActors(threatActors))
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+
+	var query string
+	if s.isSQLite {
+		query = `
+			UPDATE incidents SET
+				threat_actors = ?,
+				severity = CASE WHEN ? != '' THEN ? ELSE severity END,
+				japan_relevance = CASE WHEN ? != '' THEN ? ELSE japan_relevance END,
+				attack_type = CASE WHEN ? != '' THEN ? ELSE attack_type END,
+				victim_org = CASE WHEN ? != '' THEN ? ELSE victim_org END,
+				updated_at = ?
+			WHERE id = ?
+		`
+		_, err := s.db.ExecContext(ctx, query,
+			string(actorsJSON),
+			severity, severity,
+			japanRelevance, japanRelevance,
+			attackType, attackType,
+			victimOrg, victimOrg,
+			nowStr,
+			id,
+		)
+		return err
+	}
+
+	query = `
+		UPDATE incidents SET
+			threat_actors = $1,
+			severity = CASE WHEN $2 != '' THEN $2 ELSE severity END,
+			japan_relevance = CASE WHEN $3 != '' THEN $3 ELSE japan_relevance END,
+			attack_type = CASE WHEN $4 != '' THEN $4 ELSE attack_type END,
+			victim_org = CASE WHEN $5 != '' THEN $5 ELSE victim_org END,
+			updated_at = $6
+		WHERE id = $7
+	`
+	_, err := s.db.ExecContext(ctx, query,
+		string(actorsJSON),
+		severity,
+		japanRelevance,
+		attackType,
+		victimOrg,
+		nowStr,
+		id,
+	)
+	return err
+}
+
+// GetEntityStats aggregates threat actors and victims observed across all incidents.
+func (s *SQLStore) GetEntityStats(ctx context.Context, limit int, japanOnly bool) (*models.EntityStats, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	query := `
+		SELECT threat_actors, victim_org, victim_org_ja, victim_org_en, normalized_victim_org, japan_relevance, last_seen_at
+		FROM incidents
+	`
+	if japanOnly {
+		query += " WHERE japan_relevance IN ('Direct', 'Indirect')"
+	}
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query incidents for entity stats: %w", err)
+	}
+	defer rows.Close()
+
+	type actorAgg struct {
+		displayName string
+		count       int
+		japanCount  int
+		lastSeenAt  string
+	}
+
+	type victimAgg struct {
+		displayName string
+		nameJa      string
+		nameEn      string
+		count       int
+		japanCount  int
+		lastSeenAt  string
+	}
+
+	actorsMap := make(map[string]*actorAgg)
+	victimsMap := make(map[string]*victimAgg)
+
+	for rows.Next() {
+		var taStr, vOrg, vJa, vEn, normV, jRel, lastSeen sql.NullString
+		if err := rows.Scan(&taStr, &vOrg, &vJa, &vEn, &normV, &jRel, &lastSeen); err != nil {
+			continue
+		}
+
+		isJapan := jRel.String == "Direct" || jRel.String == "Indirect"
+		lastSeenVal := lastSeen.String
+
+		// Aggregate Threat Actors
+		if taStr.Valid && strings.HasPrefix(strings.TrimSpace(taStr.String), "[") {
+			var rawActors []string
+			if err := json.Unmarshal([]byte(taStr.String), &rawActors); err == nil {
+				cleaned := models.CleanThreatActors(rawActors)
+				for _, actor := range cleaned {
+					actor = strings.TrimSpace(actor)
+					if actor == "" {
+						continue
+					}
+					key := strings.ToLower(actor)
+					entry, exists := actorsMap[key]
+					if !exists {
+						entry = &actorAgg{
+							displayName: actor,
+							lastSeenAt:  lastSeenVal,
+						}
+						actorsMap[key] = entry
+					}
+					entry.count++
+					if isJapan {
+						entry.japanCount++
+					}
+					// Prefer capitalized/TitleCase name as display name
+					if len(actor) > 0 && len(entry.displayName) > 0 {
+						if unicode.IsUpper(rune(actor[0])) && !unicode.IsUpper(rune(entry.displayName[0])) {
+							entry.displayName = actor
+						}
+					}
+					if lastSeenVal > entry.lastSeenAt {
+						entry.lastSeenAt = lastSeenVal
+					}
+				}
+			}
+		}
+
+		// Aggregate Victims
+		vDisplay := ""
+		if vJa.Valid && strings.TrimSpace(vJa.String) != "" {
+			vDisplay = strings.TrimSpace(vJa.String)
+		} else if vOrg.Valid && strings.TrimSpace(vOrg.String) != "" {
+			vDisplay = strings.TrimSpace(vOrg.String)
+		} else if normV.Valid && strings.TrimSpace(normV.String) != "" {
+			vDisplay = strings.TrimSpace(normV.String)
+		}
+
+		if vDisplay != "" && !models.IsGenericVictimOrg(vDisplay) {
+			lowKey := strings.ToLower(vDisplay)
+			vEntry, exists := victimsMap[lowKey]
+			if !exists {
+				vEntry = &victimAgg{
+					displayName: vDisplay,
+					nameJa:      vJa.String,
+					nameEn:      vEn.String,
+					lastSeenAt:  lastSeenVal,
+				}
+				victimsMap[lowKey] = vEntry
+			}
+			vEntry.count++
+			if isJapan {
+				vEntry.japanCount++
+			}
+			if vJa.Valid && vJa.String != "" {
+				vEntry.nameJa = vJa.String
+			}
+			if vEn.Valid && vEn.String != "" {
+				vEntry.nameEn = vEn.String
+			}
+			if lastSeenVal > vEntry.lastSeenAt {
+				vEntry.lastSeenAt = lastSeenVal
+			}
+		}
+	}
+
+	// Convert and sort
+	var sortedActors []models.ActorStat
+	for _, a := range actorsMap {
+		sortedActors = append(sortedActors, models.ActorStat{
+			Name:       a.displayName,
+			Count:      a.count,
+			JapanCount: a.japanCount,
+			LastSeenAt: a.lastSeenAt,
+		})
+	}
+	sort.Slice(sortedActors, func(i, j int) bool {
+		if sortedActors[i].Count == sortedActors[j].Count {
+			return sortedActors[i].Name < sortedActors[j].Name
+		}
+		return sortedActors[i].Count > sortedActors[j].Count
+	})
+
+	var sortedVictims []models.VictimStat
+	for _, v := range victimsMap {
+		sortedVictims = append(sortedVictims, models.VictimStat{
+			Name:       v.displayName,
+			NameJa:     v.nameJa,
+			NameEn:     v.nameEn,
+			Count:      v.count,
+			JapanCount: v.japanCount,
+			LastSeenAt: v.lastSeenAt,
+		})
+	}
+	sort.Slice(sortedVictims, func(i, j int) bool {
+		if sortedVictims[i].Count == sortedVictims[j].Count {
+			return sortedVictims[i].Name < sortedVictims[j].Name
+		}
+		return sortedVictims[i].Count > sortedVictims[j].Count
+	})
+
+	totalUniqueActors := len(sortedActors)
+	totalUniqueVictims := len(sortedVictims)
+
+	if len(sortedActors) > limit {
+		sortedActors = sortedActors[:limit]
+	}
+	if len(sortedVictims) > limit {
+		sortedVictims = sortedVictims[:limit]
+	}
+
+	return &models.EntityStats{
+		TotalUniqueActors:  totalUniqueActors,
+		TotalUniqueVictims: totalUniqueVictims,
+		TopActors:          sortedActors,
+		TopVictims:         sortedVictims,
+	}, nil
+}
+
+
