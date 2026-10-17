@@ -1,0 +1,61 @@
+{{- if and .Values.worker .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-worker
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: "{{ .Values.worker.image.repository | default .Values.image.repository }}:{{ .Values.worker.image.tag | default (printf "worker-%s" .Chart.AppVersion) }}"
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy | default .Values.image.pullPolicy }}
+          env:
+            - name: MODE
+              value: {{ .Values.worker.mode | default "batch" | quote }}
+            - name: BACKEND_URL
+              value: "http://{{ include "threat-harvester.fullname" . }}-api:{{ (index (.Values.api | default dict) "service" | default dict).port | default 8000 }}"
+            {{- if .Values.database.existingSecret }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret }}
+                  key: uri
+            {{- else if and (eq .Values.database.type "postgres") .Values.database.cnpg.enabled }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "threat-harvester.fullname" . }}-db-app
+                  key: uri
+            {{- end }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "threat-harvester.fullname" . }}-config
+            - secretRef:
+                name: {{ include "threat-harvester.secretName" . }}
+          {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+      {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "threat-harvester.fullname" . }}-data
+      {{- end }}
+{{- end }}

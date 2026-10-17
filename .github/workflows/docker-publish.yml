@@ -26,7 +26,7 @@ env:
 
 jobs:
   test-and-lint:
-    name: Run Quality Gates (Go, Web, Helm)
+    name: Run Quality Gates (Go API, Web, Helm)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -36,10 +36,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: "1.22"
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: api/go.sum
 
-      - name: Run Go Backend Tests
-        working-directory: backend
+      - name: Run Go API Tests
+        working-directory: api
         run: go test -v ./...
 
       - name: Set up Node.js
@@ -70,7 +70,8 @@ jobs:
       packages: write
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      backend_tag: ${{ steps.meta.outputs.backend_tag }}
+      api_tag: ${{ steps.meta.outputs.api_tag }}
+      worker_tag: ${{ steps.meta.outputs.worker_tag }}
       web_tag: ${{ steps.meta.outputs.web_tag }}
     steps:
       - name: Checkout repository
@@ -103,16 +104,21 @@ jobs:
             fi
           fi
 
+          API_TAG="${REPO_IMAGE}:api-${VER}"
           BACKEND_TAG="${REPO_IMAGE}:backend-${VER}"
+          WORKER_TAG="${REPO_IMAGE}:worker-${VER}"
           WEB_TAG="${REPO_IMAGE}:web-${VER}"
           DEV_TAG="${REPO_IMAGE}:dev-${VER}"
 
           echo "Resolved Version : ${VER}"
-          echo "Backend Image    : ${BACKEND_TAG}"
+          echo "API Image        : ${API_TAG}"
+          echo "Worker Image     : ${WORKER_TAG}"
           echo "Web Image        : ${WEB_TAG}"
 
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "api_tag=${API_TAG}" >> "$GITHUB_OUTPUT"
           echo "backend_tag=${BACKEND_TAG}" >> "$GITHUB_OUTPUT"
+          echo "worker_tag=${WORKER_TAG}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_TAG}" >> "$GITHUB_OUTPUT"
           echo "dev_tag=${DEV_TAG}" >> "$GITHUB_OUTPUT"
 
@@ -126,15 +132,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Backend image (backend-${{ steps.meta.outputs.version }})
+      - name: Build and push Go API image (api-${{ steps.meta.outputs.version }})
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: backend/Dockerfile
+          file: api/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.backend_tag }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+          tags: ${{ steps.meta.outputs.api_tag }},${{ steps.meta.outputs.backend_tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build and push Python Worker image (worker-${{ steps.meta.outputs.version }})
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: worker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.worker_tag }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
 
       - name: Build and push Web image (web-${{ steps.meta.outputs.version }})
         uses: docker/build-push-action@v7
@@ -156,4 +172,3 @@ jobs:
           tags: ${{ steps.meta.outputs.dev_tag }}
           cache-from: type=gha,scope=dev
           cache-to: type=gha,mode=max,scope=dev
-
