@@ -1,7 +1,9 @@
 # Threat Harvester (Japan Cyber Threat Intelligence Feeds Collector)
 
+[![CI / Quality Gates](https://github.com/al17091/threat_harvester/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/al17091/threat_harvester/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go: 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)
+[![Python: 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB.svg)](https://www.python.org/)
 [![Next.js: 16+](https://img.shields.io/badge/Next.js-16+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/threat-harvester)
