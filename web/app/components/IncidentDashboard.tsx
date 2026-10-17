@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import { TerminalConsole } from "./TerminalConsole";
 import { withBasePath, isAdminPath } from "./basePath";
+import { formatDate as formatIncidentDate } from "./dateFormat";
 
 interface ActorStat {
   name: string;
@@ -1196,19 +1197,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   };
 
-  const formatDate = (isoStr: string) => {
-    if (!isoStr) return "";
-    try {
-      const d = new Date(isoStr);
-      return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch (e) {
-      return isoStr;
-    }
+  const formatDate = (isoStr: string | null | undefined, l: "en" | "ja" = currentLang) => {
+    return formatIncidentDate(isoStr, l);
   };
 
   if (isAdmin && authChecking) {
@@ -1379,7 +1369,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               title="Subscribe to RSS 2.0 Feed (/api/feed.xml)"
             >
               <Rss className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
-              <span>{currentLang === "ja" ? "RSS" : "RSS Feed"}</span>
+              <span>RSS Feed</span>
             </a>
 
 
@@ -1463,7 +1453,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               }`}
             >
               <LayoutGrid className="w-4 h-4" />
-              <span>{currentLang === "ja" ? "インシデント・ラベル管理" : "Incidents & Labels"}</span>
+              <span>Incidents & Labels</span>
             </button>
 
             <button
@@ -1839,8 +1829,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   onChange={(e) => setSortBy(e.target.value as "published_at" | "harvested_at")}
                   className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-cyan-300 focus:outline-none focus:border-cyan-500 font-medium"
                 >
-                  <option value="published_at">{currentLang === "ja" ? "公開日順 (新しい順)" : "Sort: Source Published Date (Newest)"}</option>
-                  <option value="harvested_at">{currentLang === "ja" ? "検知日順 (新しい順)" : "Sort: Ingestion Date (Newest)"}</option>
+                  <option value="published_at">{currentLang === "ja" ? "公開日順 (JST・新しい順)" : "Sort: Source Published Date (UTC, Newest)"}</option>
+                  <option value="harvested_at">{currentLang === "ja" ? "検知日順 (JST・新しい順)" : "Sort: Ingestion Date (UTC, Newest)"}</option>
                 </select>
 
                 <div className="flex items-center space-x-1 text-xs text-slate-400">
@@ -3226,8 +3216,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     <div className="text-sm font-semibold text-slate-200">Auto-Harvest Periodic Scheduler</div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono">
                       {status?.pipeline?.next_run_at
-                        ? `Next run: ${formatDate(status.pipeline.next_run_at)} (Interval: ${status?.pipeline?.interval_hours || 1}h)`
-                        : `Interval: ${status?.pipeline?.interval_hours || 1} hour(s)`}
+                        ? `${currentLang === "ja" ? "次回実行:" : "Next run:"} ${formatDate(status.pipeline.next_run_at)} (${currentLang === "ja" ? "間隔:" : "Interval:"} ${status?.pipeline?.interval_hours || 1}h)`
+                        : `${currentLang === "ja" ? "実行間隔:" : "Interval:"} ${status?.pipeline?.interval_hours || 1} ${currentLang === "ja" ? "時間" : "hour(s)"}`}
                     </div>
                   </div>
                   <span
@@ -3360,7 +3350,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 <div className="flex flex-wrap items-center gap-4 mt-2.5 text-xs text-slate-400 font-mono">
                   <div>
                     <span className="text-slate-500 mr-1.5 uppercase font-sans">
-                      {currentLang === "ja" ? "情報元公開日時:" : "Source Published:"}
+                      {currentLang === "ja" ? "情報元公開日時 (JST):" : "Source Published (UTC):"}
                     </span>
                     <span className="text-cyan-300 font-medium">
                       {selectedIncident.published_at ? formatDate(selectedIncident.published_at) : (currentLang === "ja" ? "不明 / リアルタイム" : "Unknown / Realtime")}
@@ -3368,7 +3358,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                   <div>
                     <span className="text-slate-500 mr-1.5 uppercase font-sans">
-                      {currentLang === "ja" ? "初検知・収集日時:" : "Harvest Ingested:"}
+                      {currentLang === "ja" ? "初検知・収集日時 (JST):" : "Harvest Ingested (UTC):"}
                     </span>
                     <span className="text-slate-300">{formatDate(selectedIncident.harvested_at)}</span>
                   </div>
@@ -3932,7 +3922,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 {selectedIncident.child_items && selectedIncident.child_items.length > 1 && (
                   <div className="pt-2 border-t border-slate-800/80">
                     <h5 className="text-xs font-semibold text-purple-400 uppercase tracking-wider mb-2">
-                      {currentLang === "ja" ? "関連レポート時系列" : "Child Reports Timeline"} ({selectedIncident.child_items.length})
+                      {currentLang === "ja" ? "関連レポート時系列 (JST)" : "Child Reports Timeline (UTC)"} ({selectedIncident.child_items.length})
                     </h5>
                     <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                       {selectedIncident.child_items.map((c, cIdx) => (
@@ -5129,7 +5119,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="flex items-center space-x-4">
                           {actor.last_seen_at && (
                             <span className="text-slate-500 text-[11px] font-mono hidden sm:inline">
-                              Last: {formatDate(actor.last_seen_at)}
+                              {currentLang === "ja" ? "最終観測:" : "Last:"} {formatDate(actor.last_seen_at)}
                             </span>
                           )}
                           <span className="px-2 py-0.5 rounded-full font-mono font-bold bg-purple-950 text-purple-300 border border-purple-800 text-xs">
@@ -5200,7 +5190,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                           <div className="flex items-center space-x-4">
                             {victim.last_seen_at && (
                               <span className="text-slate-500 text-[11px] font-mono hidden sm:inline">
-                                Last: {formatDate(victim.last_seen_at)}
+                                {currentLang === "ja" ? "最終観測:" : "Last:"} {formatDate(victim.last_seen_at)}
                               </span>
                             )}
                             <span className="px-2 py-0.5 rounded-full font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800 text-xs">
