@@ -1224,7 +1224,12 @@ func (s *Server) handleGenerateQueries(w http.ResponseWriter, r *http.Request) {
 		req.Count = 3
 	}
 
-	az := analyzer.NewDefaultThreatAnalyzer()
+	var az analyzer.ThreatAnalyzer
+	if s.pipeline != nil && s.pipeline.Analyzer() != nil {
+		az = s.pipeline.Analyzer()
+	} else {
+		az = analyzer.NewDefaultThreatAnalyzer()
+	}
 	queries, err := az.GenerateSearchQueries(r.Context(), req.Directive, req.TargetType, req.Count)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("Failed to generate queries: %v", err))

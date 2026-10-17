@@ -1532,7 +1532,11 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 	}
 	rows, err := s.db.QueryContext(ctx, cQuery, id)
 	if err == nil {
-		defer rows.Close()
+		type childItem struct {
+			id string
+			ed map[string]interface{}
+		}
+		var itemsToUpdate []childItem
 		for rows.Next() {
 			var cid, edStr sql.NullString
 			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
@@ -1555,12 +1559,17 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 				if len(actions) > 0 {
 					ed["recommended_actions"] = actions
 				}
-				newBytes, _ := json.Marshal(ed)
-				if s.isSQLite {
-					_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(newBytes), cid.String)
-				} else {
-					_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(newBytes), cid.String)
-				}
+				itemsToUpdate = append(itemsToUpdate, childItem{id: cid.String, ed: ed})
+			}
+		}
+		_ = rows.Close()
+
+		for _, item := range itemsToUpdate {
+			newBytes, _ := json.Marshal(item.ed)
+			if s.isSQLite {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(newBytes), item.id)
+			} else {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(newBytes), item.id)
 			}
 		}
 	}

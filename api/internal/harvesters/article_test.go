@@ -167,3 +167,46 @@ func TestFollowAndScrapeLinkedArticles(t *testing.T) {
 	}
 }
 
+func TestFetchOnionArticleContentValidation(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Empty URL
+	_, err := FetchOnionArticleContent(ctx, "", "", 10)
+	if err == nil {
+		t.Errorf("expected error for empty URL")
+	}
+
+	// 2. Non-onion URL
+	_, err = FetchOnionArticleContent(ctx, "https://example.com/advisory", "", 10)
+	if err == nil {
+		t.Errorf("expected error for non-onion URL")
+	}
+
+	// 3. doFetchHTMLWithTorClient with mock server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<html><body><h1>Onion Leak Site</h1><p>Compromised data list</p></body></html>")
+	}))
+	defer ts.Close()
+
+	html, err := doFetchHTMLWithTorClient(ctx, ts.Client(), ts.URL)
+	if err != nil {
+		t.Fatalf("doFetchHTMLWithTorClient failed: %v", err)
+	}
+	if !strings.Contains(html, "Onion Leak Site") {
+		t.Errorf("expected HTML to contain Onion Leak Site, got: %s", html)
+	}
+
+	// Error response
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer errServer.Close()
+
+	_, err = doFetchHTMLWithTorClient(ctx, errServer.Client(), errServer.URL)
+	if err == nil {
+		t.Errorf("expected HTTP status error for 403 status")
+	}
+}
+
+

@@ -54,6 +54,10 @@ func (p *Pipeline) Analyzer() analyzer.ThreatAnalyzer {
 	return p.analyzer
 }
 
+func (p *Pipeline) SetAnalyzer(a analyzer.ThreatAnalyzer) {
+	p.analyzer = a
+}
+
 func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOnly bool) (PipelineSummary, error) {
 	cfg := config.GetSettings().GetConfig()
 	if lookbackHours <= 0 {
