@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go: 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)
-[![Next.js: 14+](https://img.shields.io/badge/Next.js-14+-black.svg)](https://nextjs.org/)
+[![Next.js: 16+](https://img.shields.io/badge/Next.js-16+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/threat-harvester)
 
