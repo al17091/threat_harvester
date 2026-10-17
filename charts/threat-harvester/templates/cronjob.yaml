@@ -22,8 +22,8 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: harvester
-              image: "{{ .Values.backend.image.repository | default .Values.image.repository }}:{{ .Values.backend.image.tag | default (printf "backend-%s" .Chart.AppVersion) }}"
-              imagePullPolicy: {{ .Values.backend.image.pullPolicy | default .Values.image.pullPolicy }}
+              image: "{{ (.Values.cronjob.image | default dict).repository | default ((.Values.worker | default dict).image | default dict).repository | default ((.Values.api | default dict).image | default dict).repository | default .Values.image.repository }}:{{ (.Values.cronjob.image | default dict).tag | default ((.Values.worker | default dict).image | default dict).tag | default (printf "worker-%s" .Chart.AppVersion) }}"
+              imagePullPolicy: {{ (.Values.cronjob.image | default dict).pullPolicy | default .Values.image.pullPolicy }}
               command: ["harvester", "run"]
               env:
                 - name: MODE

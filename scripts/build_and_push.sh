@@ -7,14 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 if [ -z "$1" ]; then
-    echo "Usage: ./scripts/build_and_push.sh <github-username> [version] [all|backend|web|dev]"
+    echo "Usage: ./scripts/build_and_push.sh <github-username> [version] [all|api|worker|web|dev]"
     echo "Examples:"
-    echo "  ./scripts/build_and_push.sh al17091                  # Uses VERSION file (e.g. 0.1.0, or 0.1.0-preview on develop branch)"
-    echo "  ./scripts/build_and_push.sh al17091 0.1.0 all        # Build & push backend-0.1.0 and web-0.1.0"
-    echo "  ./scripts/build_and_push.sh al17091 0.0.5-preview    # Build & push backend-0.0.5-preview and web-0.0.5-preview"
-    echo "  ./scripts/build_and_push.sh al17091 0.1.0 backend    # Build & push backend-0.1.0 only"
-    echo "  ./scripts/build_and_push.sh al17091 0.1.0 web        # Build & push web-0.1.0 only"
-    echo "  ./scripts/build_and_push.sh al17091 0.1.0 dev        # Build & push dev-0.1.0 only"
+    echo "  ./scripts/build_and_push.sh al17091                  # Uses VERSION file"
+    echo "  ./scripts/build_and_push.sh al17091 0.1.0 all        # Build & push api, worker, and web"
+    echo "  ./scripts/build_and_push.sh al17091 0.1.0 api        # Build & push api image only"
+    echo "  ./scripts/build_and_push.sh al17091 0.1.0 worker     # Build & push worker image only"
+    echo "  ./scripts/build_and_push.sh al17091 0.1.0 web        # Build & push web image only"
     exit 1
 fi
 
@@ -22,7 +21,7 @@ GH_USERNAME=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 BASE_REPO="ghcr.io/${GH_USERNAME}/${IMAGE_NAME}"
 
 # Resolve version from 2nd arg or VERSION file
-if [ -n "$2" ] && [[ "$2" != "all" && "$2" != "backend" && "$2" != "web" && "$2" != "dev" ]]; then
+if [ -n "$2" ] && [[ "$2" != "all" && "$2" != "api" && "$2" != "backend" && "$2" != "worker" && "$2" != "web" && "$2" != "dev" ]]; then
     VERSION="${2#v}"
     TARGET="${3:-all}"
 else
@@ -38,10 +37,20 @@ else
     TARGET="${2:-all}"
 fi
 
-build_and_push_backend() {
-    local tag="backend-${VERSION}"
-    echo "==> Building Backend image ${BASE_REPO}:${tag} from backend/Dockerfile..."
-    docker build -t "${BASE_REPO}:${tag}" -f "${ROOT_DIR}/backend/Dockerfile" "${ROOT_DIR}"
+build_and_push_api() {
+    local tag="api-${VERSION}"
+    local compat_tag="backend-${VERSION}"
+    echo "==> Building API image ${BASE_REPO}:${tag} from api/Dockerfile..."
+    docker build -t "${BASE_REPO}:${tag}" -t "${BASE_REPO}:${compat_tag}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}"
+    echo "==> Pushing ${BASE_REPO}:${tag} and ${BASE_REPO}:${compat_tag}..."
+    docker push "${BASE_REPO}:${tag}"
+    docker push "${BASE_REPO}:${compat_tag}"
+}
+
+build_and_push_worker() {
+    local tag="worker-${VERSION}"
+    echo "==> Building Worker image ${BASE_REPO}:${tag} from worker/Dockerfile..."
+    docker build -t "${BASE_REPO}:${tag}" -f "${ROOT_DIR}/worker/Dockerfile" "${ROOT_DIR}"
     echo "==> Pushing ${BASE_REPO}:${tag}..."
     docker push "${BASE_REPO}:${tag}"
 }
@@ -64,11 +73,15 @@ build_and_push_dev() {
 
 case "${TARGET}" in
     all)
-        build_and_push_backend
+        build_and_push_api
+        build_and_push_worker
         build_and_push_web
         ;;
-    backend)
-        build_and_push_backend
+    api|backend)
+        build_and_push_api
+        ;;
+    worker)
+        build_and_push_worker
         ;;
     web)
         build_and_push_web
@@ -77,7 +90,7 @@ case "${TARGET}" in
         build_and_push_dev
         ;;
     *)
-        echo "Unknown target '${TARGET}'. Supported targets: all, backend, web, dev"
+        echo "Unknown target '${TARGET}'. Supported targets: all, api, worker, web, dev"
         exit 1
         ;;
 esac

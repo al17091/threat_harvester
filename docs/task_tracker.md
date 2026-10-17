@@ -7,7 +7,7 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 
 ## Current Status
 - **Current Version**: `v0.1.0`
-- **Current Phase**: Phase 6 Completed (v0.1.0 Release Preparation, GHCR CI/CD Workflow, Helm Split Services, and Hybrid AI Pipeline)
+- **Current Phase**: Phase 7 Completed (Comprehensive Unit & E2E Testing Suite with 75%+ coverage)
 - **Last Updated**: 2026-10-17
 
 ---
@@ -67,3 +67,18 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Automatically appends `-preview` suffix for builds from the `develop` branch.
 - [x] **Unified Helper Scripts (`scripts/`)**:
   - `scripts/build_and_push.sh` and `scripts/harvester.sh`.
+
+### Phase 7: Comprehensive Unit & E2E Testing Suite
+- [x] **Repository Synchronization & Refactoring**:
+  - Merged latest container separation architecture (`api/`, `worker/`, `web/`) from `develop`.
+  - Removed deprecated legacy `backend/` and `tests/` directories.
+- [x] **API (`api/`) Testing & Coverage**:
+  - Built mock transport layer for Gemini and OpenAI-compatible threat analyzers (analyzing, batching, translations).
+  - Unit tests covering REST API endpoints, incident clustering, groundings, and storage queries.
+  - End-to-End integration test (`api/e2e_test.go`) validating end-to-end flow from RSS ingest to API delivery.
+  - Achieved **75.1%** statement test coverage across the API service.
+- [x] **Worker (`worker/`) Python Testing**:
+  - Built pytest suite for Python harvesters, notifiers, models, and analyzers (24/24 passing, 72% coverage).
+- [x] **Web (`web/`) Node.js Testing**:
+  - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
+

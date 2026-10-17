@@ -28,6 +28,8 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage.out
+*.out
 
 # Local configuration & secrets
 .env

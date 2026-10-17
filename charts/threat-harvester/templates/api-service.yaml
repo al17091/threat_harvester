@@ -1,0 +1,38 @@
+{{- $api := .Values.api | default .Values.backend -}}
+{{- if $api.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-api
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ $api.service.type }}
+  ports:
+    - port: {{ $api.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "threat-harvester.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-backend
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ $api.service.type }}
+  ports:
+    - port: {{ $api.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "threat-harvester.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+{{- end }}

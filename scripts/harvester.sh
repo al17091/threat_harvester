@@ -20,7 +20,7 @@ build_container() {
     docker run --rm \
         -u "$(id -u):$(id -g)" \
         -v "${ROOT_DIR}:/workspace" \
-        -w /workspace/backend \
+        -w /workspace/api \
         -e HOME=/tmp \
         -e GOCACHE=/tmp/go-build \
         -e GOPATH=/tmp/go-pkg \
@@ -35,7 +35,7 @@ test_container() {
     docker run --rm \
         -u "$(id -u):$(id -g)" \
         -v "${ROOT_DIR}:/workspace" \
-        -w /workspace/backend \
+        -w /workspace/api \
         -e HOME=/tmp \
         -e GOCACHE=/tmp/go-build \
         -e GOPATH=/tmp/go-pkg \
