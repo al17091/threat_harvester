@@ -11,7 +11,7 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
    - Only dependencies with permissive open-source licenses (MIT, Apache 2.0, BSD) are allowed. Avoid copyleft licenses (e.g., AGPL/GPL).
 2. **Project Structure**:
    - `backend/`: High-performance Go CTI Engine (`threat-harvester`), Gemini AI analyzer, and concurrent threat harvesters.
-   - `web/`: Next.js 14 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
+   - `web/`: Next.js 15 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
    - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/threat-harvester/` for k3s).
 3. **Container Image Naming**:
    - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated service tags (`backend-<version>` and `web-<version>`). Never use `threat-harvester` or other aliases.

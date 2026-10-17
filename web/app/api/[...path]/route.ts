@@ -6,8 +6,12 @@ const getBackendUrl = () => {
   return process.env.BACKEND_URL || "http://127.0.0.1:8000";
 };
 
-async function handleProxy(req: NextRequest, { params }: { params: { path: string[] } }) {
-  const path = params.path ? params.path.join("/") : "";
+async function handleProxy(
+  req: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const resolvedParams = await params;
+  const path = resolvedParams.path ? resolvedParams.path.join("/") : "";
   const search = req.nextUrl.search;
   const targetUrl = `${getBackendUrl()}/api/${path}${search}`;
 

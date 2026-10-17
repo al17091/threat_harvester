@@ -13,7 +13,7 @@ Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLL
 ## 1. Architecture & Services
 
 The platform consists of a decoupled microservice architecture (orchestrated via Docker Compose or Helm using `ghcr.io/al17091/threat_harvester`):
-- **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 14 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja` on Port 3000).
+- **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 15 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja` on Port 3000).
 - **Backend CTI Engine (`backend/`, tag `backend-<version>`)**: High-performance Go 1.22+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and concurrent threat collectors (Port 8000).
 - **Database Engine**: PostgreSQL 16 (CloudNativePG on k3s / container) with pure-Go SQLite fallback.
 - **Tor SOCKS5 Proxy**: External or in-cluster Tor SOCKS5h proxy for dark web (`.onion`) reachability.
