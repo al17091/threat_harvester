@@ -506,6 +506,12 @@ func (s *SettingsManager) GetConfig() AppConfig {
 	return s.Config
 }
 
+func (s *SettingsManager) SetConfig(cfg AppConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Config = cfg
+}
+
 func (s *SettingsManager) ToSafeMap() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

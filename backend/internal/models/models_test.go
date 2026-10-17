@@ -292,4 +292,127 @@ func TestIsServiceReleaseOrNonThreat(t *testing.T) {
 	}
 }
 
+func TestThreatActorsCleaningAndValidation(t *testing.T) {
+	actors := []string{
+		"APT28",
+		"Lazarus Group",
+		"Unknown",
+		"Not specified",
+		"attackers",
+		"  LockBit 3.0  ",
+		"APT28", // Duplicate
+		"a",     // Too short
+		strings.Repeat("long", 15), // Too long
+	}
+
+	cleaned := CleanThreatActors(actors)
+	expected := []string{"APT28", "Lazarus Group", "LockBit 3.0"}
+	if len(cleaned) != len(expected) {
+		t.Fatalf("expected %d cleaned actors, got %d: %v", len(expected), len(cleaned), cleaned)
+	}
+	for i, a := range cleaned {
+		if a != expected[i] {
+			t.Errorf("expected actor %s, got %s", expected[i], a)
+		}
+	}
+}
+
+func TestExtractVictimOrgs(t *testing.T) {
+	item := ThreatItem{
+		Title: "Ransomware Attack Victim: Tokyo Gas Co., Ltd. (Japan)",
+		Metadata: map[string]interface{}{
+			"victim": "Tokyo Gas Co., Ltd.",
+		},
+	}
+	enriched := &EnrichedThreat{
+		VictimOrgs: []string{"株式会社東京ガス", "Some Generic Org"},
+	}
+
+	raws, norms := ExtractVictimOrgs(item, enriched)
+	if len(raws) == 0 || len(norms) == 0 {
+		t.Fatalf("expected extracted victim orgs, got empty")
+	}
+
+	primaryRaw, primaryNorm := ExtractVictimOrg(item, enriched)
+	if primaryRaw == "" || primaryNorm == "" {
+		t.Fatalf("expected non-empty primary victim org")
+	}
+
+	// Empty test
+	emptyRaw, emptyNorm := ExtractVictimOrg(ThreatItem{}, nil)
+	if emptyRaw != "" || emptyNorm != "" {
+		t.Errorf("expected empty victim org for empty item, got raw=%s norm=%s", emptyRaw, emptyNorm)
+	}
+}
+
+func TestExtractActorSnippet(t *testing.T) {
+	text := "Recent intelligence reports suggest that LockBit 3.0 has targeted multiple critical infrastructure operators in Japan during Q3."
+	snippet := ExtractActorSnippet(text, "LockBit 3.0", 50)
+	if !strings.Contains(snippet, "LockBit 3.0") {
+		t.Errorf("expected snippet to contain actor name, got: %s", snippet)
+	}
+
+	// Non-existent actor
+	if s := ExtractActorSnippet(text, "NonExistentGroup", 50); s != "" {
+		t.Errorf("expected empty snippet for non-existent actor, got: %s", s)
+	}
+
+	// Empty text or actor
+	if s := ExtractActorSnippet("", "Actor", 50); s != "" {
+		t.Errorf("expected empty snippet for empty text, got: %s", s)
+	}
+}
+
+func TestTruncateRunes(t *testing.T) {
+	multibyte := "日本語の長いテキストデータです。これは切り捨てテストです。"
+	truncated := TruncateRunes(multibyte, 5)
+	if truncated != "日本語の長" {
+		t.Errorf("expected '日本語の長', got '%s'", truncated)
+	}
+	// Under limit
+	if s := TruncateRunes("短い", 10); s != "短い" {
+		t.Errorf("expected '短い', got '%s'", s)
+	}
+}
+
+func TestRelevanceAndSeverityScoresExtended(t *testing.T) {
+	if s := SeverityScore(Severity("UnknownSeverity")); s != 0 {
+		t.Errorf("expected 0 for unknown severity, got %d", s)
+	}
+	if r := RelevanceScore(JapanRelevance("UnknownRelevance")); r != 0 {
+		t.Errorf("expected 0 for unknown relevance, got %d", r)
+	}
+}
+
+func TestNormalizeProductExtended(t *testing.T) {
+	products := []string{
+		"Apache HTTP Server",
+		"Microsoft Exchange Server",
+		"Fortinet FortiOS",
+		"Cisco IOS XE",
+		"VMware ESXi",
+		"Palo Alto Networks PAN-OS",
+		"GitLab Enterprise Edition",
+		"WordPress Core",
+		"Ivanti Connect Secure",
+		"OpenSSL Cryptographic Library",
+	}
+	for _, p := range products {
+		norm := NormalizeProduct(p)
+		if norm == "" {
+			t.Errorf("expected normalized product for %s", p)
+		}
+	}
+
+	// ExtractAffectedProduct test
+	item := ThreatItem{
+		Title:   "Critical RCE vulnerability in Fortinet FortiOS (CVE-2024-1234)",
+		Summary: "Advisory for FortiOS devices",
+	}
+	raw, norm := ExtractAffectedProduct(item, nil)
+	if raw == "" || norm == "" {
+		t.Errorf("expected extracted affected product for FortiOS")
+	}
+}
+
 

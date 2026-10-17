@@ -16,12 +16,14 @@ import (
 )
 
 type NotionReporter struct {
-	client *http.Client
+	client  *http.Client
+	baseURL string
 }
 
 func NewNotionReporter() *NotionReporter {
 	return &NotionReporter{
-		client: &http.Client{Timeout: 25 * time.Second},
+		client:  &http.Client{Timeout: 25 * time.Second},
+		baseURL: "https://api.notion.com/v1/pages",
 	}
 }
 
@@ -192,7 +194,11 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.notion.com/v1/pages", bytes.NewReader(bodyBytes))
+	targetURL := r.baseURL
+	if targetURL == "" {
+		targetURL = "https://api.notion.com/v1/pages"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", err
 	}

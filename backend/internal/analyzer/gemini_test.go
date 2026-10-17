@@ -73,3 +73,127 @@ func TestAnalyzeBatchBasic(t *testing.T) {
 		t.Fatalf("unexpected item IDs in batch results: %+v", results)
 	}
 }
+
+func TestGeminiFallbacksAndHelpers(t *testing.T) {
+	an := NewGeminiThreatAnalyzer()
+	ctx := context.Background()
+
+	item := models.ThreatItem{
+		ID:         "test-gemini-single",
+		Title:      "Critical Vulnerability in Apache",
+		Summary:    "Apache HTTP Server vulnerability",
+		SourceType: models.SourceTypeVendorRSS,
+		SourceName: "JPCERT",
+	}
+
+	// 1. Analyze single fallback
+	enriched, err := an.Analyze(ctx, item)
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+	if enriched.ItemID != "test-gemini-single" {
+		t.Errorf("expected item id test-gemini-single, got %s", enriched.ItemID)
+	}
+
+	// 2. TranslateIncident fallback
+	incOut, err := an.TranslateIncident(ctx, IncidentTranslationInput{
+		ID:      "inc-gemini-1",
+		Title:   "日本語タイトル",
+		Summary: "日本語要約",
+	})
+	if incOut == nil || incOut.Title != "日本語タイトル" {
+		t.Errorf("expected fallback title, got %+v", incOut)
+	}
+	_ = err // Expected error when unconfigured
+
+	// 3. TranslateIncidentFields fallback
+	t1, s1, i1, a1, err := an.TranslateIncidentFields(ctx, "Title", "Summary", "Impact", []string{"Act1"})
+	if err == nil || t1 != "Title" || len(a1) != 1 {
+		t.Errorf("TranslateIncidentFields fallback failed: t1=%s, err=%v", t1, err)
+	}
+	_ = s1
+	_ = i1
+
+	// 4. TranslateFieldsToJapanese fallback
+	tj1, sj1, ij1, aj1, err := an.TranslateFieldsToJapanese(ctx, "Title", "Summary", "Impact", []string{"Act1"})
+	if err == nil || tj1 != "Title" || len(aj1) != 1 {
+		t.Errorf("TranslateFieldsToJapanese fallback failed: tj1=%s, err=%v", tj1, err)
+	}
+	_ = sj1
+	_ = ij1
+
+	// 5. LocalizeThreatToJapanese fallback
+	if err := an.LocalizeThreatToJapanese(ctx, enriched); err == nil {
+		t.Errorf("expected error when unconfigured in LocalizeThreatToJapanese")
+	}
+
+	// 6. TranslateBatch fallback
+	batchRes, err := an.TranslateBatch(ctx, []BatchTranslateItem{
+		{ID: "b1", Title: "Title 1", Summary: "Summary 1"},
+	})
+	if err == nil {
+		t.Errorf("expected error when unconfigured in TranslateBatch")
+	}
+	_ = batchRes
+
+	// 7. cleanJSONFences
+	fenced := "```json\n{\"test\": true}\n```"
+	if cleaned := cleanJSONFences(fenced); cleaned != "{\"test\": true}" {
+		t.Errorf("expected cleaned JSON, got: %s", cleaned)
+	}
+
+	// 8. fallbackSequential
+	seqItems, err := an.fallbackSequential(ctx, []models.ThreatItem{item})
+	if err != nil || len(seqItems) != 1 {
+		t.Errorf("fallbackSequential failed: %v", err)
+	}
+}
+
+func TestBuildEnrichedThreat(t *testing.T) {
+	item := models.ThreatItem{
+		ID:         "threat-100",
+		Title:      "Original Title CVE-2024-9999",
+		Summary:    "Original Summary text",
+		RawContent: "Raw threat intelligence mentioning Lazarus and Fortinet FortiGate",
+		URL:        "https://example.com/advisory",
+		SourceType: models.SourceTypeVendorRSS,
+		SourceName: "Vendor Feed",
+	}
+
+	out := analysisOutput{
+		Severity:             "High",
+		JapanRelevance:      "Direct",
+		Title:                "Enriched English Title",
+		TitleJa:              "濃縮された日本語タイトル",
+		Summary:              "Enriched English Summary",
+		SummaryJa:            "濃縮された日本語要約",
+		ImpactAnalysis:       "High potential damage",
+		ImpactAnalysisJa:     "潜在的な甚大影響",
+		VictimOrgs:           []string{"Example Corp"},
+		ThreatActors:         []string{"Lazarus"},
+		ThreatActorReasons:   map[string]string{"Lazarus": "Named explicitly in bulletin"},
+		AttackType:           "Vulnerability",
+		CVEs:                 []string{"CVE-2024-9999"},
+		AffectedProducts:     []string{"FortiGate"},
+		RecommendedActions:   []string{"Apply emergency firmware patch"},
+		RecommendedActionsJa: []string{"緊急ファームウェアパッチを適用"},
+	}
+
+	enriched := buildEnrichedThreat(item, out)
+	if enriched.Severity != models.SeverityHigh {
+		t.Errorf("Expected SeverityHigh, got %s", enriched.Severity)
+	}
+	if enriched.JapanRelevance != models.JapanRelevanceDirect {
+		t.Errorf("Expected JapanRelevanceDirect, got %s", enriched.JapanRelevance)
+	}
+	if enriched.Title != "Enriched English Title" {
+		t.Errorf("Expected Enriched English Title, got %s", enriched.Title)
+	}
+	if len(enriched.CVEs) == 0 || enriched.CVEs[0] != "CVE-2024-9999" {
+		t.Errorf("Expected CVE-2024-9999, got %v", enriched.CVEs)
+	}
+	if len(enriched.ThreatActors) == 0 || enriched.ThreatActors[0] != "Lazarus" {
+		t.Errorf("Expected Lazarus threat actor, got %v", enriched.ThreatActors)
+	}
+}
+
