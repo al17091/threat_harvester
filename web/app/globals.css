@@ -1,6 +1,14 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-cyber-bg: #070b14;
+  --color-cyber-card: #0f172a;
+  --color-cyber-border: #1e293b;
+  --color-cyber-accent: #06b6d4;
+  --color-cyber-emerald: #10b981;
+  --color-cyber-rose: #f43f5e;
+  --color-cyber-amber: #f59e0b;
+}
 
 :root {
   color-scheme: dark;
