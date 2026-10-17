@@ -1,7 +1,7 @@
 # Threat Harvester 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go: 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8.svg)](https://go.dev/)
+[![Go: 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8.svg)](https://go.dev/)
 [![Python: 3.12+](https://img.shields.io/badge/Python-3.12+-3776AB.svg)](https://www.python.org/)
 [![Next.js: 16+](https://img.shields.io/badge/Next.js-16+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
@@ -18,7 +18,7 @@ Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLL
 
 The platform consists of a decoupled microservice architecture (orchestrated via Docker Compose or Helm using `ghcr.io/al17091/threat_harvester`):
 - **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 16 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja` on Port 3000).
-- **API Engine (`api/`, tag `api-<version>` / `backend-<version>`)**: High-performance Go 1.22+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and REST API (Port 8000).
+- **API Engine (`api/`, tag `api-<version>` / `backend-<version>`)**: High-performance Go 1.26+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and REST API (Port 8000).
 - **Harvester & Analysis Worker (`worker/`, tag `worker-<version>`)**: Python 3.12+ extensible crawler worker and batch processor for continuous CTI enrichment.
 - **Database Engine**: PostgreSQL 16 (CloudNativePG on k3s / container) with pure-Go SQLite fallback.
 - **Tor SOCKS5 Proxy**: External or in-cluster Tor SOCKS5h proxy for dark web (`.onion`) reachability.
