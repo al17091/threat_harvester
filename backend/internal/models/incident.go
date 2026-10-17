@@ -95,6 +95,8 @@ var invalidActorSubstrings = []string{
 }
 
 var invalidActorExact = map[string]bool{
+	"[]": true, "[ ]": true, "null": true, "nil": true, "undefined": true, "{}": true,
+	"[none]": true, "[unknown]": true, "[\"\"]": true,
 	"unknown": true, "unspecified": true, "unidentified": true, "unnamed": true,
 	"none": true, "n/a": true, "hackers": true, "hacker": true,
 	"cybercriminals": true, "cybercriminal": true,
@@ -121,7 +123,7 @@ var invalidActorExact = map[string]bool{
 
 // IsValidThreatActor determines if a threat actor name is a legitimate specific entity rather than a generic or unknown disclaimer.
 func IsValidThreatActor(actor string) bool {
-	s := strings.TrimSpace(actor)
+	s := strings.Trim(strings.TrimSpace(actor), "[]\"' ")
 	if s == "" || len([]rune(s)) < 2 || len(s) > 40 {
 		return false
 	}
@@ -142,16 +144,53 @@ func CleanThreatActors(actors []string) []string {
 	var valid []string
 	seen := make(map[string]bool)
 	for _, a := range actors {
-		if !IsValidThreatActor(a) {
+		trimmed := strings.Trim(strings.TrimSpace(a), "[]\"' ")
+		if !IsValidThreatActor(trimmed) {
 			continue
 		}
-		low := strings.ToLower(strings.TrimSpace(a))
+		low := strings.ToLower(trimmed)
 		if !seen[low] {
 			seen[low] = true
-			valid = append(valid, strings.TrimSpace(a))
+			valid = append(valid, trimmed)
 		}
 	}
 	return valid
+}
+
+// IsActorGrounded checks whether an actor name is explicitly mentioned in any of the provided source texts.
+func IsActorGrounded(actor string, texts ...string) bool {
+	cleaned := strings.Trim(strings.TrimSpace(actor), "[]\"' ")
+	if cleaned == "" || len([]rune(cleaned)) < 2 {
+		return false
+	}
+	lowActor := strings.ToLower(cleaned)
+
+	for _, text := range texts {
+		t := strings.TrimSpace(text)
+		if t == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(t), lowActor) {
+			return true
+		}
+	}
+	return false
+}
+
+// FilterGroundedThreatActors filters out any threat actors that are not explicitly grounded in the source texts.
+// If an actor is not explicitly named in the source, it is omitted.
+func FilterGroundedThreatActors(actors []string, texts ...string) []string {
+	cleaned := CleanThreatActors(actors)
+	if len(cleaned) == 0 {
+		return nil
+	}
+	var grounded []string
+	for _, a := range cleaned {
+		if IsActorGrounded(a, texts...) {
+			grounded = append(grounded, a)
+		}
+	}
+	return grounded
 }
 
 // NormalizeVictimOrg normalizes an organization name for clustering.

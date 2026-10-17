@@ -305,8 +305,16 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		actionsJa = actions
 	}
 
-	cleanActors := models.CleanThreatActors(out.ThreatActors)
-	actorReasons := ResolveThreatActorReasons(item, cleanActors, out.ThreatActorReasons)
+	metaBytes, _ := json.Marshal(item.Metadata)
+	groundedActors := models.FilterGroundedThreatActors(
+		out.ThreatActors,
+		item.Title,
+		item.Summary,
+		item.RawContent,
+		item.URL,
+		string(metaBytes),
+	)
+	actorReasons := ResolveThreatActorReasons(item, groundedActors, out.ThreatActorReasons)
 
 	return &models.EnrichedThreat{
 		ItemID:               item.ID,
@@ -320,7 +328,7 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     impactJa,
 		VictimOrgs:           out.VictimOrgs,
-		ThreatActors:         cleanActors,
+		ThreatActors:         groundedActors,
 		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,

@@ -183,8 +183,16 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		}
 	}
 
-	cleanActors := models.CleanThreatActors(out.ThreatActors)
-	actorReasons := ResolveThreatActorReasons(item, cleanActors, out.ThreatActorReasons)
+	metaBytes, _ := json.Marshal(item.Metadata)
+	groundedActors := models.FilterGroundedThreatActors(
+		out.ThreatActors,
+		item.Title,
+		item.Summary,
+		item.RawContent,
+		item.URL,
+		string(metaBytes),
+	)
+	actorReasons := ResolveThreatActorReasons(item, groundedActors, out.ThreatActorReasons)
 
 	return &models.EnrichedThreat{
 		ItemID:               item.ID,
@@ -198,7 +206,7 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     out.ImpactAnalysisJa,
 		VictimOrgs:           out.VictimOrgs,
-		ThreatActors:         cleanActors,
+		ThreatActors:         groundedActors,
 		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
@@ -278,9 +286,12 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 - 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
 - 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
 - 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
-- 【重要】脅威アクター（threat_actors）の抽出ルール:
-  - 原文記事（中国語や外国語の脅威インテリジェンス・リーク情報含む）において具体的な攻撃グループ名・アクター名（例: "银狐", "海莲花", "暗雪", "毒云藤", "Volt Typhoon", "APT41", "Lazarus", "LockBit" 等）が明記されている場合は、原文の固有グループ名・表記のまま正確に抽出してそのまま保持してください。
-  - ただし、「未知威胁行为者」「中国国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現や未特定を示す記述は除外し、特定グループ名がない場合は空配列 [] としてください。
+- 【重要】脅威アクター（threat_actors）の厳格な抽出ルール:
+  - 対象のタイトルや原文本文データ中に、攻撃を行った具体的なグループ名・脅威アクター名（例: APTグループ名、ランサムウェア犯罪組織名など）が【直接かつ明示的に記載されている場合のみ】抽出してください。
+  - 原文に具体的なアクター名・グループ名の直接の記載がない場合は、【必ず空配列 []】にしてください。
+  - 原文に明記されていないアクター名を、文脈からの推測・連想・一般的な知識に基づいて補完・付与することは【絶対に禁止】です。
+  - 「中国系APT」「国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現やカテゴリ名は除外し、特定グループ名が明記されていない場合は空配列 [] としてください。
+  - 原文中に具体的なグループ名が固有言語（英語、中国語等）で明記されている場合は、原文表記のまま抽出してください。
 
 # 対象インシデント情報
 ソース種別: %s
@@ -302,8 +313,8 @@ URL: %s
     "summary_ja": "技術的背景と被害状況の日本語要約",
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["Identified victim organization names"],
-    "threat_actors": ["Identified threat actors / cybercrime groups"],
-    "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
+    "threat_actors": [],
+    "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["CVE identifiers e.g. CVE-2026-88771"],
     "affected_products": ["Affected product/software names e.g. FortiMail, NetScaler ADC, WordPress"],
@@ -446,9 +457,12 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 - 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
 - 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
 - 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
-- 【重要】脅威アクター（threat_actors）の抽出ルール:
-  - 原文記事（中国語や外国語の脅威インテリジェンス・リーク情報含む）において具体的な攻撃グループ名・アクター名（例: "银狐", "海莲花", "暗雪", "毒云藤", "Volt Typhoon", "APT41", "Lazarus", "LockBit" 等）が明記されている場合は、原文の固有グループ名・表記のまま正確に抽出してそのまま保持してください。
-  - ただし、「未知威胁行为者」「中国国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現や未特定を示す記述は除外し、特定グループ名がない場合は空配列 [] としてください。
+- 【重要】脅威アクター（threat_actors）の厳格な抽出ルール:
+  - 対象のタイトルや原文本文データ中に、攻撃を行った具体的なグループ名・脅威アクター名（例: APTグループ名、ランサムウェア犯罪組織名など）が【直接かつ明示的に記載されている場合のみ】抽出してください。
+  - 原文に具体的なアクター名・グループ名の直接の記載がない場合は、【必ず空配列 []】にしてください。
+  - 原文に明記されていないアクター名を、文脈からの推測・連想・一般的な知識に基づいて補完・付与することは【絶対に禁止】です。
+  - 「中国系APT」「国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現やカテゴリ名は除外し、特定グループ名が明記されていない場合は空配列 [] としてください。
+  - 原文中に具体的なグループ名が固有言語（英語、中国語等）で明記されている場合は、原文表記のまま抽出してください。
 
 # 対象インシデント一覧 (JSON)
 %s
@@ -467,8 +481,8 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
     "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
     "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
     "victim_orgs": ["被害組織名（判明している場合）"],
-    "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
-    "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
+    "threat_actors": [],
+    "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
     "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
     "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],

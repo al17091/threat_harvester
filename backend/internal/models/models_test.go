@@ -292,4 +292,53 @@ func TestIsServiceReleaseOrNonThreat(t *testing.T) {
 	}
 }
 
+func TestThreatActorValidationAndGrounding(t *testing.T) {
+	// Test IsValidThreatActor
+	invalidCases := []string{
+		"[]", "[ ]", "null", "nil", "none", "unknown", "unspecified",
+		"Hackers", "Cybercriminals", "未知威胁行为者", "中国国家支援型アクター",
+		"  ", "a",
+	}
+	for _, tc := range invalidCases {
+		if IsValidThreatActor(tc) {
+			t.Errorf("expected %q to be invalid threat actor", tc)
+		}
+	}
+
+	validCases := []string{"LockBit", "Lazarus", "APT10", "Qilin", "BlackCat", "Volt Typhoon", "银狐", "海莲花"}
+	for _, tc := range validCases {
+		if !IsValidThreatActor(tc) {
+			t.Errorf("expected %q to be valid threat actor string format", tc)
+		}
+	}
+
+	// Test CleanThreatActors strips brackets, deduplicates, and filters invalid
+	rawList := []string{"[]", "LockBit", "  LockBit  ", "unknown", "海莲花", "none"}
+	cleaned := CleanThreatActors(rawList)
+	if len(cleaned) != 2 || cleaned[0] != "LockBit" || cleaned[1] != "海莲花" {
+		t.Fatalf("unexpected CleanThreatActors result: %v", cleaned)
+	}
+
+	// Test FilterGroundedThreatActors:
+	// When report text only mentions Qilin, hallucinated actors (银狐, 海莲花, 暗雪) must be dropped!
+	sourceTitle := "Japanese Healthcare Institution Targeted in Qilin Ransomware Attack"
+	sourceBody := "A cyberattack encrypting electronic medical records was attributed to the Qilin ransomware group."
+
+	extractedActors := []string{"Qilin", "银狐", "海莲花", "暗雪", "LockBit"}
+	grounded := FilterGroundedThreatActors(extractedActors, sourceTitle, sourceBody)
+
+	if len(grounded) != 1 || grounded[0] != "Qilin" {
+		t.Fatalf("expected only ['Qilin'] to survive grounding filter, got: %v", grounded)
+	}
+
+	// When report text has no named actor, all hallucinated actors must be dropped
+	genericTitle := "Rising Ransomware Attacks Against Japanese Enterprises in the First Half of 2022"
+	genericBody := "National Police Agency reported a 60% increase in ransomware cases with no specific group named."
+	hallucinated := FilterGroundedThreatActors([]string{"LockBit", "银狐", "海莲花", "暗雪"}, genericTitle, genericBody)
+	if len(hallucinated) != 0 {
+		t.Fatalf("expected empty actors when source has no mentions, got: %v", hallucinated)
+	}
+}
+
+
 

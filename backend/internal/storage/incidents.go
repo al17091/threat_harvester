@@ -298,7 +298,11 @@ func (s *SQLStore) FindOrCreateIncident(
 			}
 			matched.Severity = models.HigherSeverity(matched.Severity, enriched.Severity)
 			matched.JapanRelevance = models.HigherRelevance(matched.JapanRelevance, enriched.JapanRelevance)
-			matched.ThreatActors = models.CleanThreatActors(mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors))
+			matched.ThreatActors = models.FilterGroundedThreatActors(
+				mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors),
+				matched.Title, matched.TitleJa, matched.RawContent, matched.Summary, matched.SummaryJa,
+				item.Title, item.RawContent, item.Summary,
+			)
 			if matched.AttackType == "" && enriched.AttackType != "" {
 				matched.AttackType = enriched.AttackType
 			}
@@ -444,7 +448,10 @@ func (s *SQLStore) buildNewIncident(
 		sev = enriched.Severity
 		jrel = enriched.JapanRelevance
 		attackType = enriched.AttackType
-		threatActors = models.CleanThreatActors(enriched.ThreatActors)
+		threatActors = models.FilterGroundedThreatActors(
+			enriched.ThreatActors,
+			item.Title, item.Summary, item.RawContent, item.URL,
+		)
 	}
 
 	if attackType == "" && (len(cves) > 0 || rawProduct != "") {
@@ -1271,7 +1278,14 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		affProds = []string{displayProduct}
 	}
 
-	cleanActors := models.CleanThreatActors(inc.ThreatActors)
+	var srcDetailTexts []string
+	for _, sd := range inc.SourcesDetail {
+		srcDetailTexts = append(srcDetailTexts, sd.Title, sd.Name, sd.URL)
+	}
+	cleanActors := models.FilterGroundedThreatActors(
+		inc.ThreatActors,
+		append([]string{inc.Title, inc.TitleJa, inc.Summary, inc.SummaryJa, inc.RawContent, inc.PrimaryURL, strings.Join(inc.SourceURLs, " ")}, srcDetailTexts...)...,
+	)
 	if cleanActors == nil {
 		cleanActors = []string{}
 	}

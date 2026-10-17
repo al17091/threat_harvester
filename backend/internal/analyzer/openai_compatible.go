@@ -194,14 +194,16 @@ Focus heavily on assessing relevance and potential impact on organizations, crit
    - "Info": New product/feature releases, marketing announcements, non-threat events. (Note: if an update mentions a vulnerability or exploit, classify according to actual threat severity, NOT Info).
 
 # Threat Actor Attribution Rules:
-- "threat_actors": Array of specific, recognized threat actor names or cybercrime groups (e.g. ["LockBit", "Lazarus", "APT10", "Qilin", "BlackCat", "Volt Typhoon", "银狐", "海莲花", "暗雪"]).
-- CRITICAL: If no specific, named threat actor or group is identified in the intelligence, you MUST return an empty array [].
+- "threat_actors": Array of specific, recognized threat actor names or cybercrime groups ONLY when explicitly and directly named in the source text.
+- STRICT RULE (GROUNDING): You must ONLY include a threat actor if their specific name appears directly in the provided title or raw content.
+- If no specific, named threat actor is explicitly mentioned in the source intelligence, you MUST return an empty array [].
+- ABSOLUTELY NEVER guess, speculate, extrapolate, or inject threat actor names from prior training data or general background knowledge.
+- NEVER copy or hallucinate threat actor names from prompt guidelines or examples. If unsure or if only general tactics/methods are described without a named group, return [].
 - NEVER output generic categories, speculative labels, or descriptive phrases such as:
   "Hackers", "Cybercriminals", "Attackers", "Unknown", "Not specified", "AI-assisted attackers",
   "AIを使用した不正アクセスの攻撃者", "AI-driven Threat Actor", "State-sponsored actors",
   "国家支援型アクター", "中国国家支援型アクター", "Chinese APT", "Rogue OpenAI agents", etc.
-- When in doubt or if only general tactics/methods are described without a named group, return [].
-- IMPORTANT (PRESERVE NATIVE NAMES): If the source article (such as Chinese CTI reports or darkweb forums) explicitly names a specific threat actor or cybercrime group in Chinese or another native language (e.g. "银狐", "海莲花", "暗雪", "毒云藤", "伏羲"), you MUST preserve and extract that exact specific group name AS-IS in "threat_actors". Do NOT translate, drop, or censor specific group names.
+- IMPORTANT: If a specific cybercrime group or APT is explicitly named in the source article in Chinese, Russian, or another native language, preserve that exact native name AS-IS. Do NOT translate or drop explicitly named groups.
 
 # Language & Output Rules:
 - STRICTLY FLUENT PROFESSIONAL ENGLISH ONLY for all textual descriptions ('title', 'summary', 'impact_analysis', 'recommended_actions').
@@ -215,8 +217,8 @@ Focus heavily on assessing relevance and potential impact on organizations, crit
   "summary": "Technical background and victim impact summary in English (2-3 sentences)",
   "impact_analysis": "Concrete evaluation of threat impact and risks in English",
   "victim_orgs": ["Identified victim organization names"],
-  "threat_actors": ["Specific named threat actors or cybercrime groups, or [] if none identified"],
-  "threat_actor_reasons": {"ActorName": "Brief explanation of where/how this actor was mentioned in the text or metadata"},
+  "threat_actors": [],
+  "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
   "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
   "cves": ["CVE identifiers e.g. CVE-2026-9999"],
   "affected_products": ["Affected product/software names e.g. FortiMail, Citrix ADC"],

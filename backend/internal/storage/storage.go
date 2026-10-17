@@ -317,7 +317,70 @@ func (s *SQLStore) initSchema() error {
 	_, _ = s.db.Exec("DELETE FROM incidents WHERE severity = 'Info' OR attack_type = 'Service Release'")
 	_, _ = s.db.Exec("DELETE FROM incidents WHERE id NOT IN (SELECT DISTINCT incident_id FROM threat_items WHERE incident_id IS NOT NULL)")
 
+	// Sanitize legacy ungrounded threat actors from existing incidents
+	s.cleanUngroundedIncidentThreatActors()
+
 	return nil
+}
+
+// cleanUngroundedIncidentThreatActors sanitizes legacy incidents with hallucinated or ungrounded threat actors.
+func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
+	query := "SELECT id, title, COALESCE(raw_content, ''), COALESCE(summary, ''), COALESCE(sources_detail, ''), threat_actors FROM incidents WHERE threat_actors IS NOT NULL AND threat_actors != '[]' AND threat_actors != ''"
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type updateItem struct {
+		id     string
+		actors string
+	}
+	var updates []updateItem
+
+	for rows.Next() {
+		var id, title, rawContent, summary, sourcesDetail, rawActors string
+		if err := rows.Scan(&id, &title, &rawContent, &summary, &sourcesDetail, &rawActors); err != nil {
+			continue
+		}
+		rawActors = strings.TrimSpace(rawActors)
+		if !strings.HasPrefix(rawActors, "[") {
+			continue
+		}
+		var actors []string
+		if err := json.Unmarshal([]byte(rawActors), &actors); err != nil {
+			continue
+		}
+		if len(actors) == 0 {
+			continue
+		}
+
+		grounded := models.FilterGroundedThreatActors(actors, title, rawContent, summary, sourcesDetail)
+		changed := len(grounded) != len(actors)
+		if !changed {
+			for i := range actors {
+				if actors[i] != grounded[i] {
+					changed = true
+					break
+				}
+			}
+		}
+		if changed {
+			if grounded == nil {
+				grounded = []string{}
+			}
+			newBytes, _ := json.Marshal(grounded)
+			updates = append(updates, updateItem{id: id, actors: string(newBytes)})
+		}
+	}
+
+	for _, up := range updates {
+		if s.isSQLite {
+			_, _ = s.db.Exec("UPDATE incidents SET threat_actors = ? WHERE id = ?", up.actors, up.id)
+		} else {
+			_, _ = s.db.Exec("UPDATE incidents SET threat_actors = $1 WHERE id = $2", up.actors, up.id)
+		}
+	}
 }
 
 func (s *SQLStore) IsSeen(ctx context.Context, itemID string) (bool, error) {
