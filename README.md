@@ -6,7 +6,7 @@
 [![Next.js: 16+](https://img.shields.io/badge/Next.js-16+-black.svg)](https://nextjs.org/)
 [![Docker Compose](https://img.shields.io/badge/Docker_Compose-Supported-2496ED.svg)](docker-compose.yml)
 [![Kubernetes / Helm](https://img.shields.io/badge/Kubernetes-Helm_3-326CE5.svg)](charts/threat-harvester)
-[![CI](https://github.com/al17091/threat_harvester/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/al17091/threat_harvester/actions/workflows/ci.yml)
+[![CI](https://github.com/al17091/threat_harvester/actions/workflows/ci.yml/badge.svg)](https://github.com/al17091/threat_harvester/actions/workflows/ci.yml)
 
 ## Japan Cyber Threat Intelligence Feeds Collector
 
