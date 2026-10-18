@@ -13,7 +13,7 @@ data:
   GEMINI_MODEL: {{ .Values.config.geminiModel | default "gemini-3.5-flash-lite" | quote }}
   SEARXNG_URL: {{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" | quote }}
   CHECK_INTERVAL_HOURS: {{ .Values.config.checkIntervalHours | quote }}
-  ENABLE_SCHEDULER: {{ .Values.config.enableScheduler | default "true" | quote }}
+  ENABLE_SCHEDULER: {{ if eq (.Values.config.enableScheduler | toString) "false" }}"false"{{ else }}"true"{{ end }}
   NOTIFY_DIRECT_ONLY: {{ .Values.config.notifyDirectOnly | quote }}
   REQUEST_TIMEOUT: {{ .Values.config.requestTimeout | quote }}
   DB_TYPE: {{ .Values.database.type | quote }}
