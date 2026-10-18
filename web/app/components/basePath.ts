@@ -17,14 +17,24 @@ const ROOT_SEGMENTS = new Set([
  * or falls back to NEXT_PUBLIC_BASE_PATH. Returns "" when served at root "/".
  */
 export function getRuntimeBasePath(pathname?: string | null): string {
+  if (typeof window !== "undefined") {
+    const injected = (window as unknown as { __RUNTIME_BASE_PATH__?: string }).__RUNTIME_BASE_PATH__;
+    if (typeof injected === "string" && injected.trim() !== "") {
+      return injected.trim().replace(/\/+$/, "");
+    }
+  }
+
   const envBase = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/+$/, "");
   const currentPath =
     typeof window !== "undefined" ? window.location.pathname : pathname || "";
 
   if (currentPath) {
     const parts = currentPath.split("/").filter(Boolean);
-    if (parts.length > 0 && !ROOT_SEGMENTS.has(parts[0])) {
-      return `/${parts[0]}`;
+    const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
+    if (rootIdx > 0) {
+      return `/${parts.slice(0, rootIdx).join("/")}`;
+    } else if (rootIdx === -1 && parts.length > 0) {
+      return `/${parts.join("/")}`;
     }
   }
   return envBase;

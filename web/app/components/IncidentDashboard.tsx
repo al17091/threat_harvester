@@ -358,6 +358,19 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   }, [lang]);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const p = typeof window !== "undefined" ? window.location.pathname : "";
+      if (p.endsWith("/ja") || p.includes("/ja/")) {
+        setCurrentLang("ja");
+      } else if (p.endsWith("/en") || p.includes("/en/")) {
+        setCurrentLang("en");
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   // Admin Authentication State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
@@ -1329,6 +1342,15 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   if (isAdmin) {
                     e.preventDefault();
                     setCurrentLang("en");
+                  } else {
+                    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
+                      e.preventDefault();
+                      setCurrentLang("en");
+                      const target = withBasePath("/en", pathname);
+                      if (typeof window !== "undefined" && window.location.pathname !== target) {
+                        window.history.pushState({}, "", target);
+                      }
+                    }
                   }
                 }}
                 className={`px-2 py-0.5 rounded font-mono font-medium transition cursor-pointer ${
@@ -1347,6 +1369,15 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   if (isAdmin) {
                     e.preventDefault();
                     setCurrentLang("ja");
+                  } else {
+                    if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
+                      e.preventDefault();
+                      setCurrentLang("ja");
+                      const target = withBasePath("/ja", pathname);
+                      if (typeof window !== "undefined" && window.location.pathname !== target) {
+                        window.history.pushState({}, "", target);
+                      }
+                    }
                   }
                 }}
                 className={`px-2 py-0.5 rounded font-mono font-medium transition cursor-pointer ${
