@@ -81,7 +81,8 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			defer wg.Done()
 			log.Printf("[Pipeline] Starting harvester: %s", h.Name())
 
-			hCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			// Allow up to 8 minutes to accommodate high-latency operations (Tor onion routing and live Gemini Grounding)
+			hCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 			defer cancel()
 
 			items, err := h.Harvest(hCtx, &since)

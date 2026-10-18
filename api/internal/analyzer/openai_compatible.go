@@ -308,9 +308,12 @@ Format: JSON array of %d strings.`, currentDate, count, targetDesc, directive, c
 		{Role: "user", Content: userPrompt},
 	}
 
-	rawJSON, err := a.sendChatCompletion(ctx, messages)
+	qCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+
+	rawJSON, err := a.sendChatCompletion(qCtx, messages)
 	if err != nil {
-		log.Printf("[OpenAICompatibleAnalyzer] GenerateSearchQueries failed: %v", err)
+		log.Printf("[OpenAICompatibleAnalyzer] GenerateSearchQueries query expansion skipped (fallback to directive): %v", err)
 		return []string{directive}, nil
 	}
 

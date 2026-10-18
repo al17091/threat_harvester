@@ -362,7 +362,7 @@ func (h *DarkwebOnionHarvester) harvestSearch(ctx context.Context, torClient *ht
 		log.Printf("[DarkWeb] Executing Tor Search Exploration for query: '%s' (Target: %s)", q, target.Name)
 		results, err := h.queryAhmia(ctx, torClient, q)
 		if err != nil {
-			log.Printf("[DarkWeb] Ahmia search query '%s' failed: %v", q, err)
+			log.Printf("[DarkWeb] Ahmia search query '%s': %v", q, err)
 			continue
 		}
 
