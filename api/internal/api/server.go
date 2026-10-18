@@ -60,6 +60,7 @@ func NewServer(store storage.Store) *Server {
 		router:     chi.NewRouter(),
 	}
 	s.setupRoutes()
+	s.triggerAsyncHealthChecks(cfg)
 	return s
 }
 
@@ -137,6 +138,45 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) triggerAsyncHealthChecks(cfg config.AppConfig) {
+	s.torMu.Lock()
+	if time.Since(s.lastTorCheck) > 60*time.Second {
+		s.lastTorCheck = time.Now()
+		go func() {
+			probeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			torH := harvesters.NewDarkwebOnionHarvester()
+			state := torH.TestConnection(probeCtx)
+			s.torMu.Lock()
+			s.lastTorState = state
+			s.torMu.Unlock()
+		}()
+	}
+	s.torMu.Unlock()
+
+	s.llmMu.Lock()
+	if time.Since(s.lastLLMCheck) > 60*time.Second {
+		s.lastLLMCheck = time.Now()
+		go func() {
+			probeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			llmAnalyzer := analyzer.NewOpenAICompatibleAnalyzer(
+				cfg.AI.Endpoint,
+				cfg.AI.Model,
+				cfg.AI.APIKey,
+				cfg.AI.Temperature,
+				cfg.AI.InsecureSkipVerify,
+				5,
+			)
+			state := llmAnalyzer.TestConnection(probeCtx)
+			s.llmMu.Lock()
+			s.lastLLMState = state
+			s.llmMu.Unlock()
+		}()
+	}
+	s.llmMu.Unlock()
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg := config.GetSettings().GetConfig()
@@ -146,28 +186,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		dbStats = map[string]interface{}{"error": err.Error()}
 	}
 
+	s.triggerAsyncHealthChecks(cfg)
+
 	s.torMu.Lock()
-	if time.Since(s.lastTorCheck) > 60*time.Second {
-		torH := harvesters.NewDarkwebOnionHarvester()
-		s.lastTorState = torH.TestConnection(ctx)
-		s.lastTorCheck = time.Now()
-	}
 	torOnline := s.lastTorState
 	s.torMu.Unlock()
 
 	s.llmMu.Lock()
-	if time.Since(s.lastLLMCheck) > 60*time.Second {
-		llmAnalyzer := analyzer.NewOpenAICompatibleAnalyzer(
-			cfg.AI.Endpoint,
-			cfg.AI.Model,
-			cfg.AI.APIKey,
-			cfg.AI.Temperature,
-			cfg.AI.InsecureSkipVerify,
-			5,
-		)
-		s.lastLLMState = llmAnalyzer.TestConnection(ctx)
-		s.lastLLMCheck = time.Now()
-	}
 	llmOnline := s.lastLLMState
 	s.llmMu.Unlock()
 
