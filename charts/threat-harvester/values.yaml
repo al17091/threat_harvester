@@ -127,6 +127,7 @@ config:
   geminiModel: "gemini-3.5-flash-lite"
   searxngUrl: "https://searxng.lab.internal/search"
   checkIntervalHours: 1
+  enableScheduler: true
   notifyDirectOnly: false
   requestTimeout: 25
 

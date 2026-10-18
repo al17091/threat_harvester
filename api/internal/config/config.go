@@ -250,6 +250,7 @@ type ScraperConfig struct {
 type PipelineConfig struct {
 	CheckIntervalHours int  `yaml:"check_interval_hours" json:"check_interval_hours"`
 	NotifyDirectOnly   bool `yaml:"notify_direct_only" json:"notify_direct_only"`
+	SchedulerEnabled   bool `yaml:"scheduler_enabled" json:"scheduler_enabled"`
 }
 
 type AppConfig struct {
@@ -321,6 +322,7 @@ func DefaultConfig() AppConfig {
 		Pipeline: PipelineConfig{
 			CheckIntervalHours: 1,
 			NotifyDirectOnly:   false,
+			SchedulerEnabled:   true,
 		},
 		Sources: SourcesConfig{
 			VendorRSS: []FeedSourceConfig{
@@ -485,9 +487,18 @@ func (s *SettingsManager) applyEnvOverrides() {
 		}
 	}
 	if v := os.Getenv("CHECK_INTERVAL_HOURS"); v != "" {
-		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+		if h, err := strconv.Atoi(v); err == nil {
 			s.Config.Pipeline.CheckIntervalHours = h
+			if h <= 0 {
+				s.Config.Pipeline.SchedulerEnabled = false
+			}
 		}
+	}
+	if v := os.Getenv("ENABLE_SCHEDULER"); v != "" {
+		s.Config.Pipeline.SchedulerEnabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("SCHEDULER_ENABLED"); v != "" {
+		s.Config.Pipeline.SchedulerEnabled = strings.EqualFold(v, "true") || v == "1"
 	}
 	if v := os.Getenv("NOTIFY_DIRECT_ONLY"); v != "" {
 		s.Config.Pipeline.NotifyDirectOnly = strings.EqualFold(v, "true") || v == "1"

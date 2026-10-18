@@ -1009,11 +1009,16 @@ func (s *Server) StartScheduler(ctx context.Context) {
 	}
 
 	cfg := config.GetSettings().GetConfig()
-	intervalHours := cfg.Pipeline.CheckIntervalHours
-	if intervalHours <= 0 {
-		intervalHours = 1
+	if !cfg.Pipeline.SchedulerEnabled || cfg.Pipeline.CheckIntervalHours <= 0 {
+		log.Println("[Scheduler] Background threat harvester scheduler is disabled by configuration")
+		s.pipeMu.Lock()
+		s.schedulerEnabled = false
+		s.nextPipeRunAt = nil
+		s.pipeMu.Unlock()
+		return
 	}
 
+	intervalHours := cfg.Pipeline.CheckIntervalHours
 	duration := time.Duration(intervalHours) * time.Hour
 
 	s.pipeMu.Lock()
