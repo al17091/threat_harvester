@@ -7,8 +7,8 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 
 ## Current Status
 - **Current Version**: `v0.1.0`
-- **Current Phase**: Phase 7 Completed (Comprehensive Unit & E2E Testing Suite with 75%+ coverage)
-- **Last Updated**: 2026-10-17
+- **Current Phase**: Phase 7 Completed / Planning Phase 8 (Strict Security Hardening & CSP)
+- **Last Updated**: 2026-10-18
 
 ---
 
@@ -81,4 +81,21 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Built pytest suite for Python harvesters, notifiers, models, and analyzers (24/24 passing, 72% coverage).
 - [x] **Web (`web/`) Node.js Testing**:
   - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
+
+### Phase 8: Strict Security Hardening & CSP Implementation (Scheduled: Next Week)
+- [ ] **Strict Content Security Policy (CSP) Implementation (`web/`)**:
+  - Configure strict CSP in `web/next.config.mjs` (or custom server / middleware):
+    - Strict `script-src` and `style-src` (evaluate nonce / strict-dynamic vs hash-based enforcement for Next.js and Tailwind CSS; minimize or eliminate unsafe directives).
+    - Restrict `default-src 'self'`, `connect-src 'self'`, `img-src 'self' data:`, `font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`.
+  - Add baseline defense-in-depth headers:
+    - `Cross-Origin-Opener-Policy: same-origin`
+    - `Cross-Origin-Resource-Policy: same-origin`
+    - `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`
+    - `X-Content-Type-Options: nosniff`
+    - `X-Frame-Options: DENY`
+- [ ] **Subpath & Reverse-Proxy Compatibility Verification**:
+  - Verify that strict CSP operates cleanly under `/threat` subpath prefix behind Traefik and CloudFront.
+  - Test bilingual language toggling (`/en`, `/ja`), STIX 2.1 bundle export, RSS feeds (`/rss`), and dark mode theme switching without CSP console violations.
+- [ ] **Automated Security Scan Verification**:
+  - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions.
 
