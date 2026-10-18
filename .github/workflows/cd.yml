@@ -57,7 +57,6 @@ jobs:
           VER="${RAW_VER#v}"
 
           API_TAG="${REPO_IMAGE}:api-${VER}"
-          BACKEND_TAG="${REPO_IMAGE}:backend-${VER}"
           WORKER_TAG="${REPO_IMAGE}:worker-${VER}"
           WEB_TAG="${REPO_IMAGE}:web-${VER}"
           DEV_TAG="${REPO_IMAGE}:dev-${VER}"
@@ -69,7 +68,6 @@ jobs:
 
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "api_tag=${API_TAG}" >> "$GITHUB_OUTPUT"
-          echo "backend_tag=${BACKEND_TAG}" >> "$GITHUB_OUTPUT"
           echo "worker_tag=${WORKER_TAG}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_TAG}" >> "$GITHUB_OUTPUT"
           echo "dev_tag=${DEV_TAG}" >> "$GITHUB_OUTPUT"
@@ -90,7 +88,7 @@ jobs:
           context: .
           file: api/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.api_tag }},${{ steps.meta.outputs.backend_tag }}
+          tags: ${{ steps.meta.outputs.api_tag }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 

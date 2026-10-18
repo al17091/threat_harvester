@@ -18,7 +18,7 @@ Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLL
 
 The platform consists of a decoupled microservice architecture (orchestrated via Docker Compose or Helm using `ghcr.io/al17091/threat_harvester`):
 - **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 16 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja` on Port 3000).
-- **API Engine (`api/`, tag `api-<version>` / `backend-<version>`)**: High-performance Go 1.26+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and REST API (Port 8000).
+- **API Engine (`api/`, tag `api-<version>`)**: High-performance Go 1.26+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and REST API (Port 8000).
 - **Harvester & Analysis Worker (`worker/`, tag `worker-<version>`)**: Python 3.12+ extensible crawler worker and batch processor for continuous CTI enrichment.
 - **Database Engine**: PostgreSQL 16 (CloudNativePG on k3s / container) with pure-Go SQLite fallback.
 - **Tor SOCKS5 Proxy**: External or in-cluster Tor SOCKS5h proxy for dark web (`.onion`) reachability.
@@ -61,7 +61,7 @@ open http://localhost:3000/thhv/rss
 
 Images are published to `ghcr.io/al17091/threat_harvester` using Semantic Versioning (`VERSION` file) via GitHub Actions ([`.github/workflows/docker-publish.yml`](.github/workflows/docker-publish.yml)):
 - **`main` branch / release tag (`v0.1.0`)**:
-  - `ghcr.io/al17091/threat_harvester:api-0.1.0` (also tagged `backend-0.1.0`)
+  - `ghcr.io/al17091/threat_harvester:api-0.1.0`
   - `ghcr.io/al17091/threat_harvester:worker-0.1.0`
   - `ghcr.io/al17091/threat_harvester:web-0.1.0`
 - **`develop` branch (automatic `-preview` suffix)**:
@@ -110,13 +110,14 @@ harvester test-notion
 
 ## 5. Kubernetes & k3s (CloudNativePG) Deployment
 
-Deploy the separated `backend` (`backend-0.1.0`) and `dashboard` (`web-0.1.0`) services to Kubernetes / k3s using Helm (`charts/threat-harvester`):
+Deploy the separated `api` (`api-0.1.0`), `worker` (`worker-0.1.0`), and `dashboard` (`web-0.1.0`) services to Kubernetes / k3s using Helm (`charts/threat-harvester`):
 
 ```bash
 helm upgrade --install threat-harvester ./charts/threat-harvester \
   --namespace security \
   --create-namespace \
-  --set backend.image.tag="backend-0.1.0" \
+  --set api.image.tag="api-0.1.0" \
+  --set worker.image.tag="worker-0.1.0" \
   --set dashboard.image.tag="web-0.1.0" \
   --set database.type="postgres" \
   --set database.existingSecret="threat-harvester-db-app" \

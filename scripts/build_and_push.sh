@@ -21,7 +21,7 @@ GH_USERNAME=$(echo "$1" | tr '[:upper:]' '[:lower:]')
 BASE_REPO="ghcr.io/${GH_USERNAME}/${IMAGE_NAME}"
 
 # Resolve version from 2nd arg or VERSION file
-if [ -n "$2" ] && [[ "$2" != "all" && "$2" != "api" && "$2" != "backend" && "$2" != "worker" && "$2" != "web" && "$2" != "dev" ]]; then
+if [ -n "$2" ] && [[ "$2" != "all" && "$2" != "api" && "$2" != "worker" && "$2" != "web" && "$2" != "dev" ]]; then
     VERSION="${2#v}"
     TARGET="${3:-all}"
 else
@@ -39,12 +39,10 @@ fi
 
 build_and_push_api() {
     local tag="api-${VERSION}"
-    local compat_tag="backend-${VERSION}"
     echo "==> Building API image ${BASE_REPO}:${tag} from api/Dockerfile..."
-    docker build -t "${BASE_REPO}:${tag}" -t "${BASE_REPO}:${compat_tag}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}"
-    echo "==> Pushing ${BASE_REPO}:${tag} and ${BASE_REPO}:${compat_tag}..."
+    docker build -t "${BASE_REPO}:${tag}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}"
+    echo "==> Pushing ${BASE_REPO}:${tag}..."
     docker push "${BASE_REPO}:${tag}"
-    docker push "${BASE_REPO}:${compat_tag}"
 }
 
 build_and_push_worker() {
@@ -77,7 +75,7 @@ case "${TARGET}" in
         build_and_push_worker
         build_and_push_web
         ;;
-    api|backend)
+    api)
         build_and_push_api
         ;;
     worker)
