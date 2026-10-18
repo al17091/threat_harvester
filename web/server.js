@@ -57,10 +57,19 @@ function detectSubpathPrefix(req, pathname) {
 
 function rewriteHtmlAssets(bodyStr, prefix) {
   if (!prefix) return bodyStr;
-  return bodyStr
+  let rewritten = bodyStr
     .replace(/(["'])\/_next\//g, `$1${prefix}/_next/`)
     .replace(/\\\/_next\\\//g, `\\${prefix}\\/_next\\/`)
     .replace(/(href=["'])\/(icon\.svg|favicon\.ico|apple-touch-icon\.png)(["'])/g, `$1${prefix}/$2$3`);
+
+  // Ensure Turbopack chunk loader prepends the subpath prefix when dynamically loading other chunks
+  if (rewritten.includes("<head>")) {
+    rewritten = rewritten.replace(
+      "<head>",
+      `<head><script>window.TURBOPACK_CHUNK_BASE_PATH="${prefix}/_next/";</script>`
+    );
+  }
+  return rewritten;
 }
 
 app.prepare().then(() => {
@@ -98,6 +107,14 @@ app.prepare().then(() => {
             const chunks = [];
             const origWrite = res.write.bind(res);
             const origEnd = res.end.bind(res);
+            const origWriteHead = res.writeHead.bind(res);
+
+            let writeHeadArgs = null;
+
+            res.writeHead = function (...args) {
+              writeHeadArgs = args;
+              return res;
+            };
 
             res.write = function (chunk, encoding, cb) {
               if (chunk) {
@@ -114,18 +131,46 @@ app.prepare().then(() => {
               }
               const fullBuffer = Buffer.concat(chunks);
               const contentType = String(res.getHeader("content-type") || "");
+
               if (
                 contentType.includes("text/html") ||
                 contentType.includes("text/x-component")
               ) {
                 const rewritten = rewriteHtmlAssets(fullBuffer.toString("utf8"), prefix);
                 const outBuf = Buffer.from(rewritten, "utf8");
-                if (res.getHeader("content-length")) {
-                  res.setHeader("content-length", outBuf.length);
+
+                res.removeHeader("content-length");
+                res.setHeader("content-length", outBuf.length);
+
+                if (writeHeadArgs) {
+                  let [status, reasonOrHeaders, maybeHeaders] = writeHeadArgs;
+                  let headers = typeof reasonOrHeaders === "object" ? reasonOrHeaders : maybeHeaders;
+                  if (headers) {
+                    if (Array.isArray(headers)) {
+                      headers = headers.filter(([k]) => k.toLowerCase() !== "content-length");
+                      headers.push(["content-length", outBuf.length]);
+                    } else {
+                      for (const k of Object.keys(headers)) {
+                        if (k.toLowerCase() === "content-length") delete headers[k];
+                      }
+                      headers["content-length"] = outBuf.length;
+                    }
+                    if (typeof reasonOrHeaders === "object") {
+                      writeHeadArgs[1] = headers;
+                    } else if (maybeHeaders) {
+                      writeHeadArgs[2] = headers;
+                    }
+                  }
+                  origWriteHead.apply(res, writeHeadArgs);
                 }
+
                 res.write = origWrite;
                 res.end = origEnd;
                 return origEnd(outBuf, cb);
+              }
+
+              if (writeHeadArgs) {
+                origWriteHead.apply(res, writeHeadArgs);
               }
               res.write = origWrite;
               res.end = origEnd;
