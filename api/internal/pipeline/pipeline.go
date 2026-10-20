@@ -236,6 +236,42 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		}
 	}
 
+	// Translate any newly added Japanese incidents into English
+	if len(newItems) > 0 && p.analyzer != nil {
+		needingTrans, err := p.store.GetIncidentsNeedingTranslation(ctx, 50)
+		if err == nil && len(needingTrans) > 0 {
+			log.Printf("[Pipeline] Translating %d newly created incidents into English...", len(needingTrans))
+			var transItems []analyzer.BatchTranslateItem
+			for _, inc := range needingTrans {
+				sum := inc.Summary
+				if sum == "" {
+					sum = inc.SummaryJa
+				}
+				imp := inc.ImpactAnalysis
+				if imp == "" {
+					imp = inc.ImpactAnalysisJa
+				}
+				transItems = append(transItems, analyzer.BatchTranslateItem{
+					ID:              inc.ID,
+					Title:           inc.Title,
+					Summary:         sum,
+					ImpactAnalysis:  imp,
+					VictimOrg:       inc.VictimOrg,
+					AffectedProduct: inc.AffectedProduct,
+				})
+			}
+			results, err := p.analyzer.TranslateBatch(ctx, transItems)
+			if err == nil {
+				for _, res := range results {
+					if res.Title != "" || res.Summary != "" || res.ImpactAnalysis != "" || res.VictimOrgEn != "" {
+						_ = p.store.UpdateIncidentTranslations(ctx, res.ID, res.Title, res.Summary, res.ImpactAnalysis, res.VictimOrgEn, res.AffectedProductEn, res.RecommendedActions)
+					}
+				}
+				log.Printf("[Pipeline] Successfully translated %d incidents into English", len(results))
+			}
+		}
+	}
+
 	summary := PipelineSummary{
 		TotalHarvested:   len(allItems),
 		NewItems:         len(newItems),

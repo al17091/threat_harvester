@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/al17091/threat_harvester/api/internal/analyzer"
 	"github.com/al17091/threat_harvester/api/internal/api"
@@ -87,7 +88,8 @@ func (m *mockE2EAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.B
 
 func TestE2EPipelineAndAPI(t *testing.T) {
 	// 1. Setup mock RSS Server
-	rssXML := `<?xml version="1.0" encoding="UTF-8"?>
+	pubDateStr := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC1123)
+	rssXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
     <title>Security Alerts Feed</title>
@@ -97,10 +99,10 @@ func TestE2EPipelineAndAPI(t *testing.T) {
       <title>LockBit claims attack on Cyber Defense Inc exploiting CVE-2024-9999</title>
       <link>https://example.com/alerts/lockbit-incident</link>
       <description>LockBit ransomware group published data allegedly stolen from Cyber Defense Inc.</description>
-      <pubDate>Mon, 17 Oct 2026 12:00:00 GMT</pubDate>
+      <pubDate>%s</pubDate>
     </item>
   </channel>
-</rss>`
+</rss>`, pubDateStr)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/rss+xml")

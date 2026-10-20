@@ -198,15 +198,13 @@ func (h *HybridThreatAnalyzer) TranslateIncidentFields(ctx context.Context, titl
 }
 
 func (h *HybridThreatAnalyzer) TranslateBatch(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error) {
-	// Primarily use local Qwen
-	results, err := h.primary.TranslateBatch(ctx, items)
-	if err == nil {
-		return results, nil
-	}
 	if h.escalation != nil {
-		return h.escalation.TranslateBatch(ctx, items)
+		results, err := h.escalation.TranslateBatch(ctx, items)
+		if err == nil {
+			return results, nil
+		}
 	}
-	return nil, err
+	return h.primary.TranslateBatch(ctx, items)
 }
 
 func (h *HybridThreatAnalyzer) TranslateFieldsToJapanese(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {

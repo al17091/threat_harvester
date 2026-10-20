@@ -1510,13 +1510,29 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 	var query string
 	nowStr := time.Now().UTC().Format(time.RFC3339)
 	if s.isSQLite {
-		query = `UPDATE incidents SET title = ?, summary_ja = ?, impact_analysis_ja = ?, victim_org_en = COALESCE(NULLIF(?, ''), victim_org_en), affected_product_en = COALESCE(NULLIF(?, ''), affected_product_en), updated_at = ? WHERE id = ?`
+		query = `UPDATE incidents SET
+			title_ja = CASE WHEN title_ja IS NULL OR title_ja = '' THEN title ELSE title_ja END,
+			summary_ja = CASE WHEN summary_ja IS NULL OR summary_ja = '' THEN summary ELSE summary_ja END,
+			impact_analysis_ja = CASE WHEN impact_analysis_ja IS NULL OR impact_analysis_ja = '' THEN impact_analysis ELSE impact_analysis_ja END,
+			title = ?, summary = ?, impact_analysis = ?,
+			victim_org_en = COALESCE(NULLIF(?, ''), victim_org_en),
+			affected_product_en = COALESCE(NULLIF(?, ''), affected_product_en),
+			updated_at = ?
+		WHERE id = ?`
 		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
 		if err != nil {
 			return err
 		}
 	} else {
-		query = `UPDATE incidents SET title = $1, summary_ja = $2, impact_analysis_ja = $3, victim_org_en = COALESCE(NULLIF($4, ''), victim_org_en), affected_product_en = COALESCE(NULLIF($5, ''), affected_product_en), updated_at = $6 WHERE id = $7`
+		query = `UPDATE incidents SET
+			title_ja = CASE WHEN title_ja IS NULL OR title_ja = '' THEN title ELSE title_ja END,
+			summary_ja = CASE WHEN summary_ja IS NULL OR summary_ja = '' THEN summary ELSE summary_ja END,
+			impact_analysis_ja = CASE WHEN impact_analysis_ja IS NULL OR impact_analysis_ja = '' THEN impact_analysis ELSE impact_analysis_ja END,
+			title = $1, summary = $2, impact_analysis = $3,
+			victim_org_en = COALESCE(NULLIF($4, ''), victim_org_en),
+			affected_product_en = COALESCE(NULLIF($5, ''), affected_product_en),
+			updated_at = $6
+		WHERE id = $7`
 		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
 		if err != nil {
 			return err
@@ -1588,7 +1604,7 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title LIKE '%[あ-ん]%' OR summary_ja LIKE '%[あ-ん]%' OR impact_analysis_ja LIKE '%[あ-ん]%' OR victim_org LIKE '%[あ-ん]%')
+			WHERE (title LIKE '%[あ-ん]%' OR summary LIKE '%[あ-ん]%' OR (COALESCE(summary, '') = '' AND COALESCE(summary_ja, '') != ''))
 			ORDER BY last_seen_at DESC
 			LIMIT ?
 		`
@@ -1596,7 +1612,7 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR impact_analysis_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR victim_org ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+			WHERE (title ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR summary ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR (COALESCE(summary, '') = '' AND summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]'))
 			ORDER BY last_seen_at DESC
 			LIMIT $1
 		`
@@ -1615,7 +1631,7 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 			continue
 		}
 		if s.isSQLite {
-			if isJapaneseText(inc.Title) || isJapaneseText(inc.SummaryJa) || isJapaneseText(inc.ImpactAnalysisJa) {
+			if isJapaneseText(inc.Title) || isJapaneseText(inc.Summary) || (inc.Summary == "" && isJapaneseText(inc.SummaryJa)) {
 				incidents = append(incidents, *inc)
 			}
 		} else {

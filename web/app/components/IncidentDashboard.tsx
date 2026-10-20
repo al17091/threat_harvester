@@ -1385,7 +1385,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     ? "bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40"
                     : "text-slate-400 hover:text-white"
                 }`}
-                title="日本語表示に切替"
+                title={currentLang === "ja" ? "日本語表示中" : "Switch to Japanese view"}
               >
                 JA
               </a>
@@ -1704,7 +1704,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="flex items-center justify-between text-xs font-semibold text-purple-300 border-b border-purple-950/50 pb-1.5">
                           <div className="flex items-center space-x-1.5">
                             <Skull className="w-3.5 h-3.5 text-purple-400" />
-                            <span>{currentLang === "ja" ? "主要観測アクター (Top Threat Actors)" : "Top Threat Actors"}</span>
+                            <span>{currentLang === "ja" ? "主要観測アクター" : "Top Threat Actors"}</span>
                           </div>
                           <span className="text-[11px] text-purple-400/80 font-mono">
                             {entityStats.total_unique_actors} {currentLang === "ja" ? "組 観測" : "Observed"}
@@ -1754,7 +1754,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="flex items-center justify-between text-xs font-semibold text-cyan-300 border-b border-cyan-950/50 pb-1.5">
                           <div className="flex items-center space-x-1.5">
                             <Building2 className="w-3.5 h-3.5 text-cyan-400" />
-                            <span>{currentLang === "ja" ? "主要標的・被害組織 (Targeted Organizations)" : "Top Targeted Organizations"}</span>
+                            <span>{currentLang === "ja" ? "主要標的・被害組織" : "Top Targeted Organizations"}</span>
                           </div>
                           <span className="text-[11px] text-cyan-400/80 font-mono">
                             {entityStats.total_unique_victims} {currentLang === "ja" ? "社・機関 観測" : "Observed"}
@@ -3464,10 +3464,10 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         onChange={(e) => setEditJapanRel(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400 font-mono"
                       >
-                        <option value="Direct">Direct (日本直接対象)</option>
-                        <option value="Indirect">Indirect (間接影響)</option>
-                        <option value="None">None (日本無関係)</option>
-                        <option value="Unknown">Unknown (不明)</option>
+                        <option value="Direct">{currentLang === "ja" ? "Direct (日本直接対象)" : "Direct (Japan Direct)"}</option>
+                        <option value="Indirect">{currentLang === "ja" ? "Indirect (間接影響)" : "Indirect (Indirect Impact)"}</option>
+                        <option value="None">{currentLang === "ja" ? "None (日本無関係)" : "None (No Japan Relevance)"}</option>
+                        <option value="Unknown">{currentLang === "ja" ? "Unknown (不明)" : "Unknown"}</option>
                       </select>
                     </div>
 
