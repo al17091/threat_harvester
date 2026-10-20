@@ -3,14 +3,14 @@
 # Base repository & version (shared across api, worker, web, and cronjob)
 image:
   repository: ghcr.io/al17091/threat_harvester
-  version: "0.1.0"
-  tag: "api-0.1.0"
+  version: "0.1.1"
+  tag: "api-0.1.1"
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
 devImage:
   repository: ghcr.io/al17091/threat_harvester
-  tag: "dev-0.1.0"
+  tag: "dev-0.1.1"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -22,7 +22,7 @@ api:
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "api-0.1.0"
+    tag: "api-0.1.1"
     pullPolicy: IfNotPresent
   port: 8000
   service:
@@ -42,7 +42,7 @@ worker:
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "worker-0.1.0"
+    tag: "worker-0.1.1"
     pullPolicy: IfNotPresent
   mode: "batch"  # "batch" or "api"
   resources:
@@ -60,7 +60,7 @@ dashboard:
   basePath: "/thhv"
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "web-0.1.0"
+    tag: "web-0.1.1"
     pullPolicy: IfNotPresent
   port: 3000
   service:

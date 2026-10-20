@@ -1,6 +1,6 @@
 [project]
 name = "threat-harvester"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cyber Threat Intelligence Harvester focusing on Japan-targeted threats"
 requires-python = ">=3.11"
 

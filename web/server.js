@@ -48,8 +48,11 @@ function detectSubpathPrefix(req, pathname) {
   }
 
   const parts = (pathname || "").split("/").filter(Boolean);
-  if (parts.length > 0 && !ROOT_SEGMENTS.has(parts[0])) {
-    return `/${parts[0]}`;
+  const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
+  if (rootIdx > 0) {
+    return `/${parts.slice(0, rootIdx).join("/")}`;
+  } else if (rootIdx === -1 && parts.length > 0) {
+    return `/${parts.join("/")}`;
   }
 
   return "";
@@ -60,13 +63,16 @@ function rewriteHtmlAssets(bodyStr, prefix) {
   let rewritten = bodyStr
     .replace(/(["'])\/_next\//g, `$1${prefix}/_next/`)
     .replace(/\\\/_next\\\//g, `\\${prefix}\\/_next\\/`)
-    .replace(/(href=["'])\/(icon\.svg|favicon\.ico|apple-touch-icon\.png)(["'])/g, `$1${prefix}/$2$3`);
+    .replace(/(href=["'])\/(icon\.svg|favicon\.ico[^\s"'>]*|apple-touch-icon\.png)(["'])/g, `$1${prefix}/$2$3`)
+    .replace(/(href=["'])\/(en|ja|admin|api\/[^\s"'>]+|rss|feed\.xml)(["'])/g, `$1${prefix}/$2$3`)
+    .replace(/(\\"href\\":\s*\\")\/(en|ja|admin|api\/[^"\\\s]+|rss|feed\.xml)(\\")/g, `$1${prefix}/$2$3`)
+    .replace(/("href":\s*")\/(en|ja|admin|api\/[^"\s]+|rss|feed\.xml)(")/g, `$1${prefix}/$2$3`);
 
-  // Ensure Turbopack chunk loader prepends the subpath prefix when dynamically loading other chunks
+  // Ensure client runtime knows subpath and Turbopack chunk loader prepends the prefix
   if (rewritten.includes("<head>")) {
     rewritten = rewritten.replace(
       "<head>",
-      `<head><script>window.TURBOPACK_CHUNK_BASE_PATH="${prefix}/_next/";</script>`
+      `<head><script>window.__RUNTIME_BASE_PATH__="${prefix}";window.TURBOPACK_CHUNK_BASE_PATH="${prefix}/_next/";</script>`
     );
   }
   return rewritten;
