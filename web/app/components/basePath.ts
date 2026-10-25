@@ -28,24 +28,24 @@ export function getRuntimeBasePath(pathname?: string | null): string {
   // 2. Client-side URL detection from window.location.pathname
   if (typeof window !== "undefined" && window.location.pathname) {
     const parts = window.location.pathname.split("/").filter(Boolean);
-    if (parts.length > 0 && !ROOT_SEGMENTS.has(parts[0])) {
-      return `/${parts[0]}`;
-    }
     const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
     if (rootIdx > 0) {
       return `/${parts.slice(0, rootIdx).join("/")}`;
+    }
+    if (rootIdx === -1 && parts.length > 0) {
+      return `/${parts.join("/")}`;
     }
   }
 
   // 3. SSR pathname inspection
   if (pathname) {
     const parts = pathname.split("/").filter(Boolean);
-    if (parts.length > 0 && !ROOT_SEGMENTS.has(parts[0])) {
-      return `/${parts[0]}`;
-    }
     const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
     if (rootIdx > 0) {
       return `/${parts.slice(0, rootIdx).join("/")}`;
+    }
+    if (rootIdx === -1 && parts.length > 0) {
+      return `/${parts.join("/")}`;
     }
   }
 
