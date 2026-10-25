@@ -48,3 +48,4 @@ spec:
           resources:
             {{- toYaml .Values.browserless.resources | nindent 12 }}
 {{- end }}
+

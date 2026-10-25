@@ -17,3 +17,4 @@ spec:
     {{- include "threat-harvester.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: browserless
 {{- end }}
+
