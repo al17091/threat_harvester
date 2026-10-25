@@ -3,14 +3,14 @@
 # Base repository & version (shared across api, worker, web, and cronjob)
 image:
   repository: ghcr.io/al17091/threat_harvester
-  version: "0.1.1"
-  tag: "api-0.1.1"
+  version: "0.1.2"
+  tag: "api-0.1.2"
   pullPolicy: IfNotPresent
 
 # Development image for Dev / Ops container
 devImage:
   repository: ghcr.io/al17091/threat_harvester
-  tag: "dev-0.1.1"
+  tag: "dev-0.1.2"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -22,7 +22,7 @@ api:
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "api-0.1.1"
+    tag: "api-0.1.2"
     pullPolicy: IfNotPresent
   port: 8000
   service:
@@ -42,7 +42,7 @@ worker:
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "api-0.1.1"
+    tag: "worker-0.1.2"
     pullPolicy: IfNotPresent
   resources:
     limits:
@@ -77,7 +77,7 @@ dashboard:
   basePath: "/threat"
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "web-0.1.1"
+    tag: "web-0.1.2"
     pullPolicy: IfNotPresent
   port: 3000
   service:
@@ -138,10 +138,18 @@ secrets:
 # General application configuration
 config:
   complianceMode: "all"
-  aiPrimaryProvider: "openai_compatible"
+  aiPrimaryProvider: "hybrid"
+  aiTimeoutSeconds: 180
   litellmEndpoint: "https://litellm.lab.internal/v1/chat/completions"
   litellmModel: "qwen2.5-3b-instruct"
   geminiModel: "gemini-3.5-flash-lite"
+  hybrid:
+    queryGenerator: "qwen"
+    extractor: "qwen"
+    refiner: "gemini"
+    translator: "gemini"
+    refineSeverities: "CRITICAL,HIGH"
+    refineJapanOnly: false
   searxngUrl: "https://searxng.lab.internal/search"
   searxngResearchUrl: "https://searxng-research.lab.internal/search"
   checkIntervalHours: 1

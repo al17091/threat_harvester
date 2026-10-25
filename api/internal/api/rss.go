@@ -160,7 +160,7 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 		var itemTitle, displayVictim, displaySummary, displayImpact string
 		if lang == "ja" {
 			itemTitleText := titleJa
-			if itemTitleText == "" {
+			if itemTitleText == "" || (!isJapaneseText(itemTitleText) && isJapaneseText(titleEn)) {
 				itemTitleText = titleEn
 			}
 			displayVictim = victimOrgJa
@@ -175,17 +175,31 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 			} else {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
 			}
-			displaySummary = summaryJa
-			if displaySummary == "" {
+
+			if isJapaneseText(summaryJa) {
+				displaySummary = summaryJa
+			} else if isJapaneseText(summaryEn) {
 				displaySummary = summaryEn
+			} else {
+				displaySummary = summaryJa
+				if displaySummary == "" {
+					displaySummary = summaryEn
+				}
 			}
-			displayImpact = impactJa
-			if displayImpact == "" {
+
+			if isJapaneseText(impactJa) {
+				displayImpact = impactJa
+			} else if isJapaneseText(impactEn) {
 				displayImpact = impactEn
+			} else {
+				displayImpact = impactJa
+				if displayImpact == "" {
+					displayImpact = impactEn
+				}
 			}
 		} else {
 			itemTitleText := titleEn
-			if itemTitleText == "" {
+			if itemTitleText == "" || (isJapaneseText(itemTitleText) && !isJapaneseText(titleJa) && titleJa != "") {
 				itemTitleText = titleJa
 			}
 			displayVictim = victimOrgEn
@@ -200,13 +214,27 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 			} else {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
 			}
-			displaySummary = summaryEn
-			if displaySummary == "" {
+
+			if summaryEn != "" && !isJapaneseText(summaryEn) {
+				displaySummary = summaryEn
+			} else if summaryJa != "" && !isJapaneseText(summaryJa) {
 				displaySummary = summaryJa
+			} else {
+				displaySummary = summaryEn
+				if displaySummary == "" {
+					displaySummary = summaryJa
+				}
 			}
-			displayImpact = impactEn
-			if displayImpact == "" {
+
+			if impactEn != "" && !isJapaneseText(impactEn) {
+				displayImpact = impactEn
+			} else if impactJa != "" && !isJapaneseText(impactJa) {
 				displayImpact = impactJa
+			} else {
+				displayImpact = impactEn
+				if displayImpact == "" {
+					displayImpact = impactJa
+				}
 			}
 		}
 

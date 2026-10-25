@@ -10,3 +10,4 @@ data:
   server.js: |
 {{ .Files.Get "files/server.js" | indent 4 }}
 {{- end }}
+

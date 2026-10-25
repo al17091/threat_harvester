@@ -64,9 +64,9 @@ function rewriteHtmlAssets(bodyStr, prefix) {
     .replace(/(["'])\/_next\//g, `$1${prefix}/_next/`)
     .replace(/\\\/_next\\\//g, `\\${prefix}\\/_next\\/`)
     .replace(/(href=["'])\/(icon\.svg|favicon\.ico[^\s"'>]*|apple-touch-icon\.png)(["'])/g, `$1${prefix}/$2$3`)
-    .replace(/(href=["'])\/(en|ja|admin|api\/[^\s"'>]+|rss|feed\.xml)(["'])/g, `$1${prefix}/$2$3`)
-    .replace(/(\\"href\\":\s*\\")\/(en|ja|admin|api\/[^"\\\s]+|rss|feed\.xml)(\\")/g, `$1${prefix}/$2$3`)
-    .replace(/("href":\s*")\/(en|ja|admin|api\/[^"\s]+|rss|feed\.xml)(")/g, `$1${prefix}/$2$3`);
+    .replace(/(href=["'])\/(en|ja|admin|api\/[^\s"'>]+|(?:rss|feed\.xml)[^\s"'>]*)(["'])/g, `$1${prefix}/$2$3`)
+    .replace(/(\\"href\\":\s*\\")\/(en|ja|admin|api\/[^"\\\s]+|(?:rss|feed\.xml)[^"\\\s]*)(\\")/g, `$1${prefix}/$2$3`)
+    .replace(/("href":\s*")\/(en|ja|admin|api\/[^"\s]+|(?:rss|feed\.xml)[^"\s]*)(")/g, `$1${prefix}/$2$3`);
 
   // Ensure client runtime knows subpath and Turbopack chunk loader prepends the prefix
   if (rewritten.includes("<head>")) {
