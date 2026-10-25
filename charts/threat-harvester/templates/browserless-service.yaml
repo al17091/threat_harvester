@@ -1,0 +1,19 @@
+{{- if and .Values.browserless .Values.browserless.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-browserless
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: browserless
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.browserless.port | default 3000 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "threat-harvester.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: browserless
+{{- end }}

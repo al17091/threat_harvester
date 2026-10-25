@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/al17091/threat_harvester/api/internal/analyzer"
 	"github.com/al17091/threat_harvester/api/internal/api"
 	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/logger"
 	"github.com/al17091/threat_harvester/api/internal/pipeline"
+	"github.com/al17091/threat_harvester/api/internal/scraper"
 	"github.com/al17091/threat_harvester/api/internal/storage"
 )
 
@@ -49,6 +51,8 @@ func main() {
 		runWeb(ctx, store)
 	case "run", "harvest":
 		runHarvest(ctx, store)
+	case "worker":
+		runWorker(ctx, store)
 	case "cron":
 		runCron(ctx, store)
 	case "status":
@@ -76,6 +80,7 @@ Usage:
 
 Commands:
   web, serve     Start the REST API server and dashboard backend (default: :8000)
+  worker         Run standalone background harvester daemon with /healthz endpoint
   run, harvest   Execute a single threat harvesting and enrichment cycle
   cron           Run the harvesting pipeline in an infinite loop with interval
   status         Check database statistics and component connectivity
@@ -167,6 +172,97 @@ func runCron(ctx context.Context, store storage.Store) {
 		case <-ticker.C:
 			log.Printf("Triggering scheduled harvest cycle...")
 			_, _ = pipe.RunAll(ctx, intervalHours, cfg.Pipeline.NotifyDirectOnly)
+		}
+	}
+}
+
+func runWorker(ctx context.Context, store storage.Store) {
+	fs := flag.NewFlagSet("worker", flag.ExitOnError)
+	port := fs.Int("port", 8001, "Port for healthcheck HTTP server")
+	interval := fs.Int("interval", 0, "Hours between harvest runs (0 = use config)")
+	directOnly := fs.Bool("direct-only", false, "Notify Japan-direct incidents only")
+	_ = fs.Parse(os.Args[2:])
+
+	if envPort := os.Getenv("WORKER_PORT"); envPort != "" {
+		var p int
+		if _, err := fmt.Sscanf(envPort, "%d", &p); err == nil && p > 0 {
+			*port = p
+		}
+	} else if envPort := os.Getenv("PORT"); envPort != "" && *port == 8001 {
+		var p int
+		if _, err := fmt.Sscanf(envPort, "%d", &p); err == nil && p > 0 && p != 8000 {
+			*port = p
+		}
+	}
+
+	cfg := config.GetSettings().GetConfig()
+	intervalHours := cfg.Pipeline.CheckIntervalHours
+	if *interval > 0 {
+		intervalHours = *interval
+	}
+	if intervalHours <= 0 {
+		intervalHours = 1
+	}
+
+	isDirectOnly := cfg.Pipeline.NotifyDirectOnly
+	if *directOnly {
+		isDirectOnly = true
+	}
+
+	// 1. Start HTTP Healthcheck Server (:8001 /healthz)
+	healthMux := http.NewServeMux()
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"healthy","component":"worker","timestamp":"` + time.Now().UTC().Format(time.RFC3339) + `"}`))
+	})
+	healthServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", *port),
+		Handler: healthMux,
+	}
+
+	go func() {
+		log.Printf("[Worker] Healthcheck server listening on :%d/healthz", *port)
+		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[Worker] Healthcheck server error: %v", err)
+		}
+	}()
+
+	// 2. Start Clearnet/Tor Article Scraper Manager
+	analyzerInst := analyzer.NewDefaultThreatAnalyzer()
+	scraperMgr := scraper.NewScraperManager(store, analyzerInst, cfg.Scraper, cfg.Network)
+	if cfg.Scraper.Enabled {
+		log.Printf("[Worker] Starting background article scraper manager...")
+		scraperMgr.Start(ctx)
+	}
+
+	// 3. Start Harvester Pipeline Loop
+	pipe := pipeline.NewPipeline(store)
+	log.Printf("[Worker] Starting threat harvester worker (Interval: %d hour(s), DirectOnly: %v, Lang: %s). Initial run now...",
+		intervalHours, isDirectOnly, cfg.Pipeline.NotifyLanguage)
+
+	// Execute initial run
+	if _, err := pipe.RunAll(ctx, intervalHours, isDirectOnly); err != nil {
+		log.Printf("[Worker] Initial harvest run encountered error: %v", err)
+	}
+
+	ticker := time.NewTicker(time.Duration(intervalHours) * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("[Worker] Shutting down worker gracefully...")
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = healthServer.Shutdown(shutdownCtx)
+			log.Println("[Worker] Worker shutdown complete")
+			return
+		case <-ticker.C:
+			log.Printf("[Worker] Scheduled harvest cycle triggered...")
+			if _, err := pipe.RunAll(ctx, intervalHours, isDirectOnly); err != nil {
+				log.Printf("[Worker] Scheduled harvest run encountered error: %v", err)
+			}
 		}
 	}
 }

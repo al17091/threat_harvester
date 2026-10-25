@@ -1393,14 +1393,14 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
             {/* RSS Feed is available to both Public and Admin */}
             <a
-              href={withBasePath("/api/feed.xml", pathname)}
+              href={withBasePath(`/api/feed.xml?lang=${currentLang}`, pathname)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
-              title="Subscribe to RSS 2.0 Feed (/api/feed.xml)"
+              title={currentLang === "ja" ? "RSS 2.0フィードを購読 (/api/feed.xml?lang=ja)" : "Subscribe to RSS 2.0 Feed (/api/feed.xml?lang=en)"}
             >
               <Rss className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
-              <span>RSS Feed</span>
+              <span>{currentLang === "ja" ? "RSSフィード (日本語)" : "RSS Feed (EN)"}</span>
             </a>
 
 

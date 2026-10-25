@@ -84,11 +84,15 @@ func (s *Server) setupRoutes() {
 	r.Get("/", s.handleRoot)
 	r.Head("/", s.handleRoot)
 	r.Get("/rss", s.handleRSSFeed)
+	r.Get("/rss/{lang}", s.handleRSSFeed)
 	r.Get("/feed.xml", s.handleRSSFeed)
+	r.Get("/feed.xml/{lang}", s.handleRSSFeed)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/rss", s.handleRSSFeed)
+		r.Get("/rss/{lang}", s.handleRSSFeed)
 		r.Get("/feed.xml", s.handleRSSFeed)
+		r.Get("/feed.xml/{lang}", s.handleRSSFeed)
 		r.Get("/status", s.handleStatus)
 		r.Get("/stats/entities", s.handleGetEntityStats)
 		r.Get("/incidents", s.handleListIncidents)
@@ -1004,18 +1008,18 @@ func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 
 // StartScheduler launches an in-process background ticker that runs harvest cycles periodically.
 func (s *Server) StartScheduler(ctx context.Context) {
-	if s.scraperMgr != nil {
-		s.scraperMgr.Start(ctx)
-	}
-
 	cfg := config.GetSettings().GetConfig()
 	if !cfg.Pipeline.SchedulerEnabled || cfg.Pipeline.CheckIntervalHours <= 0 {
-		log.Println("[Scheduler] Background threat harvester scheduler is disabled by configuration")
+		log.Println("[Scheduler] Background threat harvester scheduler and scraper are disabled by configuration")
 		s.pipeMu.Lock()
 		s.schedulerEnabled = false
 		s.nextPipeRunAt = nil
 		s.pipeMu.Unlock()
 		return
+	}
+
+	if s.scraperMgr != nil {
+		s.scraperMgr.Start(ctx)
 	}
 
 	intervalHours := cfg.Pipeline.CheckIntervalHours

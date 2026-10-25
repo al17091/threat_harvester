@@ -47,8 +47,8 @@ build_and_push_api() {
 
 build_and_push_worker() {
     local tag="worker-${VERSION}"
-    echo "==> Building Worker image ${BASE_REPO}:${tag} from worker/Dockerfile..."
-    docker build -t "${BASE_REPO}:${tag}" -f "${ROOT_DIR}/worker/Dockerfile" "${ROOT_DIR}"
+    echo "==> Building Go Worker image ${BASE_REPO}:${tag} from api/Dockerfile..."
+    docker build -t "${BASE_REPO}:${tag}" -f "${ROOT_DIR}/api/Dockerfile" "${ROOT_DIR}"
     echo "==> Pushing ${BASE_REPO}:${tag}..."
     docker push "${BASE_REPO}:${tag}"
 }

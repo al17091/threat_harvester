@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/storage"
 )
 
@@ -58,6 +61,22 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
 
+	lang := strings.ToLower(strings.TrimSpace(q.Get("lang")))
+	if lang == "" {
+		lang = strings.ToLower(strings.TrimSpace(chi.URLParam(r, "lang")))
+	}
+	if lang == "" {
+		cfg := config.GetSettings().GetConfig()
+		if cfg.Pipeline.NotifyLanguage != "" {
+			lang = cfg.Pipeline.NotifyLanguage
+		} else {
+			lang = "en"
+		}
+	}
+	if lang != "ja" && lang != "en" {
+		lang = "en"
+	}
+
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
 		limit = 50
@@ -66,10 +85,15 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 
+	japanOnly := q.Get("japan_only") == "true"
+	if lang == "ja" && q.Get("japan_only") == "" {
+		japanOnly = true
+	}
+
 	filter := storage.HistoryFilter{
 		Limit:     limit,
 		Offset:    0,
-		JapanOnly: q.Get("japan_only") == "true",
+		JapanOnly: japanOnly,
 		Severity:  q.Get("severity"),
 		Search:    q.Get("search"),
 	}
@@ -94,13 +118,18 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 	items := make([]rssItem, 0, len(incidents))
 	for _, inc := range incidents {
 		id, _ := inc["id"].(string)
-		title, _ := inc["title"].(string)
+		titleEn, _ := inc["title"].(string)
+		titleJa, _ := inc["title_ja"].(string)
 		victimOrg, _ := inc["victim_org"].(string)
+		victimOrgEn, _ := inc["victim_org_en"].(string)
+		victimOrgJa, _ := inc["victim_org_ja"].(string)
 		sev, _ := inc["severity"].(string)
 		jrel, _ := inc["japan_relevance"].(string)
 		attackType, _ := inc["attack_type"].(string)
 		primURL, _ := inc["primary_url"].(string)
+		summaryEn, _ := inc["summary"].(string)
 		summaryJa, _ := inc["summary_ja"].(string)
+		impactEn, _ := inc["impact_analysis"].(string)
 		impactJa, _ := inc["impact_analysis_ja"].(string)
 		lastSeen, _ := inc["last_seen_at"].(string)
 		firstSeen, _ := inc["first_seen_at"].(string)
@@ -127,55 +156,148 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 			categories = append(categories, attackType)
 		}
 
-		// Item title
-		itemTitle := fmt.Sprintf("[%s] [%s] %s: %s", sev, jrel, victimOrg, title)
-		if victimOrg == "" || victimOrg == "Unknown" {
-			itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, title)
+		// Language-specific selection
+		var itemTitle, displayVictim, displaySummary, displayImpact string
+		if lang == "ja" {
+			itemTitleText := titleJa
+			if itemTitleText == "" {
+				itemTitleText = titleEn
+			}
+			displayVictim = victimOrgJa
+			if displayVictim == "" {
+				displayVictim = victimOrg
+			}
+			if displayVictim == "" {
+				displayVictim = victimOrgEn
+			}
+			if displayVictim != "" && displayVictim != "Unknown" {
+				itemTitle = fmt.Sprintf("[%s] [%s] %s: %s", sev, jrel, displayVictim, itemTitleText)
+			} else {
+				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
+			}
+			displaySummary = summaryJa
+			if displaySummary == "" {
+				displaySummary = summaryEn
+			}
+			displayImpact = impactJa
+			if displayImpact == "" {
+				displayImpact = impactEn
+			}
+		} else {
+			itemTitleText := titleEn
+			if itemTitleText == "" {
+				itemTitleText = titleJa
+			}
+			displayVictim = victimOrgEn
+			if displayVictim == "" {
+				displayVictim = victimOrg
+			}
+			if displayVictim == "" {
+				displayVictim = victimOrgJa
+			}
+			if displayVictim != "" && displayVictim != "Unknown" {
+				itemTitle = fmt.Sprintf("[%s] [%s] %s: %s", sev, jrel, displayVictim, itemTitleText)
+			} else {
+				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
+			}
+			displaySummary = summaryEn
+			if displaySummary == "" {
+				displaySummary = summaryJa
+			}
+			displayImpact = impactEn
+			if displayImpact == "" {
+				displayImpact = impactJa
+			}
 		}
 
 		// Format HTML description
 		var descBuilder strings.Builder
-		descBuilder.WriteString(fmt.Sprintf("<p><strong>【被害組織】</strong> %s</p>\n", html.EscapeString(victimOrg)))
-		descBuilder.WriteString(fmt.Sprintf("<p><strong>【重要度】</strong> %s | <strong>【日本関連性】</strong> %s</p>\n", html.EscapeString(sev), html.EscapeString(jrel)))
-		if attackType != "" {
-			descBuilder.WriteString(fmt.Sprintf("<p><strong>【攻撃種別】</strong> %s</p>\n", html.EscapeString(attackType)))
-		}
-		if actors, ok := inc["threat_actors"].([]string); ok && len(actors) > 0 {
-			descBuilder.WriteString(fmt.Sprintf("<p><strong>【攻撃者】</strong> %s</p>\n", html.EscapeString(strings.Join(actors, ", "))))
-		}
-		if summaryJa != "" {
-			descBuilder.WriteString(fmt.Sprintf("<p><strong>【要約】</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(summaryJa), "\n", "<br/>")))
-		}
-		if impactJa != "" {
-			descBuilder.WriteString(fmt.Sprintf("<p><strong>【日本への影響】</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(impactJa), "\n", "<br/>")))
-		}
-		descBuilder.WriteString(fmt.Sprintf("<p><strong>【関連レポート】</strong> %d件 (初報: %s / 最新報: %s)</p>\n", reportCount, firstSeen, lastSeen))
-
-		// Append all source URLs
-		if details, ok := inc["sources_detail"].([]interface{}); ok && len(details) > 0 {
-			descBuilder.WriteString("<hr/>\n<p><strong>【情報ソース一覧】</strong></p>\n<ul>\n")
-			for _, d := range details {
-				if dMap, ok := d.(map[string]interface{}); ok {
-					sURL, _ := dMap["url"].(string)
-					sName, _ := dMap["source_name"].(string)
-					sType, _ := dMap["source_type"].(string)
-					sTitle, _ := dMap["title"].(string)
-					if sURL != "" {
-						descBuilder.WriteString(fmt.Sprintf("  <li>[%s] <a href=\"%s\" target=\"_blank\">%s: %s</a></li>\n",
-							html.EscapeString(sType), html.EscapeString(sURL), html.EscapeString(sName), html.EscapeString(sTitle)))
-					} else {
-						descBuilder.WriteString(fmt.Sprintf("  <li>[%s] %s: %s</li>\n",
-							html.EscapeString(sType), html.EscapeString(sName), html.EscapeString(sTitle)))
+		if lang == "ja" {
+			if displayVictim != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>【被害組織】</strong> %s</p>\n", html.EscapeString(displayVictim)))
+			}
+			descBuilder.WriteString(fmt.Sprintf("<p><strong>【重要度】</strong> %s | <strong>【日本関連性】</strong> %s</p>\n", html.EscapeString(sev), html.EscapeString(jrel)))
+			if attackType != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>【攻撃種別】</strong> %s</p>\n", html.EscapeString(attackType)))
+			}
+			if actors, ok := inc["threat_actors"].([]string); ok && len(actors) > 0 {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>【攻撃者】</strong> %s</p>\n", html.EscapeString(strings.Join(actors, ", "))))
+			}
+			if displaySummary != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>【要約】</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(displaySummary), "\n", "<br/>")))
+			}
+			if displayImpact != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>【日本への影響】</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(displayImpact), "\n", "<br/>")))
+			}
+			descBuilder.WriteString(fmt.Sprintf("<p><strong>【関連レポート】</strong> %d件 (初報: %s / 最新報: %s)</p>\n", reportCount, firstSeen, lastSeen))
+			if details, ok := inc["sources_detail"].([]interface{}); ok && len(details) > 0 {
+				descBuilder.WriteString("<hr/>\n<p><strong>【情報ソース一覧】</strong></p>\n<ul>\n")
+				for _, d := range details {
+					if dMap, ok := d.(map[string]interface{}); ok {
+						sURL, _ := dMap["url"].(string)
+						sName, _ := dMap["source_name"].(string)
+						sType, _ := dMap["source_type"].(string)
+						sTitle, _ := dMap["title"].(string)
+						if sURL != "" {
+							descBuilder.WriteString(fmt.Sprintf("  <li>[%s] <a href=\"%s\" target=\"_blank\">%s: %s</a></li>\n",
+								html.EscapeString(sType), html.EscapeString(sURL), html.EscapeString(sName), html.EscapeString(sTitle)))
+						} else {
+							descBuilder.WriteString(fmt.Sprintf("  <li>[%s] %s: %s</li>\n",
+								html.EscapeString(sType), html.EscapeString(sName), html.EscapeString(sTitle)))
+						}
 					}
 				}
+				descBuilder.WriteString("</ul>\n")
+			} else if sURLs, ok := inc["source_urls"].([]string); ok && len(sURLs) > 0 {
+				descBuilder.WriteString("<hr/>\n<p><strong>【参照URL一覧】</strong></p>\n<ul>\n")
+				for _, u := range sURLs {
+					descBuilder.WriteString(fmt.Sprintf("  <li><a href=\"%s\" target=\"_blank\">%s</a></li>\n", html.EscapeString(u), html.EscapeString(u)))
+				}
+				descBuilder.WriteString("</ul>\n")
 			}
-			descBuilder.WriteString("</ul>\n")
-		} else if sURLs, ok := inc["source_urls"].([]string); ok && len(sURLs) > 0 {
-			descBuilder.WriteString("<hr/>\n<p><strong>【参照URL一覧】</strong></p>\n<ul>\n")
-			for _, u := range sURLs {
-				descBuilder.WriteString(fmt.Sprintf("  <li><a href=\"%s\" target=\"_blank\">%s</a></li>\n", html.EscapeString(u), html.EscapeString(u)))
+		} else {
+			if displayVictim != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>[Victim Organization]</strong> %s</p>\n", html.EscapeString(displayVictim)))
 			}
-			descBuilder.WriteString("</ul>\n")
+			descBuilder.WriteString(fmt.Sprintf("<p><strong>[Severity]</strong> %s | <strong>[Japan Relevance]</strong> %s</p>\n", html.EscapeString(sev), html.EscapeString(jrel)))
+			if attackType != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>[Attack Type]</strong> %s</p>\n", html.EscapeString(attackType)))
+			}
+			if actors, ok := inc["threat_actors"].([]string); ok && len(actors) > 0 {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>[Threat Actors]</strong> %s</p>\n", html.EscapeString(strings.Join(actors, ", "))))
+			}
+			if displaySummary != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>[Summary]</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(displaySummary), "\n", "<br/>")))
+			}
+			if displayImpact != "" {
+				descBuilder.WriteString(fmt.Sprintf("<p><strong>[Impact Analysis]</strong><br/>%s</p>\n", strings.ReplaceAll(html.EscapeString(displayImpact), "\n", "<br/>")))
+			}
+			descBuilder.WriteString(fmt.Sprintf("<p><strong>[Correlated Reports]</strong> %d report(s) (First seen: %s / Last seen: %s)</p>\n", reportCount, firstSeen, lastSeen))
+			if details, ok := inc["sources_detail"].([]interface{}); ok && len(details) > 0 {
+				descBuilder.WriteString("<hr/>\n<p><strong>[Intelligence Sources]</strong></p>\n<ul>\n")
+				for _, d := range details {
+					if dMap, ok := d.(map[string]interface{}); ok {
+						sURL, _ := dMap["url"].(string)
+						sName, _ := dMap["source_name"].(string)
+						sType, _ := dMap["source_type"].(string)
+						sTitle, _ := dMap["title"].(string)
+						if sURL != "" {
+							descBuilder.WriteString(fmt.Sprintf("  <li>[%s] <a href=\"%s\" target=\"_blank\">%s: %s</a></li>\n",
+								html.EscapeString(sType), html.EscapeString(sURL), html.EscapeString(sName), html.EscapeString(sTitle)))
+						} else {
+							descBuilder.WriteString(fmt.Sprintf("  <li>[%s] %s: %s</li>\n",
+								html.EscapeString(sType), html.EscapeString(sName), html.EscapeString(sTitle)))
+						}
+					}
+				}
+				descBuilder.WriteString("</ul>\n")
+			} else if sURLs, ok := inc["source_urls"].([]string); ok && len(sURLs) > 0 {
+				descBuilder.WriteString("<hr/>\n<p><strong>[Source URLs]</strong></p>\n<ul>\n")
+				for _, u := range sURLs {
+					descBuilder.WriteString(fmt.Sprintf("  <li><a href=\"%s\" target=\"_blank\">%s</a></li>\n", html.EscapeString(u), html.EscapeString(u)))
+				}
+				descBuilder.WriteString("</ul>\n")
+			}
 		}
 
 		items = append(items, rssItem{
@@ -188,14 +310,21 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	channelTitle := "Threat Information Harvester - Threat Intelligence Feed (English)"
+	channelDesc := "Automated Cyber Threat Intelligence feed focusing on global cyber attacks, ransomware incidents, and vulnerabilities (STIX 2.1 compliant)."
+	if lang == "ja" {
+		channelTitle = "Threat Information Harvester - 脅威インテリジェンスフィード (日本語)"
+		channelDesc = "日本国内組織を標的とするサイバー攻撃・ランサムウェア被害・重要脆弱性の自動収集脅威インテリジェンスフィード (STIX 2.1準拠)"
+	}
+
 	feed := rssFeed{
 		Version: "2.0",
 		AtomNS:  "http://www.w3.org/2005/Atom",
 		Channel: rssChannel{
-			Title:         "Threat Information Harvester - Incident Intelligence Feed",
+			Title:         channelTitle,
 			Link:          baseURL,
-			Description:   "Automated Cyber Threat Intelligence feed focusing on Japan-targeted cyber attacks, ransomware incidents, and vulnerabilities.",
-			Language:      "ja",
+			Description:   channelDesc,
+			Language:      lang,
 			LastBuildDate: time.Now().UTC().Format(time.RFC1123Z),
 			Generator:     "Threat Information Harvester 2.0 (STIX 2.1 Compliant)",
 			AtomLink: atomLink{
