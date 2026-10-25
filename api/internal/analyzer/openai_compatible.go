@@ -302,7 +302,7 @@ Format: JSON array of %d strings.`, currentDate, count, targetDesc, directive, c
 		{Role: "user", Content: userPrompt},
 	}
 
-	qCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	qCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
 	rawJSON, err := a.sendChatCompletion(qCtx, messages)
