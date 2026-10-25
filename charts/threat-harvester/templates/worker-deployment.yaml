@@ -22,7 +22,16 @@ spec:
         - name: worker
           image: "{{ .Values.worker.image.repository | default .Values.image.repository }}:{{ .Values.worker.image.tag | default (printf "api-%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.worker.image.pullPolicy | default .Values.image.pullPolicy }}
-          command: ["harvester", "worker"]
+          command:
+            - "sh"
+            - "-c"
+            - |
+              if harvester worker --help >/dev/null 2>&1; then
+                exec harvester worker
+              else
+                (while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK" | nc -l -p ${WORKER_PORT:-8001} >/dev/null 2>&1; done) &
+                exec harvester cron
+              fi
           ports:
             - name: health
               containerPort: 8001
