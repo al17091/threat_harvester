@@ -371,6 +371,15 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const [mounted, setMounted] = useState<boolean>(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const activePathname = mounted && typeof window !== "undefined" ? window.location.pathname : pathname;
+  const enHref = isAdmin ? "#" : withBasePath("/en", activePathname);
+  const jaHref = isAdmin ? "#" : withBasePath("/ja", activePathname);
+
   // Admin Authentication State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
@@ -1345,7 +1354,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
             {/* Language Switcher */}
             <div className="flex items-center bg-slate-800/90 rounded-lg p-0.5 border border-slate-700 text-xs shadow-sm">
               <a
-                href={isAdmin ? "#" : withBasePath("/en", pathname)}
+                href={enHref}
                 onClick={(e) => {
                   if (isAdmin) {
                     e.preventDefault();
@@ -1354,7 +1363,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
                       e.preventDefault();
                       setCurrentLang("en");
-                      const target = withBasePath("/en", pathname);
+                      const target = withBasePath("/en", typeof window !== "undefined" ? window.location.pathname : pathname);
                       if (typeof window !== "undefined" && window.location.pathname !== target) {
                         window.history.pushState({}, "", target);
                       }
@@ -1372,7 +1381,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               </a>
               <span className="text-slate-600 px-0.5">|</span>
               <a
-                href={isAdmin ? "#" : withBasePath("/ja", pathname)}
+                href={jaHref}
                 onClick={(e) => {
                   if (isAdmin) {
                     e.preventDefault();
@@ -1381,7 +1390,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
                       e.preventDefault();
                       setCurrentLang("ja");
-                      const target = withBasePath("/ja", pathname);
+                      const target = withBasePath("/ja", typeof window !== "undefined" ? window.location.pathname : pathname);
                       if (typeof window !== "undefined" && window.location.pathname !== target) {
                         window.history.pushState({}, "", target);
                       }

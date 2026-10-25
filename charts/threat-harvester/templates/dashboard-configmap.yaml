@@ -1,0 +1,12 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-dashboard-script
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+data:
+  server.js: |
+{{ .Files.Get "files/server.js" | indent 4 }}
+{{- end }}

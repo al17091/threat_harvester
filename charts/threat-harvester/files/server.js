@@ -1,0 +1,206 @@
+const http = require("http");
+const { parse } = require("url");
+const next = require("next");
+
+const dev = process.env.NODE_ENV !== "production";
+const hostname = "0.0.0.0";
+const port = parseInt(process.env.PORT || "3000", 10);
+
+const app = next({ dev, hostname, port });
+const handle = app.getRequestHandler();
+
+const ROOT_SEGMENTS = new Set([
+  "",
+  "en",
+  "ja",
+  "admin",
+  "api",
+  "rss",
+  "feed.xml",
+  "_next",
+  "icon.svg",
+  "favicon.ico",
+  "apple-touch-icon.png",
+]);
+
+function normalizePrefix(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed || trimmed === "/") return "";
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+}
+
+const configuredBasePath = normalizePrefix(
+  process.env.BASE_PATH || process.env.NEXT_PUBLIC_BASE_PATH || ""
+);
+
+function detectSubpathPrefix(req, pathname) {
+  const headerPrefix = normalizePrefix(req.headers["x-forwarded-prefix"]);
+  if (headerPrefix) {
+    return headerPrefix;
+  }
+
+  if (
+    configuredBasePath &&
+    (pathname === configuredBasePath || pathname.startsWith(`${configuredBasePath}/`))
+  ) {
+    return configuredBasePath;
+  }
+
+  const parts = (pathname || "").split("/").filter(Boolean);
+  const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
+  if (rootIdx > 0) {
+    return `/${parts.slice(0, rootIdx).join("/")}`;
+  } else if (rootIdx === -1 && parts.length > 0) {
+    return `/${parts.join("/")}`;
+  }
+
+  return "";
+}
+
+function rewriteHtmlAssets(bodyStr, prefix) {
+  if (!prefix) return bodyStr;
+  let rewritten = bodyStr
+    .replace(/(["'])\/_next\//g, `$1${prefix}/_next/`)
+    .replace(/\\\/_next\\\//g, `\\${prefix}\\/_next\\/`)
+    .replace(/(href=["'])\/(icon\.svg|favicon\.ico[^\s"'>]*|apple-touch-icon\.png)(["'])/g, `$1${prefix}/$2$3`)
+    .replace(/(href=["'])\/(en|ja|admin|api\/[^\s"'>]+|rss|feed\.xml)(["'])/g, `$1${prefix}/$2$3`)
+    .replace(/(\\"href\\":\s*\\")\/(en|ja|admin|api\/[^"\\\s]+|rss|feed\.xml)(\\")/g, `$1${prefix}/$2$3`)
+    .replace(/("href":\s*")\/(en|ja|admin|api\/[^"\s]+|rss|feed\.xml)(")/g, `$1${prefix}/$2$3`);
+
+  // Ensure client runtime knows subpath and Turbopack chunk loader prepends the prefix
+  if (rewritten.includes("<head>")) {
+    rewritten = rewritten.replace(
+      "<head>",
+      `<head><script>window.__RUNTIME_BASE_PATH__="${prefix}";window.TURBOPACK_CHUNK_BASE_PATH="${prefix}/_next/";</script>`
+    );
+  }
+  return rewritten;
+}
+
+app.prepare().then(() => {
+  http
+    .createServer(async (req, res) => {
+      try {
+        const parsedUrl = parse(req.url || "/", true);
+        const pathname = parsedUrl.pathname || "/";
+        const search = parsedUrl.search || "";
+
+        const prefix = detectSubpathPrefix(req, pathname);
+        if (prefix) {
+          let strippedPath = pathname;
+          if (pathname === prefix) {
+            strippedPath = "/";
+          } else if (pathname.startsWith(`${prefix}/`)) {
+            strippedPath = pathname.slice(prefix.length) || "/";
+          }
+          req.url = `${strippedPath}${search}`;
+          const strippedParsedUrl = parse(req.url, true);
+
+          const isStaticOrApi =
+            strippedPath.startsWith("/_next/") ||
+            strippedPath.startsWith("/api/") ||
+            strippedPath === "/rss" ||
+            strippedPath === "/feed.xml" ||
+            strippedPath === "/icon.svg" ||
+            strippedPath === "/favicon.ico" ||
+            strippedPath === "/apple-touch-icon.png";
+
+          if (!isStaticOrApi) {
+            // Ensure uncompressed HTML/RSC output so asset paths can be rewritten cleanly
+            delete req.headers["accept-encoding"];
+
+            const chunks = [];
+            const origWrite = res.write.bind(res);
+            const origEnd = res.end.bind(res);
+            const origWriteHead = res.writeHead.bind(res);
+
+            let writeHeadArgs = null;
+
+            res.writeHead = function (...args) {
+              writeHeadArgs = args;
+              return res;
+            };
+
+            res.write = function (chunk, encoding, cb) {
+              if (chunk) {
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+              }
+              if (typeof encoding === "function") encoding();
+              if (typeof cb === "function") cb();
+              return true;
+            };
+
+            res.end = function (chunk, encoding, cb) {
+              if (chunk && typeof chunk !== "function") {
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+              }
+              const fullBuffer = Buffer.concat(chunks);
+              const contentType = String(res.getHeader("content-type") || "");
+
+              if (
+                contentType.includes("text/html") ||
+                contentType.includes("text/x-component")
+              ) {
+                const rewritten = rewriteHtmlAssets(fullBuffer.toString("utf8"), prefix);
+                const outBuf = Buffer.from(rewritten, "utf8");
+
+                res.removeHeader("content-length");
+                res.setHeader("content-length", outBuf.length);
+
+                if (writeHeadArgs) {
+                  let [status, reasonOrHeaders, maybeHeaders] = writeHeadArgs;
+                  let headers = typeof reasonOrHeaders === "object" ? reasonOrHeaders : maybeHeaders;
+                  if (headers) {
+                    if (Array.isArray(headers)) {
+                      headers = headers.filter(([k]) => k.toLowerCase() !== "content-length");
+                      headers.push(["content-length", outBuf.length]);
+                    } else {
+                      for (const k of Object.keys(headers)) {
+                        if (k.toLowerCase() === "content-length") delete headers[k];
+                      }
+                      headers["content-length"] = outBuf.length;
+                    }
+                    if (typeof reasonOrHeaders === "object") {
+                      writeHeadArgs[1] = headers;
+                    } else if (maybeHeaders) {
+                      writeHeadArgs[2] = headers;
+                    }
+                  }
+                  origWriteHead.apply(res, writeHeadArgs);
+                }
+
+                res.write = origWrite;
+                res.end = origEnd;
+                return origEnd(outBuf, cb);
+              }
+
+              if (writeHeadArgs) {
+                origWriteHead.apply(res, writeHeadArgs);
+              }
+              res.write = origWrite;
+              res.end = origEnd;
+              return origEnd(fullBuffer, cb);
+            };
+          }
+
+          await handle(req, res, strippedParsedUrl);
+          return;
+        }
+
+        await handle(req, res, parsedUrl);
+      } catch (err) {
+        console.error("Error handling request:", req.url, err);
+        res.statusCode = 500;
+        res.end("Internal Server Error");
+      }
+    })
+    .listen(port, hostname, () => {
+      console.log(
+        `> Threat Harvester Web Ready on http://${hostname}:${port}${
+          configuredBasePath ? ` ( also serving subpath ${configuredBasePath} )` : " ( dynamic subpath routing enabled, e.g. /thhv )"
+        }`
+      );
+    });
+});
+

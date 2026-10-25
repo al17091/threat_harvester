@@ -74,7 +74,7 @@ browserless:
 dashboard:
   enabled: true
   replicas: 1
-  basePath: "/thhv"
+  basePath: "/threat"
   image:
     repository: ghcr.io/al17091/threat_harvester
     tag: "web-0.1.1"
