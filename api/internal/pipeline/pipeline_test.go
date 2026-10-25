@@ -238,3 +238,85 @@ func TestPipeline(t *testing.T) {
 		t.Errorf("Expected 0 new items on repeat run, got %d", summary2.NewItems)
 	}
 }
+
+func TestPipelineCircuitBreakerAndLanguageScope(t *testing.T) {
+	store, err := storage.NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("Failed to init in-memory SQLite store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// 1. Test Japanese Scope (NotifyLanguage = "ja")
+	cfgMgr := config.GetSettings()
+	cfg := cfgMgr.GetConfig()
+	cfg.Pipeline.NotifyLanguage = "ja"
+	cfg.Pipeline.CircuitBreakerMaxAlerts = 1 // Limit to 1 alert
+	cfgMgr.SetConfig(cfg)
+
+	p := NewPipeline(store)
+	now := time.Now()
+
+	p.harvesterList = []harvesters.Harvester{
+		&mockHarvester{
+			name:       "ScopeTestHarvester",
+			sourceType: models.SourceTypeVendorRSS,
+			items: []models.ThreatItem{
+				{
+					ID:          "threat-none-jp",
+					Title:       "Global Bank Breach in Europe",
+					URL:         "https://example.com/global-breach",
+					PublishedAt: &now,
+				},
+				{
+					ID:          "threat-jp-1",
+					Title:       "Japanese Telecom Attack",
+					URL:         "https://example.com/jp-telecom",
+					PublishedAt: &now,
+				},
+				{
+					ID:          "threat-jp-2",
+					Title:       "Japanese Manufacturer Ransomware",
+					URL:         "https://example.com/jp-mfg",
+					PublishedAt: &now,
+				},
+			},
+		},
+	}
+
+	p.analyzer = &mockAnalyzer{
+		enriched: []*models.EnrichedThreat{
+			{
+				ItemID:         "threat-none-jp",
+				Title:          "Global Bank Breach in Europe",
+				Severity:       models.SeverityCritical,
+				JapanRelevance: models.JapanRelevanceNone, // None -> Should NOT notify when NotifyLanguage == "ja"
+			},
+			{
+				ItemID:         "threat-jp-1",
+				TitleJa:        "日本通信大手への不正アクセス",
+				Severity:       models.SeverityCritical,
+				JapanRelevance: models.JapanRelevanceDirect, // Direct -> Should notify (alert 1)
+			},
+			{
+				ItemID:         "threat-jp-2",
+				TitleJa:        "国内大手メーカーへのランサムウェア攻撃",
+				Severity:       models.SeverityCritical,
+				JapanRelevance: models.JapanRelevanceDirect, // Direct -> Exceeds CircuitBreakerMaxAlerts(1), capped!
+			},
+		},
+	}
+
+	summary, err := p.RunAll(ctx, 24, false)
+	if err != nil {
+		t.Fatalf("RunAll failed: %v", err)
+	}
+
+	// threat-none-jp was ignored due to ja scope.
+	// threat-jp-1 was notified (count = 1).
+	// threat-jp-2 hit circuit breaker (count = 1, individual alert suppressed).
+	if summary.Notified != 1 {
+		t.Errorf("Expected exactly 1 notified alert due to CircuitBreaker (max=1), got %d", summary.Notified)
+	}
+}

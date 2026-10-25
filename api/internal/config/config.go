@@ -242,15 +242,20 @@ type ScraperConfig struct {
 	ClearnetTimeoutSeconds int  `yaml:"clearnet_timeout_seconds" json:"clearnet_timeout_seconds"`
 	TorTimeoutSeconds      int  `yaml:"tor_timeout_seconds" json:"tor_timeout_seconds"`
 	WorkerIntervalSeconds  int  `yaml:"worker_interval_seconds" json:"worker_interval_seconds"`
-	BatchSize              int  `yaml:"batch_size" json:"batch_size"`
-	MaxAttempts            int  `yaml:"max_attempts" json:"max_attempts"`
-	AutoReAnalyze          bool `yaml:"auto_re_analyze" json:"auto_re_analyze"`
+	BatchSize              int    `yaml:"batch_size" json:"batch_size"`
+	MaxAttempts            int    `yaml:"max_attempts" json:"max_attempts"`
+	AutoReAnalyze          bool   `yaml:"auto_re_analyze" json:"auto_re_analyze"`
+	BrowserlessURL         string `yaml:"browserless_url" json:"browserless_url"`
+	BrowserlessTimeoutSec  int    `yaml:"browserless_timeout_sec" json:"browserless_timeout_sec"`
 }
 
 type PipelineConfig struct {
-	CheckIntervalHours int  `yaml:"check_interval_hours" json:"check_interval_hours"`
-	NotifyDirectOnly   bool `yaml:"notify_direct_only" json:"notify_direct_only"`
-	SchedulerEnabled   bool `yaml:"scheduler_enabled" json:"scheduler_enabled"`
+	CheckIntervalHours      int    `yaml:"check_interval_hours" json:"check_interval_hours"`
+	NotifyDirectOnly        bool   `yaml:"notify_direct_only" json:"notify_direct_only"`
+	SchedulerEnabled        bool   `yaml:"scheduler_enabled" json:"scheduler_enabled"`
+	NotifyLanguage          string `yaml:"notify_language" json:"notify_language"`
+	CircuitBreakerMaxAlerts int    `yaml:"circuit_breaker_max_alerts" json:"circuit_breaker_max_alerts"`
+	NotifyDryRun            bool   `yaml:"notify_dry_run" json:"notify_dry_run"`
 }
 
 type AppConfig struct {
@@ -310,6 +315,8 @@ func DefaultConfig() AppConfig {
 			TorConcurrency:         2,
 			ClearnetTimeoutSeconds: 15,
 			TorTimeoutSeconds:      45,
+			BrowserlessURL:         "",
+			BrowserlessTimeoutSec:  25,
 			WorkerIntervalSeconds:  10,
 			BatchSize:              20,
 			MaxAttempts:            2,
@@ -320,9 +327,12 @@ func DefaultConfig() AppConfig {
 			RequestTimeout: 25,
 		},
 		Pipeline: PipelineConfig{
-			CheckIntervalHours: 1,
-			NotifyDirectOnly:   false,
-			SchedulerEnabled:   true,
+			CheckIntervalHours:      1,
+			NotifyDirectOnly:        false,
+			SchedulerEnabled:        true,
+			NotifyLanguage:          "en",
+			CircuitBreakerMaxAlerts: 5,
+			NotifyDryRun:            false,
 		},
 		Sources: SourcesConfig{
 			VendorRSS: []FeedSourceConfig{
@@ -502,6 +512,20 @@ func (s *SettingsManager) applyEnvOverrides() {
 	}
 	if v := os.Getenv("NOTIFY_DIRECT_ONLY"); v != "" {
 		s.Config.Pipeline.NotifyDirectOnly = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("NOTIFY_LANGUAGE"); v != "" {
+		s.Config.Pipeline.NotifyLanguage = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("CIRCUIT_BREAKER_MAX_ALERTS"); v != "" {
+		if m, err := strconv.Atoi(v); err == nil && m > 0 {
+			s.Config.Pipeline.CircuitBreakerMaxAlerts = m
+		}
+	}
+	if v := os.Getenv("NOTIFY_DRY_RUN"); v != "" {
+		s.Config.Pipeline.NotifyDryRun = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("BROWSERLESS_URL"); v != "" {
+		s.Config.Scraper.BrowserlessURL = strings.TrimRight(v, "/")
 	}
 	if v := os.Getenv("CACHE_DB_PATH"); v != "" {
 		s.Config.Database.SQLitePath = v

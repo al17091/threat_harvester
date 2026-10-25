@@ -36,19 +36,36 @@ api:
       cpu: 100m
       memory: 256Mi
 
-# Python Threat Harvester & Batch Worker Deployment
+# Go CTI Threat Harvester & Batch Worker Daemon
 worker:
   enabled: true
   replicas: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
-    tag: "worker-0.1.1"
+    tag: "api-0.1.1"
     pullPolicy: IfNotPresent
-  mode: "batch"  # "batch" or "api"
   resources:
     limits:
       cpu: 1000m
-      memory: 1024Mi
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Headless Chrome Service (Browserless Chromium) for dynamic JavaScript / SPA article scraping
+browserless:
+  enabled: true
+  replicas: 1
+  port: 3000
+  image:
+    repository: ghcr.io/browserless/chromium
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  maxConcurrentSessions: 5
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1536Mi
     requests:
       cpu: 100m
       memory: 256Mi
@@ -126,9 +143,14 @@ config:
   litellmModel: "qwen2.5-3b-instruct"
   geminiModel: "gemini-3.5-flash-lite"
   searxngUrl: "https://searxng.lab.internal/search"
+  searxngResearchUrl: "https://searxng-research.lab.internal/search"
   checkIntervalHours: 1
-  enableScheduler: true
+  enableScheduler: false
   notifyDirectOnly: false
+  notifyLanguage: "en"
+  circuitBreakerMaxAlerts: 5
+  notifyDryRun: false
+  browserlessUrl: ""
   requestTimeout: 25
 
 # Standalone scheduled harvester CronJob

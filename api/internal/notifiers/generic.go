@@ -28,6 +28,10 @@ func (n *GenericNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 	if !cfg.Sinks.GenericWebhook.Enabled || webhookURL == "" {
 		return true
 	}
+	if cfg.Pipeline.NotifyDryRun {
+		log.Printf("[GenericWebhook Dry-Run (Config)] Alert would be sent: [%s] %s", threat.Severity, threat.TitleJa)
+		return true
+	}
 
 	body, err := json.Marshal(threat)
 	if err != nil {
@@ -75,4 +79,10 @@ func (m *NotificationManager) Dispatch(ctx context.Context, threat *models.Enric
 	sOk := m.slack.Notify(ctx, threat)
 	gOk := m.generic.Notify(ctx, threat)
 	return dOk || sOk || gOk
+}
+
+func (m *NotificationManager) DispatchSummary(ctx context.Context, totalAlerts int, maxAlerts int) bool {
+	dOk := m.discord.NotifySummary(ctx, totalAlerts, maxAlerts)
+	sOk := m.slack.NotifySummary(ctx, totalAlerts, maxAlerts)
+	return dOk || sOk
 }

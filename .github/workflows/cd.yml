@@ -82,25 +82,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Go API image (api-${{ steps.meta.outputs.version }})
+      - name: Build and push Go API & Worker image (api-${{ steps.meta.outputs.version }} / worker-${{ steps.meta.outputs.version }})
         uses: docker/build-push-action@v7
         with:
           context: .
           file: api/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.api_tag }}
+          tags: |
+            ${{ steps.meta.outputs.api_tag }}
+            ${{ steps.meta.outputs.worker_tag }}
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
-
-      - name: Build and push Python Worker image (worker-${{ steps.meta.outputs.version }})
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: worker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.worker_tag }}
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,mode=max,scope=worker
 
       - name: Build and push Web image (web-${{ steps.meta.outputs.version }})
         uses: docker/build-push-action@v7

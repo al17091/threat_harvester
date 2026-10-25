@@ -1037,15 +1037,19 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     if (type === "vendor_rss") data = { name: addModal.form.name, url: addModal.form.url, enabled: true };
     if (type === "telegram") data = { channel: addModal.form.channel, enabled: true };
     if (type === "darkweb_onion") {
+      const isSearxng = addModal.form.type === "searxng";
       const isSearch = addModal.form.type === "search";
-      if (!isSearch && !addModal.form.url.includes(".onion")) {
+      if (!isSearch && !isSearxng && !addModal.form.url.includes(".onion")) {
         showToast("Dark Web sources must use a .onion address", "error");
         return;
       }
       data = {
         name: addModal.form.name,
-        url: addModal.form.url || (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : ""),
-        type: addModal.form.type || (addModal.form.mode === "directive" || addModal.form.query ? "search" : "onion"),
+        url: addModal.form.url || (isSearxng ? "https://searxng-research.lab.internal/search" : (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : "")),
+        type: addModal.form.type || (addModal.form.mode === "directive" || addModal.form.query ? "searxng" : "onion"),
+        engines: addModal.form.engines || (isSearxng ? "ahmia,torch" : ""),
+        categories: addModal.form.categories || (isSearxng ? "onions" : ""),
+        timeout_seconds: addModal.form.timeout_seconds ? Number(addModal.form.timeout_seconds) : 300,
         directive: addModal.form.mode === "directive" ? addModal.form.directive : "",
         query: addModal.form.mode === "query" ? addModal.form.query : addModal.form.query,
         enabled: true,
@@ -1106,15 +1110,19 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     } else if (type === "telegram") {
       data = { channel: editModal.form.channel };
     } else if (type === "darkweb_onion") {
+      const isSearxng = editModal.form.type === "searxng";
       const isSearch = editModal.form.type === "search";
-      if (!isSearch && !editModal.form.url.includes(".onion")) {
+      if (!isSearch && !isSearxng && !editModal.form.url.includes(".onion")) {
         showToast("Dark Web sources must use a .onion address", "error");
         return;
       }
       data = {
         name: editModal.form.name,
-        url: editModal.form.url || (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : ""),
-        type: editModal.form.type || (editModal.form.mode === "directive" || editModal.form.query ? "search" : "onion"),
+        url: editModal.form.url || (isSearxng ? "https://searxng-research.lab.internal/search" : (isSearch ? "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion" : "")),
+        type: editModal.form.type || (editModal.form.mode === "directive" || editModal.form.query ? "searxng" : "onion"),
+        engines: editModal.form.engines || (isSearxng ? "ahmia,torch" : ""),
+        categories: editModal.form.categories || (isSearxng ? "onions" : ""),
+        timeout_seconds: editModal.form.timeout_seconds ? Number(editModal.form.timeout_seconds) : 300,
         directive: editModal.form.mode === "directive" ? editModal.form.directive : "",
         query: editModal.form.mode === "query" ? editModal.form.query : editModal.form.query,
       };
@@ -1393,14 +1401,14 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
             {/* RSS Feed is available to both Public and Admin */}
             <a
-              href={withBasePath("/api/feed.xml", pathname)}
+              href={withBasePath(`/api/feed.xml?lang=${currentLang}`, pathname)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
-              title="Subscribe to RSS 2.0 Feed (/api/feed.xml)"
+              title={currentLang === "ja" ? "RSS 2.0フィードを購読 (/api/feed.xml?lang=ja)" : "Subscribe to RSS 2.0 Feed (/api/feed.xml?lang=en)"}
             >
               <Rss className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
-              <span>RSS Feed</span>
+              <span>{currentLang === "ja" ? "RSSフィード (日本語)" : "RSS Feed (EN)"}</span>
             </a>
 
 
@@ -2632,7 +2640,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       setAddModal({
                         visible: true,
                         type: "darkweb_onion",
-                        form: { name: "", url: "", channel: "", directive: "", query: "", type: "search", compliance_tier: "darkweb_access", mode: "directive" },
+                        form: { name: "", url: "https://searxng-research.lab.internal/search", channel: "", directive: "", query: "", type: "searxng", engines: "ahmia,torch", categories: "onions", compliance_tier: "darkweb_access", mode: "directive" },
                       })
                     }
                     className="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition"
@@ -4078,7 +4086,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="search">Tor Search Engine (Ahmia / SearXNG)</option>
+                      <option value="searxng">SearXNG Cross-Search (Ahmia & Torch via Deverticulum)</option>
+                      <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>
                       <option value="rss">rss (Tor RSS Feed)</option>
@@ -4086,7 +4095,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     </select>
                   </div>
 
-                  {addModal.form.type === "search" ? (
+                  {addModal.form.type === "search" || addModal.form.type === "searxng" ? (
                     <div className="space-y-3">
                       {/* Mode Selector */}
                       <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
@@ -4200,13 +4209,19 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
                       <div>
                         <label className="block text-xs font-semibold text-slate-400 mb-1">
-                          Tor Search Engine Onion URL (Default: official Ahmia onion)
+                          {addModal.form.type === "searxng"
+                            ? "SearXNG Research URL (Default: https://searxng-research.lab.internal/search)"
+                            : "Tor Search Engine Onion URL (Default: official Ahmia onion)"}
                         </label>
                         <input
                           type="text"
                           value={addModal.form.url}
                           onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, url: e.target.value } })}
-                          placeholder="http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          placeholder={
+                            addModal.form.type === "searxng"
+                              ? "https://searxng-research.lab.internal/search"
+                              : "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          }
                           className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono text-xs"
                         />
                       </div>
@@ -4600,7 +4615,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="search">Tor Search Engine (Ahmia / SearXNG)</option>
+                      <option value="searxng">SearXNG Cross-Search (Ahmia & Torch via Deverticulum)</option>
+                      <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>
                       <option value="rss">rss (Tor RSS Feed)</option>
@@ -4608,7 +4624,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     </select>
                   </div>
 
-                  {editModal.form.type === "search" ? (
+                  {editModal.form.type === "search" || editModal.form.type === "searxng" ? (
                     <div className="space-y-3">
                       {/* Mode Selector */}
                       <div className="flex rounded-lg bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
@@ -4722,13 +4738,19 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
                       <div>
                         <label className="block text-xs font-semibold text-slate-400 mb-1">
-                          Tor Search Engine Onion URL (Default: official Ahmia onion)
+                          {editModal.form.type === "searxng"
+                            ? "SearXNG Research URL (Default: https://searxng-research.lab.internal/search)"
+                            : "Tor Search Engine Onion URL (Default: official Ahmia onion)"}
                         </label>
                         <input
                           type="text"
                           value={editModal.form.url}
                           onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, url: e.target.value } })}
-                          placeholder="http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          placeholder={
+                            editModal.form.type === "searxng"
+                              ? "https://searxng-research.lab.internal/search"
+                              : "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
+                          }
                           className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 font-mono text-xs"
                         />
                       </div>

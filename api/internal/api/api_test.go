@@ -203,6 +203,21 @@ func TestAPIRoutes(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 on /rss, got %d", w.Code)
 	}
+
+	// 9b. GET /api/rss?lang=ja and /api/rss?lang=en
+	reqJa := httptest.NewRequest(http.MethodGet, "/api/rss?lang=ja", nil)
+	wJa := httptest.NewRecorder()
+	srv.ServeHTTP(wJa, reqJa)
+	if wJa.Code != http.StatusOK || !strings.Contains(wJa.Body.String(), "<language>ja</language>") {
+		t.Fatalf("expected Japanese RSS feed with <language>ja</language>, got code %d body %s", wJa.Code, wJa.Body.String())
+	}
+
+	reqEn := httptest.NewRequest(http.MethodGet, "/api/rss?lang=en", nil)
+	wEn := httptest.NewRecorder()
+	srv.ServeHTTP(wEn, reqEn)
+	if wEn.Code != http.StatusOK || !strings.Contains(wEn.Body.String(), "<language>en</language>") {
+		t.Fatalf("expected English RSS feed with <language>en</language>, got code %d body %s", wEn.Code, wEn.Body.String())
+	}
 }
 
 func TestAPIIncidentEndpoints(t *testing.T) {
