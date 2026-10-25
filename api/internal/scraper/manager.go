@@ -163,7 +163,10 @@ func (m *ScraperManager) processClearnetQueue(ctx context.Context) {
 			}
 
 			// Save scraped raw content
-			_ = m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "", content)
+			if err := m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "", content); err != nil {
+				log.Printf("[ScraperManager] Failed to update completed fetch status for %s: %v", item.ID, err)
+				return
+			}
 			log.Printf("[ScraperManager] Successfully scraped Clearnet article for %s (%d runes)", item.Title, len([]rune(content)))
 
 			m.postProcessEnrichment(ctx, item, content)
@@ -208,7 +211,10 @@ func (m *ScraperManager) processTorQueue(ctx context.Context) {
 			}
 
 			// Save scraped raw content
-			_ = m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "", content)
+			if err := m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "", content); err != nil {
+				log.Printf("[ScraperManager] Failed to update completed Tor fetch status for %s: %v", item.ID, err)
+				return
+			}
 			log.Printf("[ScraperManager] Successfully scraped Tor .onion article for %s (%d runes)", item.Title, len([]rune(content)))
 
 			m.postProcessEnrichment(ctx, item, content)

@@ -195,8 +195,17 @@ type EscalationConfig struct {
 	TriggerJapanDirect   bool     `yaml:"trigger_japan_direct" json:"trigger_japan_direct"`
 }
 
+type HybridConfig struct {
+	QueryGenerator   string   `yaml:"query_generator" json:"query_generator"`     // "qwen" or "gemini"
+	Extractor        string   `yaml:"extractor" json:"extractor"`                 // "qwen" or "gemini"
+	Refiner          string   `yaml:"refiner" json:"refiner"`                     // "gemini", "qwen", or "none"
+	Translator       string   `yaml:"translator" json:"translator"`               // "gemini" or "qwen"
+	RefineSeverities []string `yaml:"refine_severities" json:"refine_severities"` // default ["CRITICAL", "HIGH"]
+	RefineJapanOnly  bool     `yaml:"refine_japan_only" json:"refine_japan_only"` // if true, only refine items with Japan relevance
+}
+
 type AiConfig struct {
-	PrimaryProvider    string           `yaml:"primary_provider" json:"primary_provider"` // "openai_compatible" or "gemini"
+	PrimaryProvider    string           `yaml:"primary_provider" json:"primary_provider"` // "hybrid", "openai_compatible", or "gemini"
 	Endpoint           string           `yaml:"endpoint" json:"endpoint"`
 	Model              string           `yaml:"model" json:"model"`
 	APIKey             string           `yaml:"api_key" json:"api_key"`
@@ -204,6 +213,7 @@ type AiConfig struct {
 	InsecureSkipVerify bool             `yaml:"insecure_skip_verify" json:"insecure_skip_verify"`
 	TimeoutSeconds     int              `yaml:"timeout_seconds" json:"timeout_seconds"`
 	Escalation         EscalationConfig `yaml:"escalation" json:"escalation"`
+	Hybrid             HybridConfig     `yaml:"hybrid" json:"hybrid"`
 
 	// Backward compatibility
 	GeminiAPIKey string `yaml:"gemini_api_key" json:"gemini_api_key"`
@@ -242,15 +252,20 @@ type ScraperConfig struct {
 	ClearnetTimeoutSeconds int  `yaml:"clearnet_timeout_seconds" json:"clearnet_timeout_seconds"`
 	TorTimeoutSeconds      int  `yaml:"tor_timeout_seconds" json:"tor_timeout_seconds"`
 	WorkerIntervalSeconds  int  `yaml:"worker_interval_seconds" json:"worker_interval_seconds"`
-	BatchSize              int  `yaml:"batch_size" json:"batch_size"`
-	MaxAttempts            int  `yaml:"max_attempts" json:"max_attempts"`
-	AutoReAnalyze          bool `yaml:"auto_re_analyze" json:"auto_re_analyze"`
+	BatchSize              int    `yaml:"batch_size" json:"batch_size"`
+	MaxAttempts            int    `yaml:"max_attempts" json:"max_attempts"`
+	AutoReAnalyze          bool   `yaml:"auto_re_analyze" json:"auto_re_analyze"`
+	BrowserlessURL         string `yaml:"browserless_url" json:"browserless_url"`
+	BrowserlessTimeoutSec  int    `yaml:"browserless_timeout_sec" json:"browserless_timeout_sec"`
 }
 
 type PipelineConfig struct {
-	CheckIntervalHours int  `yaml:"check_interval_hours" json:"check_interval_hours"`
-	NotifyDirectOnly   bool `yaml:"notify_direct_only" json:"notify_direct_only"`
-	SchedulerEnabled   bool `yaml:"scheduler_enabled" json:"scheduler_enabled"`
+	CheckIntervalHours      int    `yaml:"check_interval_hours" json:"check_interval_hours"`
+	NotifyDirectOnly        bool   `yaml:"notify_direct_only" json:"notify_direct_only"`
+	SchedulerEnabled        bool   `yaml:"scheduler_enabled" json:"scheduler_enabled"`
+	NotifyLanguage          string `yaml:"notify_language" json:"notify_language"`
+	CircuitBreakerMaxAlerts int    `yaml:"circuit_breaker_max_alerts" json:"circuit_breaker_max_alerts"`
+	NotifyDryRun            bool   `yaml:"notify_dry_run" json:"notify_dry_run"`
 }
 
 type AppConfig struct {
@@ -287,19 +302,27 @@ func DefaultConfig() AppConfig {
 			SQLitePath: "data/threat_cache.db",
 		},
 		AI: AiConfig{
-			PrimaryProvider:    "openai_compatible",
+			PrimaryProvider:    "hybrid",
 			Endpoint:           "https://litellm.lab.internal/v1/chat/completions",
 			Model:              "qwen2.5-3b-instruct",
 			Temperature:        0.1,
 			InsecureSkipVerify: true,
-			TimeoutSeconds:     60,
+			TimeoutSeconds:     180,
 			GeminiModel:        "gemini-3.5-flash-lite",
 			Escalation: EscalationConfig{
 				Enabled:              true,
 				GeminiModel:          "gemini-3.5-flash-lite",
 				MaxLocalContentRunes: 6000,
-				TriggerSeverities:    []string{"Critical"},
+				TriggerSeverities:    []string{"Critical", "High"},
 				TriggerJapanDirect:   true,
+			},
+			Hybrid: HybridConfig{
+				QueryGenerator:   "qwen",
+				Extractor:        "qwen",
+				Refiner:          "gemini",
+				Translator:       "gemini",
+				RefineSeverities: []string{"CRITICAL", "HIGH"},
+				RefineJapanOnly:  false,
 			},
 		},
 		Scraper: ScraperConfig{
@@ -310,6 +333,8 @@ func DefaultConfig() AppConfig {
 			TorConcurrency:         2,
 			ClearnetTimeoutSeconds: 15,
 			TorTimeoutSeconds:      45,
+			BrowserlessURL:         "",
+			BrowserlessTimeoutSec:  25,
 			WorkerIntervalSeconds:  10,
 			BatchSize:              20,
 			MaxAttempts:            2,
@@ -320,9 +345,12 @@ func DefaultConfig() AppConfig {
 			RequestTimeout: 25,
 		},
 		Pipeline: PipelineConfig{
-			CheckIntervalHours: 1,
-			NotifyDirectOnly:   false,
-			SchedulerEnabled:   true,
+			CheckIntervalHours:      1,
+			NotifyDirectOnly:        false,
+			SchedulerEnabled:        true,
+			NotifyLanguage:          "en",
+			CircuitBreakerMaxAlerts: 5,
+			NotifyDryRun:            false,
 		},
 		Sources: SourcesConfig{
 			VendorRSS: []FeedSourceConfig{
@@ -432,6 +460,38 @@ func (s *SettingsManager) applyEnvOverrides() {
 			s.Config.AI.Escalation.GeminiModel = v
 		}
 	}
+	if v := os.Getenv("AI_TIMEOUT_SECONDS"); v != "" {
+		if t, err := strconv.Atoi(v); err == nil && t > 0 {
+			s.Config.AI.TimeoutSeconds = t
+		}
+	}
+	if v := os.Getenv("AI_HYBRID_QUERY_GENERATOR"); v != "" {
+		s.Config.AI.Hybrid.QueryGenerator = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("AI_HYBRID_EXTRACTOR"); v != "" {
+		s.Config.AI.Hybrid.Extractor = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("AI_HYBRID_REFINER"); v != "" {
+		s.Config.AI.Hybrid.Refiner = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("AI_HYBRID_TRANSLATOR"); v != "" {
+		s.Config.AI.Hybrid.Translator = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("AI_HYBRID_REFINE_SEVERITIES"); v != "" {
+		parts := strings.Split(v, ",")
+		var sevs []string
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				sevs = append(sevs, strings.ToUpper(trimmed))
+			}
+		}
+		if len(sevs) > 0 {
+			s.Config.AI.Hybrid.RefineSeverities = sevs
+		}
+	}
+	if v := os.Getenv("AI_HYBRID_REFINE_JAPAN_ONLY"); v != "" {
+		s.Config.AI.Hybrid.RefineJapanOnly = strings.EqualFold(v, "true") || v == "1"
+	}
 	if v := os.Getenv("DB_TYPE"); v != "" {
 		s.Config.Database.Type = v
 	}
@@ -502,6 +562,20 @@ func (s *SettingsManager) applyEnvOverrides() {
 	}
 	if v := os.Getenv("NOTIFY_DIRECT_ONLY"); v != "" {
 		s.Config.Pipeline.NotifyDirectOnly = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("NOTIFY_LANGUAGE"); v != "" {
+		s.Config.Pipeline.NotifyLanguage = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := os.Getenv("CIRCUIT_BREAKER_MAX_ALERTS"); v != "" {
+		if m, err := strconv.Atoi(v); err == nil && m > 0 {
+			s.Config.Pipeline.CircuitBreakerMaxAlerts = m
+		}
+	}
+	if v := os.Getenv("NOTIFY_DRY_RUN"); v != "" {
+		s.Config.Pipeline.NotifyDryRun = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("BROWSERLESS_URL"); v != "" {
+		s.Config.Scraper.BrowserlessURL = strings.TrimRight(v, "/")
 	}
 	if v := os.Getenv("CACHE_DB_PATH"); v != "" {
 		s.Config.Database.SQLitePath = v

@@ -350,4 +350,24 @@ func TestHarvestSearch_Ahmia(t *testing.T) {
 	}
 }
 
+func TestQuerySearXNGAPI_PathAutoAppend(t *testing.T) {
+	var requestedPath string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results": []}`))
+	}))
+	defer ts.Close()
+
+	// ts.URL has no trailing /search
+	_, err := QuerySearXNGAPI(context.Background(), ts.Client(), ts.URL, "test", "ahmia", "onions")
+	if err != nil {
+		t.Fatalf("QuerySearXNGAPI failed: %v", err)
+	}
+
+	if requestedPath != "/search" {
+		t.Errorf("expected requestedPath='/search', got '%s'", requestedPath)
+	}
+}
+
 

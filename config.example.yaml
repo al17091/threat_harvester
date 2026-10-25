@@ -126,50 +126,50 @@ sources:
 
   darkweb_onion:
     - name: "SearXNG Cross-Search: Japan Ransomware & Leak Sites"
-      url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
+      url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
       categories: "onions"
       directive: "日本国内の企業や組織を標的としたランサムウェアリークサイト（DLS）の暴露情報やデータ侵害"
       query: "(japan OR 日本) (ransomware OR ランサムウェア OR leak OR breach OR リーク)"
-      timeout_seconds: 30
+      timeout_seconds: 300
       enabled: true
     - name: "SearXNG Cross-Search: 0day Exploit & Initial Access"
-      url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
+      url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
       categories: "onions"
       directive: "ゼロデイ脆弱性の悪用PoC、エクスプロイトコード、VPNや境界機器の初期アクセス販売"
       query: "(0day OR ゼロデイ OR exploit OR 脆弱性) (poc OR broker OR \"initial access\" OR 初期アクセス)"
-      timeout_seconds: 30
+      timeout_seconds: 300
       enabled: true
     - name: "SearXNG Cross-Search: Database Leaks & Credentials"
-      url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
+      url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
       categories: "onions"
       directive: "日本国内組織のアカウント情報、データベースダンプ、機密情報のダークウェブ流出・販売"
       query: "(database leak OR dump OR 流出 OR 侵害 OR 漏洩) (japan OR 日本 OR tokyo)"
-      timeout_seconds: 30
+      timeout_seconds: 300
       enabled: true
-    - name: "Tor横断探索: 日本関連組織ランサムウェア・データ侵害"
+    - name: "Tor横断探索: 日本関連組織ランサムウェア・データ侵害 (Legacy Ahmia)"
       url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
       type: "search"
       directive: "日本国内の企業や組織を標的としたランサムウェアリークサイト（DLS）の暴露情報やデータ侵害"
       query: "(japan OR 日本) (ransomware OR leak OR breach)"
-      enabled: true
-    - name: "Tor横断探索: 日本関連データ漏洩・侵害データベース"
+      enabled: false
+    - name: "Tor横断探索: 日本関連データ漏洩・侵害データベース (Legacy Ahmia)"
       url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
       type: "search"
       directive: "日本国内組織のアカウント情報、データベースダンプ、機密情報のダークウェブ流出・販売"
       query: "japan database leak credentials"
-      enabled: true
-    - name: "Tor横断探索: 未修正ゼロデイ・悪用PoC・初期アクセス販売"
+      enabled: false
+    - name: "Tor横断探索: 未修正ゼロデイ・悪用PoC・初期アクセス販売 (Legacy Ahmia)"
       url: "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
       type: "search"
       directive: "ゼロデイ脆弱性の悪用PoC、エクスプロイトコード、VPNや境界機器の初期アクセス販売"
       query: "0day exploit poc vulnerability broker"
-      enabled: true
+      enabled: false
 
   ransomware_tracker:
     - name: "Ransomlook Tracker"

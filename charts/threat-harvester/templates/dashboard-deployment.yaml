@@ -34,7 +34,7 @@ spec:
             - name: BACKEND_URL
               value: "http://{{ include "threat-harvester.fullname" . }}-api:{{ (index (.Values.api | default dict) "service" | default dict).port | default (index (.Values.backend | default dict) "service" | default dict).port | default 8000 }}"
             - name: BASE_PATH
-              value: {{ .Values.dashboard.basePath | default "/thhv" | quote }}
+              value: {{ .Values.dashboard.basePath | default "/threat" | quote }}
           envFrom:
             - secretRef:
                 name: {{ include "threat-harvester.secretName" . }}
@@ -52,4 +52,12 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          volumeMounts:
+            - name: server-script
+              mountPath: /app/server.js
+              subPath: server.js
+      volumes:
+        - name: server-script
+          configMap:
+            name: {{ include "threat-harvester.fullname" . }}-dashboard-script
 {{- end }}

@@ -7,14 +7,30 @@ metadata:
 data:
   PORT: {{ ((.Values.api | default dict).port) | default ((.Values.backend | default dict).port) | default 8000 | quote }}
   COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
-  AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "openai_compatible" | quote }}
+  AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "hybrid" | quote }}
   LITELLM_ENDPOINT: {{ .Values.config.litellmEndpoint | default "https://litellm.lab.internal/v1/chat/completions" | quote }}
   LITELLM_MODEL: {{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" | quote }}
   GEMINI_MODEL: {{ .Values.config.geminiModel | default "gemini-3.5-flash-lite" | quote }}
+  AI_TIMEOUT_SECONDS: {{ .Values.config.aiTimeoutSeconds | default 180 | quote }}
+  AI_HYBRID_QUERY_GENERATOR: {{ ((.Values.config.hybrid | default dict).queryGenerator) | default "qwen" | quote }}
+  AI_HYBRID_EXTRACTOR: {{ ((.Values.config.hybrid | default dict).extractor) | default "qwen" | quote }}
+  AI_HYBRID_REFINER: {{ ((.Values.config.hybrid | default dict).refiner) | default "gemini" | quote }}
+  AI_HYBRID_TRANSLATOR: {{ ((.Values.config.hybrid | default dict).translator) | default "gemini" | quote }}
+  AI_HYBRID_REFINE_SEVERITIES: {{ ((.Values.config.hybrid | default dict).refineSeverities) | default "CRITICAL,HIGH" | quote }}
+  AI_HYBRID_REFINE_JAPAN_ONLY: {{ if eq (((.Values.config.hybrid | default dict).refineJapanOnly) | toString) "true" }}"true"{{ else }}"false"{{ end }}
   SEARXNG_URL: {{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" | quote }}
+  SEARXNG_RESEARCH_URL: {{ .Values.config.searxngResearchUrl | default "https://searxng-research.lab.internal/search" | quote }}
   CHECK_INTERVAL_HOURS: {{ .Values.config.checkIntervalHours | quote }}
   ENABLE_SCHEDULER: {{ if eq (.Values.config.enableScheduler | toString) "false" }}"false"{{ else }}"true"{{ end }}
   NOTIFY_DIRECT_ONLY: {{ .Values.config.notifyDirectOnly | quote }}
+  NOTIFY_LANGUAGE: {{ .Values.config.notifyLanguage | default "en" | quote }}
+  CIRCUIT_BREAKER_MAX_ALERTS: {{ .Values.config.circuitBreakerMaxAlerts | default 5 | quote }}
+  NOTIFY_DRY_RUN: {{ if eq (.Values.config.notifyDryRun | toString) "true" }}"true"{{ else }}"false"{{ end }}
+  {{- if and .Values.browserless .Values.browserless.enabled }}
+  BROWSERLESS_URL: "http://{{ include "threat-harvester.fullname" . }}-browserless:{{ .Values.browserless.port | default 3000 }}"
+  {{- else if .Values.config.browserlessUrl }}
+  BROWSERLESS_URL: {{ .Values.config.browserlessUrl | quote }}
+  {{- end }}
   REQUEST_TIMEOUT: {{ .Values.config.requestTimeout | quote }}
   DB_TYPE: {{ .Values.database.type | quote }}
   DB_HOST: {{ .Values.database.host | quote }}

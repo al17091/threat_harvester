@@ -1,0 +1,51 @@
+{{- if and .Values.browserless .Values.browserless.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "threat-harvester.fullname" . }}-browserless
+  labels:
+    {{- include "threat-harvester.labels" . | nindent 4 }}
+    app.kubernetes.io/component: browserless
+spec:
+  replicas: {{ .Values.browserless.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "threat-harvester.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: browserless
+  template:
+    metadata:
+      labels:
+        {{- include "threat-harvester.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: browserless
+    spec:
+      containers:
+        - name: browserless
+          image: "{{ (.Values.browserless.image | default dict).repository | default "ghcr.io/browserless/chromium" }}:{{ (.Values.browserless.image | default dict).tag | default "latest" }}"
+          imagePullPolicy: {{ (.Values.browserless.image | default dict).pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.browserless.port | default 3000 }}
+              protocol: TCP
+          env:
+            - name: MAX_CONCURRENT_SESSIONS
+              value: {{ .Values.browserless.maxConcurrentSessions | default 5 | quote }}
+            - name: PORT
+              value: {{ .Values.browserless.port | default 3000 | quote }}
+          livenessProbe:
+            httpGet:
+              path: /pressure
+              port: {{ .Values.browserless.port | default 3000 }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /pressure
+              port: {{ .Values.browserless.port | default 3000 }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.browserless.resources | nindent 12 }}
+{{- end }}
+

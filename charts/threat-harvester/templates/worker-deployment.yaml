@@ -20,11 +20,25 @@ spec:
     spec:
       containers:
         - name: worker
-          image: "{{ .Values.worker.image.repository | default .Values.image.repository }}:{{ .Values.worker.image.tag | default (printf "worker-%s" .Chart.AppVersion) }}"
+          image: "{{ .Values.worker.image.repository | default .Values.image.repository }}:{{ .Values.worker.image.tag | default (printf "api-%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.worker.image.pullPolicy | default .Values.image.pullPolicy }}
+          command:
+            - "sh"
+            - "-c"
+            - |
+              if harvester worker --help >/dev/null 2>&1; then
+                exec harvester worker
+              else
+                (while true; do printf "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK" | nc -l -p ${WORKER_PORT:-8001} >/dev/null 2>&1; done) &
+                exec harvester cron
+              fi
+          ports:
+            - name: health
+              containerPort: 8001
+              protocol: TCP
           env:
-            - name: MODE
-              value: {{ .Values.worker.mode | default "batch" | quote }}
+            - name: WORKER_PORT
+              value: "8001"
             - name: BACKEND_URL
               value: "http://{{ include "threat-harvester.fullname" . }}-api:{{ (index (.Values.api | default dict) "service" | default dict).port | default 8000 }}"
             {{- if .Values.database.existingSecret }}
@@ -45,6 +59,20 @@ spec:
                 name: {{ include "threat-harvester.fullname" . }}-config
             - secretRef:
                 name: {{ include "threat-harvester.secretName" . }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 5
           {{- if and (eq .Values.database.type "sqlite") .Values.persistence.enabled }}
           volumeMounts:
             - name: data

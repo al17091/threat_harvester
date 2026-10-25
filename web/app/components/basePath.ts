@@ -17,6 +17,7 @@ const ROOT_SEGMENTS = new Set([
  * or falls back to NEXT_PUBLIC_BASE_PATH. Returns "" when served at root "/".
  */
 export function getRuntimeBasePath(pathname?: string | null): string {
+  // 1. Injected at runtime by server.js HTML rewrite
   if (typeof window !== "undefined") {
     const injected = (window as unknown as { __RUNTIME_BASE_PATH__?: string }).__RUNTIME_BASE_PATH__;
     if (typeof injected === "string" && injected.trim() !== "") {
@@ -24,20 +25,42 @@ export function getRuntimeBasePath(pathname?: string | null): string {
     }
   }
 
-  const envBase = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/+$/, "");
-  const currentPath =
-    typeof window !== "undefined" ? window.location.pathname : pathname || "";
-
-  if (currentPath) {
-    const parts = currentPath.split("/").filter(Boolean);
+  // 2. Client-side URL detection from window.location.pathname
+  if (typeof window !== "undefined" && window.location.pathname) {
+    const parts = window.location.pathname.split("/").filter(Boolean);
     const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
     if (rootIdx > 0) {
       return `/${parts.slice(0, rootIdx).join("/")}`;
-    } else if (rootIdx === -1 && parts.length > 0) {
+    }
+    if (rootIdx === -1 && parts.length > 0) {
       return `/${parts.join("/")}`;
     }
   }
-  return envBase;
+
+  // 3. SSR pathname inspection
+  if (pathname) {
+    const parts = pathname.split("/").filter(Boolean);
+    const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
+    if (rootIdx > 0) {
+      return `/${parts.slice(0, rootIdx).join("/")}`;
+    }
+    if (rootIdx === -1 && parts.length > 0) {
+      return `/${parts.join("/")}`;
+    }
+  }
+
+  // 4. Fallback to environment variables
+  const envBase = (
+    process.env.NEXT_PUBLIC_BASE_PATH ||
+    process.env.BASE_PATH ||
+    ""
+  ).replace(/\/+$/, "");
+
+  if (envBase) {
+    return envBase.startsWith("/") ? envBase : `/${envBase}`;
+  }
+
+  return "";
 }
 
 /**

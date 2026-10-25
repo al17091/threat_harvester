@@ -1,10 +1,13 @@
 package harvesters
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +18,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/proxy"
 
+	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/models"
 )
 
@@ -72,6 +76,13 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 		},
 	}
 
+	cfg := config.GetSettings().GetConfig()
+	browserlessURL := cfg.Scraper.BrowserlessURL
+	bTimeout := cfg.Scraper.BrowserlessTimeoutSec
+	if bTimeout <= 0 {
+		bTimeout = 25
+	}
+
 	body, err := doFetchHTMLWithClient(ctx, client, trimmedURL)
 	if err != nil && !strings.HasPrefix(u.Host, "www.") {
 		u.Host = "www." + u.Host
@@ -80,11 +91,93 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 			err = nil
 		}
 	}
+
+	var extracted string
+	var extractErr error
+	if err == nil {
+		extracted, extractErr = ExtractArticleTextFromHTML(body)
+	}
+
+	// Dynamic fallback for JS/SPA rendered pages or HTTP fetch blocks
+	needsBrowserless := (err != nil) || (extractErr != nil) || isLikelySPAShell(body, extracted)
+	if needsBrowserless && browserlessURL != "" {
+		if renderedHTML, bErr := fetchHTMLWithBrowserless(ctx, browserlessURL, trimmedURL, bTimeout); bErr == nil && len(renderedHTML) > 0 {
+			if bExtracted, bExtractErr := ExtractArticleTextFromHTML(renderedHTML); bExtractErr == nil && len(strings.TrimSpace(bExtracted)) > len(strings.TrimSpace(extracted)) {
+				return bExtracted, nil
+			}
+		}
+	}
+
+	if err != nil {
+		return "", err
+	}
+	if extractErr != nil {
+		return "", extractErr
+	}
+
+	return extracted, nil
+}
+
+func isLikelySPAShell(htmlStr string, extractedText string) bool {
+	if len(strings.TrimSpace(extractedText)) < 150 {
+		lower := strings.ToLower(htmlStr)
+		if strings.Contains(lower, `id="root"`) ||
+			strings.Contains(lower, `id="__next"`) ||
+			strings.Contains(lower, `id="app"`) ||
+			strings.Contains(lower, `id="__nuxt"`) ||
+			strings.Contains(lower, `javascript is required`) ||
+			strings.Contains(lower, `enable javascript`) {
+			return true
+		}
+	}
+	return false
+}
+
+func fetchHTMLWithBrowserless(ctx context.Context, browserlessURL, targetURL string, timeoutSec int) (string, error) {
+	if browserlessURL == "" {
+		return "", fmt.Errorf("browserless URL not configured")
+	}
+	endpoint := fmt.Sprintf("%s/content", strings.TrimRight(browserlessURL, "/"))
+	if timeoutSec <= 0 {
+		timeoutSec = 25
+	}
+
+	payload := map[string]interface{}{
+		"url": targetURL,
+		"gotoOptions": map[string]interface{}{
+			"waitUntil": "networkidle2",
+			"timeout":   timeoutSec * 1000,
+		},
+	}
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
 
-	return ExtractArticleTextFromHTML(body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(b))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	bClient := &http.Client{
+		Timeout: time.Duration(timeoutSec+5) * time.Second,
+	}
+	resp, err := bClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("browserless request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("browserless returned HTTP %d", resp.StatusCode)
+	}
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 // FetchOnionArticleContent fetches the given .onion URL via Tor SOCKS5h proxy and extracts its main body text.
@@ -316,6 +409,8 @@ func ExtractArticleTextFromHTML(htmlStr string) (string, error) {
 	rawText = multiSpaceRegex.ReplaceAllString(rawText, " ")
 	rawText = multiNewlineRegex.ReplaceAllString(rawText, "\n\n")
 	rawText = strings.TrimSpace(rawText)
+	// Sanitize invalid UTF-8 bytes to prevent DB encoding errors (e.g., 0x94)
+	rawText = strings.ToValidUTF8(rawText, "")
 
 	// Truncate to safety limit
 	rawText = models.TruncateRunes(rawText, 8000)

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -679,6 +680,9 @@ var defaultSearxngTransport = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 }
 
+// darkwebSearxngSem limits concurrent darkweb/Tor search requests to prevent overwhelming Tor proxy and SearXNG
+var darkwebSearxngSem = make(chan struct{}, 1)
+
 // harvestSearXNG executes unified meta-search via SearXNG API (format=json)
 func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target config.DarkwebSourceConfig, since *time.Time) ([]models.ThreatItem, error) {
 	var queries []string
@@ -698,7 +702,7 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 
 	timeoutSec := target.TimeoutSeconds
 	if timeoutSec <= 0 {
-		timeoutSec = 30
+		timeoutSec = 300 // Default 5 minutes for Tor meta-search
 	}
 
 	client := &http.Client{
@@ -711,12 +715,23 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 
 	baseURL := target.URL
 	if baseURL == "" {
-		baseURL = "https://searxng.lab.internal/search"
+		if envURL := os.Getenv("SEARXNG_RESEARCH_URL"); envURL != "" {
+			baseURL = envURL
+		} else {
+			baseURL = "https://searxng-research.lab.internal/search"
+		}
 	}
 
 	for _, q := range queries {
+		select {
+		case darkwebSearxngSem <- struct{}{}:
+		case <-ctx.Done():
+			return items, ctx.Err()
+		}
+
 		log.Printf("[DarkWeb] Executing SearXNG query: '%s' (Target: %s, URL: %s)", q, target.Name, baseURL)
 		results, err := h.querySearXNG(ctx, client, baseURL, q, target.Engines, target.Categories)
+		<-darkwebSearxngSem
 		if err != nil {
 			log.Printf("[DarkWeb] SearXNG search query '%s' failed: %v", q, err)
 			continue
@@ -794,6 +809,9 @@ func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, 
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid searxng endpoint: %w", err)
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/search"
 	}
 
 	qParams := u.Query()

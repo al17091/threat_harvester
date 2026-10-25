@@ -137,6 +137,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	analyzedCount := 0
 	notifiedCount := 0
 	notionReportedCount := 0
+	circuitBreakerTriggered := false
 
 	batchSize := 5
 	for i := 0; i < len(newItems); i += batchSize {
@@ -171,18 +172,34 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
 				i+itemIdx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
 
+			cfg := config.GetSettings().GetConfig()
+			notifyLang := cfg.Pipeline.NotifyLanguage
+			circuitBreakerMax := cfg.Pipeline.CircuitBreakerMaxAlerts
+			if circuitBreakerMax <= 0 {
+				circuitBreakerMax = 5
+			}
+
 			shouldNotify := false
-			// High-value alerting criteria:
-			// 1. Suppress all alerts for Info severity / non-threat items
-			// 2. Direct relevance to Japan with Critical or High severity
-			// 3. If notifyDirectOnly is false: Indirect relevance with Critical severity (global severe supply chain impact)
+			// High-value alerting criteria based on notification scope:
 			if enriched.Severity != models.SeverityInfo {
-				if enriched.JapanRelevance == models.JapanRelevanceDirect &&
-					(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
-					shouldNotify = true
-				} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
-					enriched.Severity == models.SeverityCritical {
-					shouldNotify = true
+				if notifyLang == "ja" {
+					// Japanese side only: Direct (Critical/High), or Indirect (Critical) if not notifyDirectOnly
+					if enriched.JapanRelevance == models.JapanRelevanceDirect &&
+						(enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh) {
+						shouldNotify = true
+					} else if !notifyDirectOnly && enriched.JapanRelevance == models.JapanRelevanceIndirect &&
+						enriched.Severity == models.SeverityCritical {
+						shouldNotify = true
+					}
+				} else {
+					// Default / English side: Global / English alerts
+					if enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh {
+						if notifyDirectOnly {
+							shouldNotify = (enriched.JapanRelevance == models.JapanRelevanceDirect)
+						} else {
+							shouldNotify = true
+						}
+					}
 				}
 			}
 
@@ -204,15 +221,37 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 
 			notified := false
 			if shouldNotify {
-				log.Printf("[Pipeline] Alerting on threat: [%s] [%s] %s", enriched.Severity, enriched.JapanRelevance, enriched.TitleJa)
-				notified = p.notifier.Dispatch(ctx, enriched)
-				if notified {
-					notifiedCount++
-				}
+				if notifiedCount >= circuitBreakerMax {
+					if !circuitBreakerTriggered {
+						circuitBreakerTriggered = true
+						log.Printf("[Pipeline Circuit Breaker] Notification threshold reached (%d). Suppressing further individual alerts and dispatching summary alert.", circuitBreakerMax)
+						if !cfg.Pipeline.NotifyDryRun {
+							p.notifier.DispatchSummary(ctx, notifiedCount+1, circuitBreakerMax)
+						}
+					} else {
+						log.Printf("[Pipeline Circuit Breaker] Suppressed individual alert (over threshold %d): [%s] %s", circuitBreakerMax, enriched.Severity, enriched.TitleJa)
+					}
+				} else {
+					displayTitle := enriched.Title
+					if notifyLang == "ja" || displayTitle == "" {
+						displayTitle = enriched.TitleJa
+					}
+					log.Printf("[Pipeline] Alerting on threat (lang=%s): [%s] [%s] %s", notifyLang, enriched.Severity, enriched.JapanRelevance, displayTitle)
+					if cfg.Pipeline.NotifyDryRun {
+						log.Printf("[Pipeline Dry-Run (Config)] Alert would be sent: [%s] %s", enriched.Severity, displayTitle)
+						notified = true
+						notifiedCount++
+					} else {
+						notified = p.notifier.Dispatch(ctx, enriched)
+						if notified {
+							notifiedCount++
+						}
 
-				if p.notionReporter.IsConfigured() {
-					if _, err := p.notionReporter.CreateIncidentPage(ctx, enriched); err == nil {
-						notionReportedCount++
+						if p.notionReporter.IsConfigured() {
+							if _, err := p.notionReporter.CreateIncidentPage(ctx, enriched); err == nil {
+								notionReportedCount++
+							}
+						}
 					}
 				}
 			}

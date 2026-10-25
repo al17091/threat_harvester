@@ -84,11 +84,15 @@ func (s *Server) setupRoutes() {
 	r.Get("/", s.handleRoot)
 	r.Head("/", s.handleRoot)
 	r.Get("/rss", s.handleRSSFeed)
+	r.Get("/rss/{lang}", s.handleRSSFeed)
 	r.Get("/feed.xml", s.handleRSSFeed)
+	r.Get("/feed.xml/{lang}", s.handleRSSFeed)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/rss", s.handleRSSFeed)
+		r.Get("/rss/{lang}", s.handleRSSFeed)
 		r.Get("/feed.xml", s.handleRSSFeed)
+		r.Get("/feed.xml/{lang}", s.handleRSSFeed)
 		r.Get("/status", s.handleStatus)
 		r.Get("/stats/entities", s.handleGetEntityStats)
 		r.Get("/incidents", s.handleListIncidents)
@@ -623,15 +627,36 @@ func (s *Server) RunIncidentBatchTranslation(ctx context.Context, maxItems int) 
 func formatIncidentForLang(inc map[string]interface{}, lang string) {
 	if lang == "ja" {
 		// JA VIEW:
-		if tJa, ok := inc["title_ja"].(string); ok && tJa != "" {
+		tJa, _ := inc["title_ja"].(string)
+		tEn, _ := inc["title"].(string)
+		if isJapaneseText(tJa) {
+			inc["title"] = tJa
+		} else if isJapaneseText(tEn) {
+			inc["title"] = tEn
+		} else if tJa != "" {
 			inc["title"] = tJa
 		}
-		if sJa, ok := inc["summary_ja"].(string); ok && sJa != "" {
+
+		sJa, _ := inc["summary_ja"].(string)
+		sEn, _ := inc["summary"].(string)
+		if isJapaneseText(sJa) {
+			inc["summary"] = sJa
+		} else if isJapaneseText(sEn) {
+			inc["summary"] = sEn
+		} else if sJa != "" {
 			inc["summary"] = sJa
 		}
-		if iJa, ok := inc["impact_analysis_ja"].(string); ok && iJa != "" {
+
+		iJa, _ := inc["impact_analysis_ja"].(string)
+		iEn, _ := inc["impact_analysis"].(string)
+		if isJapaneseText(iJa) {
+			inc["impact_analysis"] = iJa
+		} else if isJapaneseText(iEn) {
+			inc["impact_analysis"] = iEn
+		} else if iJa != "" {
 			inc["impact_analysis"] = iJa
 		}
+
 		if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
 			inc["victim_org"] = vJa
 		}
@@ -644,14 +669,14 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			} else if rajai, ok := ep["recommended_actions_ja"].([]interface{}); ok && len(rajai) > 0 {
 				ep["recommended_actions"] = rajai
 			}
-			if tJa, ok := inc["title_ja"].(string); ok && tJa != "" {
-				ep["title"] = tJa
+			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
+				ep["title"] = tFinal
 			}
-			if sJa, ok := inc["summary_ja"].(string); ok && sJa != "" {
-				ep["summary"] = sJa
+			if sFinal, ok := inc["summary"].(string); ok && sFinal != "" {
+				ep["summary"] = sFinal
 			}
-			if iJa, ok := inc["impact_analysis_ja"].(string); ok && iJa != "" {
-				ep["impact_analysis"] = iJa
+			if iFinal, ok := inc["impact_analysis"].(string); ok && iFinal != "" {
+				ep["impact_analysis"] = iFinal
 			}
 			if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
 				ep["victim_orgs"] = []string{vJa}
@@ -662,6 +687,30 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 		}
 	} else {
 		// EN VIEW (default):
+		tEn, _ := inc["title"].(string)
+		tJa, _ := inc["title_ja"].(string)
+		if tEn != "" && !isJapaneseText(tEn) {
+			inc["title"] = tEn
+		} else if tJa != "" && !isJapaneseText(tJa) {
+			inc["title"] = tJa
+		}
+
+		sEn, _ := inc["summary"].(string)
+		sJa, _ := inc["summary_ja"].(string)
+		if sEn != "" && !isJapaneseText(sEn) {
+			inc["summary"] = sEn
+		} else if sJa != "" && !isJapaneseText(sJa) {
+			inc["summary"] = sJa
+		}
+
+		iEn, _ := inc["impact_analysis"].(string)
+		iJa, _ := inc["impact_analysis_ja"].(string)
+		if iEn != "" && !isJapaneseText(iEn) {
+			inc["impact_analysis"] = iEn
+		} else if iJa != "" && !isJapaneseText(iJa) {
+			inc["impact_analysis"] = iJa
+		}
+
 		if vEn, ok := inc["victim_org_en"].(string); ok && vEn != "" {
 			inc["victim_org"] = vEn
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
@@ -672,6 +721,17 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["affected_product"] = pEn
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["affected_products"] = []string{pEn}
+			}
+		}
+		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
+				ep["title"] = tFinal
+			}
+			if sFinal, ok := inc["summary"].(string); ok && sFinal != "" {
+				ep["summary"] = sFinal
+			}
+			if iFinal, ok := inc["impact_analysis"].(string); ok && iFinal != "" {
+				ep["impact_analysis"] = iFinal
 			}
 		}
 	}
@@ -1004,18 +1064,18 @@ func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 
 // StartScheduler launches an in-process background ticker that runs harvest cycles periodically.
 func (s *Server) StartScheduler(ctx context.Context) {
-	if s.scraperMgr != nil {
-		s.scraperMgr.Start(ctx)
-	}
-
 	cfg := config.GetSettings().GetConfig()
 	if !cfg.Pipeline.SchedulerEnabled || cfg.Pipeline.CheckIntervalHours <= 0 {
-		log.Println("[Scheduler] Background threat harvester scheduler is disabled by configuration")
+		log.Println("[Scheduler] Background threat harvester scheduler and scraper are disabled by configuration")
 		s.pipeMu.Lock()
 		s.schedulerEnabled = false
 		s.nextPipeRunAt = nil
 		s.pipeMu.Unlock()
 		return
+	}
+
+	if s.scraperMgr != nil {
+		s.scraperMgr.Start(ctx)
 	}
 
 	intervalHours := cfg.Pipeline.CheckIntervalHours
