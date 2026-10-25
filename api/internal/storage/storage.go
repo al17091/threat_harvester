@@ -1111,6 +1111,9 @@ func (s *SQLStore) GetPendingFetchItems(ctx context.Context, limit int, maxAttem
 }
 
 func (s *SQLStore) UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error {
+	rawContent = strings.ToValidUTF8(rawContent, "")
+	fetchError = strings.ToValidUTF8(fetchError, "")
+
 	var query string
 	var fetchedAtStr *string
 	if status == "completed" {
@@ -1142,6 +1145,9 @@ func (s *SQLStore) UpdateFetchStatus(ctx context.Context, itemID string, status 
 	WHERE id = $6
 	`
 	_, err := s.db.ExecContext(ctx, query, status, attempts, fetchError, rawContent, fetchedAtStr, itemID)
+	if err != nil {
+		log.Printf("[SQLStore] UpdateFetchStatus failed for item %s: %v", itemID, err)
+	}
 	return err
 }
 

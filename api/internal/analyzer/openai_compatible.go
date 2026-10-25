@@ -263,19 +263,13 @@ func (a *OpenAICompatibleAnalyzer) AnalyzeBatch(ctx context.Context, items []mod
 		return []*models.EnrichedThreat{enriched}, nil
 	}
 
-	// Sequential fallback with concurrency limit
+	// Sequential extraction with concurrency limit
 	results := make([]*models.EnrichedThreat, len(items))
 	for i, it := range items {
 		en, err := a.Analyze(ctx, it)
 		if err != nil {
 			log.Printf("[OpenAICompatibleAnalyzer] Batch item %d failed: %v", i, err)
-			// Return fallback
-			en = BuildEnrichedThreatFromOutput(it, AnalysisOutput{
-				Severity:       string(models.SeverityUnknown),
-				JapanRelevance: string(models.JapanRelevanceUnknown),
-				Title:          it.Title,
-				Summary:        it.Summary,
-			})
+			return nil, fmt.Errorf("item %d (%s) analysis failed: %w", i, it.Title, err)
 		}
 		results[i] = en
 	}

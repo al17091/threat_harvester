@@ -409,6 +409,8 @@ func ExtractArticleTextFromHTML(htmlStr string) (string, error) {
 	rawText = multiSpaceRegex.ReplaceAllString(rawText, " ")
 	rawText = multiNewlineRegex.ReplaceAllString(rawText, "\n\n")
 	rawText = strings.TrimSpace(rawText)
+	// Sanitize invalid UTF-8 bytes to prevent DB encoding errors (e.g., 0x94)
+	rawText = strings.ToValidUTF8(rawText, "")
 
 	// Truncate to safety limit
 	rawText = models.TruncateRunes(rawText, 8000)
