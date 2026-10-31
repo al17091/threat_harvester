@@ -1109,9 +1109,9 @@ func (a *GeminiThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	if err != nil {
 		return err
 	}
-	enriched.TitleJa = tTitle
-	enriched.SummaryJa = tSummary
-	enriched.ImpactAnalysisJa = tImpact
+	enriched.TitleJa = CleanChineseCTITerms(tTitle, true)
+	enriched.SummaryJa = CleanChineseCTITerms(tSummary, true)
+	enriched.ImpactAnalysisJa = CleanChineseCTITerms(tImpact, true)
 	enriched.RecommendedActionsJa = tActions
 	return nil
 }

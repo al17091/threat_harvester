@@ -206,10 +206,12 @@ Focus heavily on assessing relevance and potential impact on organizations, crit
 - IMPORTANT: If a specific cybercrime group or APT is explicitly named in the source article in Chinese, Russian, or another native language, preserve that exact native name AS-IS. Do NOT translate or drop explicitly named groups.
 
 # Language & Output Rules:
-- STRICTLY FLUENT PROFESSIONAL ENGLISH ONLY for all textual descriptions ('title', 'summary', 'impact_analysis', 'recommended_actions').
-- ABSOLUTELY NEVER output Chinese (Simplified or Traditional) words, characters, or grammar in summary, title, or impact analysis descriptions. Do NOT use terms like "未知威胁", "行为者", "恶意软件", "黑客", "漏洞", "网络安全", etc.
-- (Exception: Specific named threat actors in 'threat_actors' should retain their original native name if specified in the source intelligence).
-- Return ONLY a valid JSON object matching the following structure. Do NOT include any markdown code fences, greetings, or conversational filler. All text fields must be in English.
+- STRICTLY 100% FLUENT PROFESSIONAL ENGLISH ONLY for all textual descriptions ('title', 'summary', 'impact_analysis', 'recommended_actions').
+- REGARDLESS of the language of the source intelligence (even if the input article is written in Japanese, Russian, or Chinese), your analysis and output MUST be exclusively in technical English.
+- DO NOT attempt to write or translate into Japanese, and DO NOT output any Japanese characters (Hiragana, Katakana, or Kanji).
+- ABSOLUTELY NEVER output Chinese (Simplified or Traditional) words, characters, or grammar under any circumstances. Do NOT use terms like "未知威胁", "行为者", "恶意软件", "黑客", "漏洞", "网络安全", "报道指出", etc.
+- (Exception: Specific named threat actors in 'threat_actors' should retain their exact original native name if specified in the source intelligence).
+- Return ONLY a valid JSON object matching the following structure. Do NOT include markdown code fences, greetings, or conversational filler. All textual values must be in English.
 {
   "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
   "japan_relevance": "Direct" | "Indirect" | "None",
@@ -225,7 +227,7 @@ Focus heavily on assessing relevance and potential impact on organizations, crit
   "recommended_actions": ["Recommended initial defensive and mitigation steps in English"]
 }`
 
-	userPrompt := fmt.Sprintf(`Target Threat Intelligence:
+	userPrompt := fmt.Sprintf(`Target Threat Intelligence (Analyze and summarize strictly in 100%% English):
 - Source Type: %s
 - Source Name: %s
 - Title: %s

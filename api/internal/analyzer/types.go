@@ -290,11 +290,19 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 
 	titleJa := strings.TrimSpace(out.TitleJa)
 	if titleJa == "" {
-		titleJa = title
+		if models.IsJapaneseText(item.Title) {
+			titleJa = strings.TrimSpace(item.Title)
+		} else {
+			titleJa = title
+		}
 	}
 	summaryJa := strings.TrimSpace(out.SummaryJa)
 	if summaryJa == "" {
-		summaryJa = summary
+		if models.IsJapaneseText(item.Summary) {
+			summaryJa = strings.TrimSpace(item.Summary)
+		} else {
+			summaryJa = summary
+		}
 	}
 	impactJa := strings.TrimSpace(out.ImpactAnalysisJa)
 	if impactJa == "" {

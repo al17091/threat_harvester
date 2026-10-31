@@ -666,4 +666,16 @@ func ExtractActorSnippet(text, actor string, maxRunes int) string {
 	return snippet
 }
 
+// IsJapaneseText checks whether a string contains Japanese Hiragana, Katakana, or Kanji characters.
+func IsJapaneseText(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x309F) || // Hiragana
+			(r >= 0x30A0 && r <= 0x30FF) || // Katakana
+			(r >= 0x4E00 && r <= 0x9FAF) { // CJK Unified Ideographs (Common Kanji)
+			return true
+		}
+	}
+	return false
+}
+
 

@@ -673,7 +673,7 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 		t.Fatalf("failed to insert incident: %v", err)
 	}
 
-	// 1. GET /rss
+	// 1. GET /rss (defaults to Japanese)
 	req := httptest.NewRequest(http.MethodGet, "/rss", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
@@ -681,8 +681,20 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 		t.Errorf("expected 200 on /rss, got %d", w.Code)
 	}
 	rssBody := w.Body.String()
-	if !strings.Contains(rssBody, "<rss") || !strings.Contains(rssBody, "Critical Zero-Day Exploit") {
+	if !strings.Contains(rssBody, "<rss") || (!strings.Contains(rssBody, "Critical Zero-Day Exploit") && !strings.Contains(rssBody, "ゼロデイ脆弱性の悪用")) {
 		t.Errorf("expected valid RSS XML containing incident title, got: %s", rssBody)
+	}
+
+	// 1b. GET /rss?lang=en
+	reqEn := httptest.NewRequest(http.MethodGet, "/rss?lang=en", nil)
+	wEn := httptest.NewRecorder()
+	srv.ServeHTTP(wEn, reqEn)
+	if wEn.Code != http.StatusOK {
+		t.Errorf("expected 200 on /rss?lang=en, got %d", wEn.Code)
+	}
+	rssEnBody := wEn.Body.String()
+	if !strings.Contains(rssEnBody, "<rss") || !strings.Contains(rssEnBody, "Critical Zero-Day Exploit") {
+		t.Errorf("expected valid English RSS XML containing incident title, got: %s", rssEnBody)
 	}
 
 	// 2. GET /rss with filters
