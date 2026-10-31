@@ -495,6 +495,7 @@ func TestAPIIncidentFormatsAndLang(t *testing.T) {
 	defer store.Close()
 
 	srv := NewServer(store)
+	srv.pipeline.SetAnalyzer(&mockAPIAnalyzer{})
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -560,6 +561,58 @@ func TestAPIIncidentFormatsAndLang(t *testing.T) {
 	srv.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 on lang=en incident, got %d", w.Code)
+	}
+
+	// 5. Test Untranslated Japanese-only incident in EN view: must not leak Japanese in title/summary/actions
+	jaOnlyItem := models.ThreatItem{
+		ID:          "ja-only-item",
+		Title:       "国内大手企業への不正アクセス被害の発生について",
+		URL:         "https://example.com/ja-incident",
+		Summary:     "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		PublishedAt: &now,
+		HarvestedAt: now,
+	}
+	jaOnlyEnriched := &models.EnrichedThreat{
+		ItemID:         "ja-only-item",
+		Item:           jaOnlyItem,
+		Title:          "国内大手企業への不正アクセス被害の発生について",
+		TitleJa:        "国内大手企業への不正アクセス被害の発生について",
+		Summary:        "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		SummaryJa:      "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		VictimOrgs:     []string{"株式会社テスト企業"},
+		CVEs:           []string{"CVE-2026-1111"},
+		RecommendedActions: []string{"認証情報を初期化する", "通信ログを調査する"},
+	}
+	jaInc, _ := store.FindOrCreateIncident(ctx, jaOnlyItem, jaOnlyEnriched, 30)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/incidents/"+jaInc.ID+"?lang=en", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on ja incident in EN view, got %d", w.Code)
+	}
+	var resBody map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resBody); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	titleRes, _ := resBody["title"].(string)
+	if isJapaneseText(titleRes) {
+		t.Errorf("expected EN title to not contain Japanese, got '%s'", titleRes)
+	}
+	summaryRes, _ := resBody["summary"].(string)
+	if isJapaneseText(summaryRes) {
+		t.Errorf("expected EN summary to not contain Japanese, got '%s'", summaryRes)
+	}
+	if ep, ok := resBody["enriched_parsed"].(map[string]interface{}); ok {
+		if ra, ok := ep["recommended_actions"].([]interface{}); ok {
+			for _, a := range ra {
+				if as, ok := a.(string); ok && isJapaneseText(as) {
+					t.Errorf("expected recommended_actions in EN view to not contain Japanese, got '%s'", as)
+				}
+			}
+		}
 	}
 }
 

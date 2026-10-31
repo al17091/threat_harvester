@@ -275,11 +275,11 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		}
 	}
 
-	// Translate any newly added Japanese incidents into English
-	if len(newItems) > 0 && p.analyzer != nil {
+	// Translate any Japanese incidents into English (runs every pipeline cycle to ensure zero untranslated backlog)
+	if p.analyzer != nil {
 		needingTrans, err := p.store.GetIncidentsNeedingTranslation(ctx, 50)
 		if err == nil && len(needingTrans) > 0 {
-			log.Printf("[Pipeline] Translating %d newly created incidents into English...", len(needingTrans))
+			log.Printf("[Pipeline] Translating %d incidents into English...", len(needingTrans))
 			var transItems []analyzer.BatchTranslateItem
 			for _, inc := range needingTrans {
 				sum := inc.Summary
@@ -290,9 +290,13 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				if imp == "" {
 					imp = inc.ImpactAnalysisJa
 				}
+				title := inc.Title
+				if title == "" {
+					title = inc.TitleJa
+				}
 				transItems = append(transItems, analyzer.BatchTranslateItem{
 					ID:              inc.ID,
-					Title:           inc.Title,
+					Title:           title,
 					Summary:         sum,
 					ImpactAnalysis:  imp,
 					VictimOrg:       inc.VictimOrg,

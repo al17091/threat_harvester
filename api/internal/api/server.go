@@ -469,9 +469,13 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 						inc["title_ja"] = title
 					}
 					inc["summary"] = transOut.Summary
-					inc["summary_ja"] = transOut.Summary
+					if isJapaneseText(summary) && (inc["summary_ja"] == nil || inc["summary_ja"] == "") {
+						inc["summary_ja"] = summary
+					}
 					inc["impact_analysis"] = transOut.ImpactAnalysis
-					inc["impact_analysis_ja"] = transOut.ImpactAnalysis
+					if isJapaneseText(impact) && (inc["impact_analysis_ja"] == nil || inc["impact_analysis_ja"] == "") {
+						inc["impact_analysis_ja"] = impact
+					}
 					if transOut.VictimOrgEn != "" {
 						inc["victim_org_en"] = transOut.VictimOrgEn
 					}
@@ -693,6 +697,28 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["title"] = tEn
 		} else if tJa != "" && !isJapaneseText(tJa) {
 			inc["title"] = tJa
+		} else {
+			// Both contain Japanese or are empty. If title contains Japanese, preserve it in title_ja
+			if isJapaneseText(tEn) && (tJa == "" || !isJapaneseText(tJa)) {
+				inc["title_ja"] = tEn
+			}
+			// Construct an informative English title from structured metadata instead of leaking raw Japanese
+			cves, _ := inc["cves"].([]string)
+			vOrg, _ := inc["victim_org_en"].(string)
+			if vOrg == "" {
+				if vo, _ := inc["victim_org"].(string); vo != "" && !isJapaneseText(vo) && vo != "Unknown" {
+					vOrg = vo
+				}
+			}
+			if len(cves) > 0 && vOrg != "" {
+				inc["title"] = fmt.Sprintf("Cyber Incident targeting %s (%s)", vOrg, strings.Join(cves, ", "))
+			} else if len(cves) > 0 {
+				inc["title"] = fmt.Sprintf("Vulnerability Advisory (%s)", strings.Join(cves, ", "))
+			} else if vOrg != "" {
+				inc["title"] = fmt.Sprintf("Cyber Incident targeting %s", vOrg)
+			} else if isJapaneseText(tEn) {
+				inc["title"] = "(Cyber Incident Report - Translation Pending)"
+			}
 		}
 
 		sEn, _ := inc["summary"].(string)
@@ -701,6 +727,13 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["summary"] = sEn
 		} else if sJa != "" && !isJapaneseText(sJa) {
 			inc["summary"] = sJa
+		} else {
+			if isJapaneseText(sEn) && (sJa == "" || !isJapaneseText(sJa)) {
+				inc["summary_ja"] = sEn
+			}
+			if isJapaneseText(sEn) {
+				inc["summary"] = "(Summary translation in progress. Detailed intelligence report being processed.)"
+			}
 		}
 
 		iEn, _ := inc["impact_analysis"].(string)
@@ -709,6 +742,13 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["impact_analysis"] = iEn
 		} else if iJa != "" && !isJapaneseText(iJa) {
 			inc["impact_analysis"] = iJa
+		} else {
+			if isJapaneseText(iEn) && (iJa == "" || !isJapaneseText(iJa)) {
+				inc["impact_analysis_ja"] = iEn
+			}
+			if isJapaneseText(iEn) {
+				inc["impact_analysis"] = "(Impact analysis translation in progress.)"
+			}
 		}
 
 		if vEn, ok := inc["victim_org_en"].(string); ok && vEn != "" {
@@ -716,14 +756,41 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["victim_orgs"] = []string{vEn}
 			}
+		} else if vRaw, ok := inc["victim_org"].(string); ok && isJapaneseText(vRaw) {
+			if _, hasJa := inc["victim_org_ja"]; !hasJa || inc["victim_org_ja"] == "" {
+				inc["victim_org_ja"] = vRaw
+			}
 		}
+
 		if pEn, ok := inc["affected_product_en"].(string); ok && pEn != "" {
 			inc["affected_product"] = pEn
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["affected_products"] = []string{pEn}
 			}
+		} else if pRaw, ok := inc["affected_product"].(string); ok && isJapaneseText(pRaw) {
+			if _, hasJa := inc["affected_product_ja"]; !hasJa || inc["affected_product_ja"] == "" {
+				inc["affected_product_ja"] = pRaw
+			}
 		}
+
+		// Ensure enriched_parsed does not leak Japanese actions or descriptions in English view
 		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+			var enActions []string
+			if ra, ok := ep["recommended_actions"].([]string); ok {
+				for _, a := range ra {
+					if as := strings.TrimSpace(a); as != "" && !isJapaneseText(as) {
+						enActions = append(enActions, as)
+					}
+				}
+			} else if rai, ok := ep["recommended_actions"].([]interface{}); ok {
+				for _, a := range rai {
+					if as, ok := a.(string); ok && strings.TrimSpace(as) != "" && !isJapaneseText(as) {
+						enActions = append(enActions, strings.TrimSpace(as))
+					}
+				}
+			}
+			ep["recommended_actions"] = enActions
+
 			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
 				ep["title"] = tFinal
 			}

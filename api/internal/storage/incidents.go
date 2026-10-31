@@ -1593,7 +1593,7 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 	return nil
 }
 
-// GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, or impact analysis.
+// GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, impact analysis, victim org, or affected product and lack English translations.
 func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error) {
 	if limit <= 0 {
 		limit = 50
@@ -1604,7 +1604,6 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title LIKE '%[あ-ん]%' OR summary LIKE '%[あ-ん]%' OR (COALESCE(summary, '') = '' AND COALESCE(summary_ja, '') != ''))
 			ORDER BY last_seen_at DESC
 			LIMIT ?
 		`
@@ -1612,7 +1611,15 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR summary ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR (COALESCE(summary, '') = '' AND summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]'))
+			WHERE (
+				title ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR summary ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR (COALESCE(summary, '') = '' AND summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+				OR impact_analysis ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR (COALESCE(impact_analysis, '') = '' AND impact_analysis_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+				OR (victim_org ~ '[\u3040-\u30ff\u4e00-\u9faf]' AND COALESCE(victim_org_en, '') = '')
+				OR (affected_product ~ '[\u3040-\u30ff\u4e00-\u9faf]' AND COALESCE(affected_product_en, '') = '')
+			)
 			ORDER BY last_seen_at DESC
 			LIMIT $1
 		`
@@ -1631,7 +1638,13 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 			continue
 		}
 		if s.isSQLite {
-			if isJapaneseText(inc.Title) || isJapaneseText(inc.Summary) || (inc.Summary == "" && isJapaneseText(inc.SummaryJa)) {
+			if isJapaneseText(inc.Title) ||
+				isJapaneseText(inc.Summary) ||
+				(inc.Summary == "" && isJapaneseText(inc.SummaryJa)) ||
+				isJapaneseText(inc.ImpactAnalysis) ||
+				(inc.ImpactAnalysis == "" && isJapaneseText(inc.ImpactAnalysisJa)) ||
+				(isJapaneseText(inc.VictimOrg) && inc.VictimOrgEn == "") ||
+				(isJapaneseText(inc.AffectedProduct) && inc.AffectedProductEn == "") {
 				incidents = append(incidents, *inc)
 			}
 		} else {
