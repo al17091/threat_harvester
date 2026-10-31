@@ -391,6 +391,12 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   }, [lang]);
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = currentLang;
+    }
+  }, [currentLang]);
+
+  useEffect(() => {
     const handlePopState = () => {
       const p = typeof window !== "undefined" ? window.location.pathname : "";
       if (p.endsWith("/ja") || p.includes("/ja/")) {

@@ -155,7 +155,7 @@ config:
   checkIntervalHours: 1
   enableScheduler: false
   notifyDirectOnly: false
-  notifyLanguage: "en"
+  notifyLanguage: "ja"
   circuitBreakerMaxAlerts: 5
   notifyDryRun: false
   browserlessUrl: ""

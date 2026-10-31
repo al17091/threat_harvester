@@ -305,6 +305,13 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		actionsJa = actions
 	}
 
+	title = CleanChineseCTITerms(title, false)
+	titleJa = CleanChineseCTITerms(titleJa, true)
+	summary = CleanChineseCTITerms(summary, false)
+	summaryJa = CleanChineseCTITerms(summaryJa, true)
+	impact = CleanChineseCTITerms(impact, false)
+	impactJa = CleanChineseCTITerms(impactJa, true)
+
 	metaBytes, _ := json.Marshal(item.Metadata)
 	groundedActors := models.FilterGroundedThreatActors(
 		out.ThreatActors,
@@ -337,5 +344,44 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		RecommendedActionsJa: actionsJa,
 		AnalyzedAt:           time.Now().UTC(),
 	}
+}
+
+// CleanChineseCTITerms replaces recurring Chinese/Simplified Chinese CTI terminology leaked by models with standard terminology.
+func CleanChineseCTITerms(s string, isJa bool) string {
+	if s == "" {
+		return s
+	}
+
+	type replacement struct {
+		cn string
+		ja string
+		en string
+	}
+
+	terms := []replacement{
+		{cn: "恶意软件", ja: "マルウェア", en: "Malware"},
+		{cn: "勒索软件", ja: "ランサムウェア", en: "Ransomware"},
+		{cn: "威胁行为者", ja: "脅威アクター", en: "Threat Actor"},
+		{cn: "网络安全", ja: "サイバーセキュリティ", en: "Cybersecurity"},
+		{cn: "数据泄露", ja: "データ漏洩", en: "Data Breach"},
+		{cn: "犯罪集团", ja: "サイバー犯罪グループ", en: "Cybercrime Group"},
+		{cn: "黑客", ja: "攻撃者", en: "Attackers"},
+		{cn: "漏洞", ja: "脆弱性", en: "Vulnerability"},
+		{cn: "钓鱼", ja: "フィッシング", en: "Phishing"},
+		{cn: "未确认", ja: "未確認", en: "Unconfirmed"},
+		{cn: "未提及", ja: "言及なし", en: "Not specified"},
+	}
+
+	res := s
+	for _, t := range terms {
+		if strings.Contains(res, t.cn) {
+			if isJa {
+				res = strings.ReplaceAll(res, t.cn, t.ja)
+			} else {
+				res = strings.ReplaceAll(res, t.cn, t.en)
+			}
+		}
+	}
+	return res
 }
 

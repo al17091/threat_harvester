@@ -82,6 +82,7 @@ scraper:
 pipeline:
   check_interval_hours: 1
   notify_direct_only: false
+  notify_language: "${NOTIFY_LANGUAGE:-ja}"
 
 sources:
   vendor_rss:

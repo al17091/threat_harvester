@@ -349,7 +349,22 @@ func TestAPIConfigEndpoints(t *testing.T) {
 		t.Errorf("expected 200 on /api/config/compliance, got %d", w.Code)
 	}
 
-	// 5. POST /api/config/sources (toggle & delete)
+	// 5. POST /api/config/sources (add, toggle & delete)
+	addPayload, _ := json.Marshal(map[string]interface{}{
+		"source_type": "vendor_rss",
+		"action":      "add",
+		"data": map[string]interface{}{
+			"name": "Config Test Feed",
+			"url":  "https://example.com/test_feed.rss",
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(addPayload))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on add source, got %d", w.Code)
+	}
+
 	togglePayload, _ := json.Marshal(map[string]interface{}{
 		"action":      "toggle",
 		"source_type": "vendor_rss",
