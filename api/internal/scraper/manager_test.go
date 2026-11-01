@@ -124,6 +124,9 @@ func (m *mockScraperAnalyzer) TranslateIncident(ctx context.Context, input analy
 func (m *mockScraperAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
 	return nil, nil
 }
+func (m *mockScraperAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	return nil, nil
+}
 
 func TestScraperManagerLifecycleAndDefaults(t *testing.T) {
 	store, _ := storage.NewStore("", ":memory:")

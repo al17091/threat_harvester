@@ -254,6 +254,16 @@ func (h *HybridThreatAnalyzer) TranslateBatch(ctx context.Context, items []Batch
 	return h.primary.TranslateBatch(ctx, items)
 }
 
+func (h *HybridThreatAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error) {
+	if h.escalation != nil {
+		results, err := h.escalation.TranslateBatchToJapanese(ctx, items)
+		if err == nil {
+			return results, nil
+		}
+	}
+	return h.primary.TranslateBatchToJapanese(ctx, items)
+}
+
 func (h *HybridThreatAnalyzer) TranslateFieldsToJapanese(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {
 	if h.escalation != nil {
 		return h.escalation.TranslateFieldsToJapanese(ctx, title, summary, impact, actions)

@@ -86,6 +86,19 @@ func (m *mockE2EAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.B
 	return results, nil
 }
 
+func (m *mockE2EAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	var results []analyzer.BatchTranslateResult
+	for _, it := range items {
+		results = append(results, analyzer.BatchTranslateResult{
+			ID:             it.ID,
+			Title:          "日本語要約: " + it.Title,
+			Summary:        "日本語要約: " + it.Summary,
+			ImpactAnalysis: "日本語影響: " + it.ImpactAnalysis,
+		})
+	}
+	return results, nil
+}
+
 func TestE2EPipelineAndAPI(t *testing.T) {
 	// 1. Setup mock RSS Server
 	pubDateStr := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC1123)

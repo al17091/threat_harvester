@@ -486,5 +486,41 @@ func TestIsJapaneseText(t *testing.T) {
 	}
 }
 
+func TestHasChineseCTITermsAndCorruption(t *testing.T) {
+	chineseInputs := []string{
+		"大和証券株式会社关于SC社不正当访问事件的公告",
+		"「焼肉きんぐ」公式アプリ会員情報泄露事件：1078万8963件の个人数据被盗",
+		"佐川急便荷物問合サービス个人数据泄露调查结果公布",
+		"MrMax公司数据泄露事件：1735,154名会员信息被盗取",
+		"CAPCOM ID服务泄露11774247个电子邮件地址及其他信息",
+		"GMOインターネット服务遭勒索攻击，要求支付80亿日元赎金",
+	}
+
+	for _, s := range chineseInputs {
+		if !HasChineseCTITerms(s) {
+			t.Errorf("expected HasChineseCTITerms(%q) = true, got false", s)
+		}
+		if !IsChineseOrCorruptedJapanese(s) {
+			t.Errorf("expected IsChineseOrCorruptedJapanese(%q) = true, got false", s)
+		}
+	}
+
+	pureJapaneseInputs := []string{
+		"大和証券株式会社、SC社への不正アクセスに関する報告書を公表",
+		"「焼肉きんぐ」公式アプリ会員情報漏洩事件：個人情報が流出",
+		"佐川急便荷物問い合わせサービスにおける個人情報漏洩の調査結果を発表",
+		"株式会社ミスターマックス・ホールディングスにおける不正アクセス被害について",
+	}
+
+	for _, s := range pureJapaneseInputs {
+		if HasChineseCTITerms(s) {
+			t.Errorf("expected HasChineseCTITerms(%q) = false, got true", s)
+		}
+		if IsChineseOrCorruptedJapanese(s) {
+			t.Errorf("expected IsChineseOrCorruptedJapanese(%q) = false, got true", s)
+		}
+	}
+}
+
 
 

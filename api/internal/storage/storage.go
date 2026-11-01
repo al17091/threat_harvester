@@ -47,8 +47,11 @@ type Store interface {
 	BackfillArticleContents(ctx context.Context, fetcher func(ctx context.Context, url string) (string, error)) (int, error)
 	GetLatestHarvestTime(ctx context.Context) (*time.Time, error)
 	UpdateIncidentTranslations(ctx context.Context, id, title, summary, impact, victimEn, productEn string, actions []string) error
+	UpdateIncidentJapaneseTranslations(ctx context.Context, id, titleJa, summaryJa, impactJa string, actions []string) error
 	UpdateIncidentLabels(ctx context.Context, id string, threatActors []string, severity, japanRelevance, attackType, victimOrg string) error
 	GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error)
+	GetIncidentsNeedingJapaneseRemediation(ctx context.Context, limit int) ([]models.Incident, error)
+	CleanChineseCTITermsInDatabase(ctx context.Context) (int64, error)
 	GetEntityStats(ctx context.Context, limit int, japanOnly bool) (*models.EntityStats, error)
 
 	GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error)

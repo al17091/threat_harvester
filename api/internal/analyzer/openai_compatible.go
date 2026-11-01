@@ -476,6 +476,20 @@ func (a *OpenAICompatibleAnalyzer) TranslateBatch(ctx context.Context, items []B
 	return results, nil
 }
 
+func (a *OpenAICompatibleAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error) {
+	results := make([]BatchTranslateResult, len(items))
+	for i, item := range items {
+		results[i] = BatchTranslateResult{
+			ID:                 item.ID,
+			Title:              CleanChineseCTITerms(item.Title, true),
+			Summary:            CleanChineseCTITerms(item.Summary, true),
+			ImpactAnalysis:     CleanChineseCTITerms(item.ImpactAnalysis, true),
+			RecommendedActions: item.RecommendedActions,
+		}
+	}
+	return results, nil
+}
+
 // TranslateFieldsToJapanese is a fallback on OpenAICompatibleAnalyzer (primary uses English).
 func (a *OpenAICompatibleAnalyzer) TranslateFieldsToJapanese(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {
 	return title, summary, impact, actions, fmt.Errorf("japanese translation not supported directly on primary local model")

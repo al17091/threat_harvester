@@ -64,6 +64,7 @@ type ThreatAnalyzer interface {
 	LocalizeThreatToJapanese(ctx context.Context, enriched *models.EnrichedThreat) error
 	TranslateIncident(ctx context.Context, input IncidentTranslationInput) (*IncidentTranslationOutput, error)
 	TranslateBatch(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error)
+	TranslateBatchToJapanese(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error)
 }
 
 // AnalysisOutput represents the structured JSON output from LLM analysis.
@@ -377,8 +378,28 @@ func CleanChineseCTITerms(s string, isJa bool) string {
 		{cn: "漏洞", ja: "脆弱性", en: "Vulnerability"},
 		{cn: "钓鱼", ja: "フィッシング", en: "Phishing"},
 		{cn: "不正当访问", ja: "不正アクセス", en: "Unauthorized Access"},
+		{cn: "不正当", ja: "不正な", en: "Unauthorized"},
 		{cn: "非法入侵", ja: "不正アクセス", en: "Unauthorized Intrusion"},
+		{cn: "不法访问", ja: "不正アクセス", en: "Unauthorized Access"},
+		{cn: "未经授权的访问", ja: "不正アクセス", en: "Unauthorized Access"},
+		{cn: "未经授权", ja: "未認可の", en: "Unauthorized"},
 		{cn: "个人数据泄露", ja: "個人情報漏洩", en: "Personal Data Leak"},
+		{cn: "个人数据", ja: "個人情報", en: "Personal Data"},
+		{cn: "数据泄露", ja: "データ漏洩", en: "Data Breach"},
+		{cn: "泄露", ja: "漏洩", en: "Leak"},
+		{cn: "被盗", ja: "窃取", en: "Stolen"},
+		{cn: "遭勒索", ja: "ランサムウェア被害を受け", en: "Suffered Ransomware Attack"},
+		{cn: "赎金", ja: "身代金", en: "Ransom"},
+		{cn: "两阶段认证", ja: "2段階認証", en: "Two-Factor Authentication"},
+		{cn: "兩階段認證", ja: "2段階認証", en: "Two-Factor Authentication"},
+		{cn: "关于", ja: "に関する", en: "Regarding"},
+		{cn: "针对", ja: "向け", en: "Targeting"},
+		{cn: "修复旧版本中的安全漏洞", ja: "旧バージョンのセキュリティ脆弱性を修正", en: "Fixed security vulnerabilities in older versions"},
+		{cn: "更新版本", ja: "アップデート", en: "Update Version"},
+		{cn: "解决了", ja: "修正しました", en: "Resolved"},
+		{cn: "调查结果公布", ja: "調査結果公表", en: "Investigation Results Disclosed"},
+		{cn: "宣布", ja: "発表", en: "Announced"},
+		{cn: "遭受", ja: "被害を受け", en: "Suffered"},
 		{cn: "邮件杂志", ja: "メールマガジン", en: "Newsletter"},
 		{cn: "零日漏洞", ja: "ゼロデイ脆弱性", en: "Zero-day Vulnerability"},
 		{cn: "后门", ja: "バックドア", en: "Backdoor"},

@@ -60,6 +60,17 @@ func (m *mockAPIAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.B
 	}
 	return res, nil
 }
+func (m *mockAPIAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	var res []analyzer.BatchTranslateResult
+	for _, it := range items {
+		res = append(res, analyzer.BatchTranslateResult{
+			ID: it.ID,
+			Title: "日本語要約: " + it.Title,
+			Summary: "日本語要約: " + it.Summary,
+		})
+	}
+	return res, nil
+}
 
 
 func TestAPIRoutes(t *testing.T) {

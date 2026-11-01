@@ -678,4 +678,48 @@ func IsJapaneseText(s string) bool {
 	return false
 }
 
+// HasChineseCTITerms checks if a string contains known Simplified Chinese cybersecurity terms or phrasings.
+func HasChineseCTITerms(s string) bool {
+	if s == "" {
+		return false
+	}
+	chineseMarkers := []string{
+		"关于", "不正当", "泄露", "个人数据", "数据泄露", "服务器遭受",
+		"未经授权", "不法访问", "被盗", "两阶段", "兩階段", "针对",
+		"更新版本", "修复旧版本", "解决了", "会员管理", "官方应用",
+		"受影响", "未提及", "未确认", "攻击活动", "恶意软件", "漏洞",
+		"钓鱼", "黑客", "木马", "后门", "云计算", "邮件杂志", "零日漏洞",
+		"非法入侵", "遭勒索", "赎金", "公布调查", "宣布", "遭受",
+	}
+	for _, m := range chineseMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsChineseOrCorruptedJapanese returns true if the string contains Chinese CTI terms,
+// or contains Kanji/Hanzi but lacks any Hiragana or Katakana.
+func IsChineseOrCorruptedJapanese(s string) bool {
+	if s == "" {
+		return false
+	}
+	if HasChineseCTITerms(s) {
+		return true
+	}
+	hasHanzi := false
+	hasKana := false
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FAF {
+			hasHanzi = true
+		}
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) {
+			hasKana = true
+		}
+	}
+	return hasHanzi && !hasKana
+}
+
+
 

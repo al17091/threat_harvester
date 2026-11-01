@@ -1593,6 +1593,208 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 	return nil
 }
 
+// UpdateIncidentJapaneseTranslations updates title_ja, summary_ja, impact_analysis_ja of an incident and syncs child threat items.
+func (s *SQLStore) UpdateIncidentJapaneseTranslations(ctx context.Context, id, titleJa, summaryJa, impactJa string, actions []string) error {
+	var query string
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	if s.isSQLite {
+		query = `UPDATE incidents SET
+			title_ja = ?, summary_ja = ?, impact_analysis_ja = ?, updated_at = ?
+		WHERE id = ?`
+		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
+		if err != nil {
+			return err
+		}
+	} else {
+		query = `UPDATE incidents SET
+			title_ja = $1, summary_ja = $2, impact_analysis_ja = $3, updated_at = $4
+		WHERE id = $5`
+		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Update child threat_items' enriched_data to sync Japanese fields
+	var cQuery string
+	if s.isSQLite {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = ?`
+	} else {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = $1`
+	}
+	rows, err := s.db.QueryContext(ctx, cQuery, id)
+	if err == nil {
+		type childItem struct {
+			id string
+			ed map[string]interface{}
+		}
+		var itemsToUpdate []childItem
+		for rows.Next() {
+			var cid, edStr sql.NullString
+			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
+				var ed map[string]interface{}
+				if edStr.Valid && edStr.String != "" {
+					_ = json.Unmarshal([]byte(edStr.String), &ed)
+				}
+				if ed == nil {
+					ed = make(map[string]interface{})
+				}
+				ed["title_ja"] = titleJa
+				ed["summary_ja"] = summaryJa
+				ed["impact_analysis_ja"] = impactJa
+				if len(actions) > 0 {
+					ed["recommended_actions_ja"] = actions
+				}
+				itemsToUpdate = append(itemsToUpdate, childItem{id: cid.String, ed: ed})
+			}
+		}
+		rows.Close()
+
+		for _, item := range itemsToUpdate {
+			updatedJSON, _ := json.Marshal(item.ed)
+			if s.isSQLite {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(updatedJSON), item.id)
+			} else {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(updatedJSON), item.id)
+			}
+		}
+	}
+
+	return nil
+}
+
+// CleanChineseCTITermsInDatabase performs direct SQL replacements of prominent Chinese CTI terms in title_ja and summary_ja.
+func (s *SQLStore) CleanChineseCTITermsInDatabase(ctx context.Context) (int64, error) {
+	type pair struct {
+		cn string
+		ja string
+	}
+	pairs := []pair{
+		{"不正当访问", "不正アクセス"},
+		{"不正当", "不正な"},
+		{"非法入侵", "不正アクセス"},
+		{"不法访问", "不正アクセス"},
+		{"未经授权的访问", "不正アクセス"},
+		{"未经授权", "未認可の"},
+		{"个人数据泄露", "個人情報漏洩"},
+		{"个人数据", "個人情報"},
+		{"数据泄露", "データ漏洩"},
+		{"泄露", "漏洩"},
+		{"被盗", "窃取"},
+		{"遭勒索", "ランサムウェア被害を受け"},
+		{"两阶段认证", "2段階認証"},
+		{"兩階段認證", "2段階認証"},
+		{"关于", "に関する"},
+		{"修复旧版本中的安全漏洞", "旧バージョンのセキュリティ脆弱性を修正"},
+		{"更新版本", "アップデート"},
+		{"解决了", "修正しました"},
+		{"调查结果公布", "調査結果公表"},
+		{"宣布", "発表"},
+		{"遭受", "被害を受け"},
+		{"邮件杂志", "メールマガジン"},
+		{"零日漏洞", "ゼロデイ脆弱性"},
+		{"后门", "バックドア"},
+		{"木马", "トロイの木馬"},
+		{"间谍软件", "スパイウェア"},
+		{"攻击活动", "攻撃活動"},
+		{"恶意软件", "マルウェア"},
+		{"勒索软件", "ランサムウェア"},
+		{"云计算", "クラウド"},
+		{"报道指出", "報道によると"},
+		{"据悉", "報道によると"},
+		{"根据报告", "レポートによると"},
+		{"漏洞", "脆弱性"},
+		{"黑客", "攻撃者"},
+		{"钓鱼", "フィッシング"},
+	}
+
+	var totalAffected int64
+	for _, p := range pairs {
+		var q string
+		if s.isSQLite {
+			q = `UPDATE incidents SET
+				title_ja = REPLACE(title_ja, ?, ?),
+				summary_ja = REPLACE(summary_ja, ?, ?),
+				impact_analysis_ja = REPLACE(impact_analysis_ja, ?, ?)
+			WHERE title_ja LIKE '%' || ? || '%' OR summary_ja LIKE '%' || ? || '%' OR impact_analysis_ja LIKE '%' || ? || '%'`
+			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.cn, p.cn)
+			if err == nil && res != nil {
+				n, _ := res.RowsAffected()
+				totalAffected += n
+			}
+		} else {
+			q = `UPDATE incidents SET
+				title_ja = REPLACE(title_ja, $1, $2),
+				summary_ja = REPLACE(summary_ja, $1, $2),
+				impact_analysis_ja = REPLACE(impact_analysis_ja, $1, $2)
+			WHERE title_ja LIKE '%' || $1 || '%' OR summary_ja LIKE '%' || $1 || '%' OR impact_analysis_ja LIKE '%' || $1 || '%'`
+			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja)
+			if err == nil && res != nil {
+				n, _ := res.RowsAffected()
+				totalAffected += n
+			}
+		}
+	}
+	return totalAffected, nil
+}
+
+// GetIncidentsNeedingJapaneseRemediation returns incidents where title_ja or summary_ja has Chinese CTI terms,
+// contains Hanzi/Kanji without Kana, or is completely missing Japanese localization.
+func (s *SQLStore) GetIncidentsNeedingJapaneseRemediation(ctx context.Context, limit int) ([]models.Incident, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var query string
+	if s.isSQLite {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			ORDER BY last_seen_at DESC
+			LIMIT ?
+		`
+	} else {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			WHERE (
+				title_ja ~ '(关于|不正当|泄露|数据|服务|攻击|漏洞|恶意|黑客|据悉|报道|宣布|遭受|未经授权|被盗|不法访问|更新版本|针对|修复旧版本|解决了|两阶段|两阶段认证|官方应用|会员管理系统|已暂停|通用漏洞披露|网络安全和基础设施安全局)'
+				OR summary_ja ~ '(关于|不正当|泄露|数据|服务|攻击|漏洞|恶意|黑客|据悉|报道|宣布|遭受|未经授权|被盗|不法访问|更新版本|针对|修复旧版本|解决了|两阶段|两阶段认证|官方应用|会员管理系统|已暂停|通用漏洞披露|网络安全和基础设施安全局)'
+				OR (title_ja ~ '[\u4e00-\u9faf]' AND title_ja !~ '[\u3040-\u30ff]')
+				OR (summary_ja ~ '[\u4e00-\u9faf]' AND summary_ja !~ '[\u3040-\u30ff]')
+				OR (COALESCE(title_ja, '') = '' AND COALESCE(title, '') != '')
+			)
+			ORDER BY last_seen_at DESC
+			LIMIT $1
+		`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var incidents []models.Incident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			continue
+		}
+		if s.isSQLite {
+			if models.IsChineseOrCorruptedJapanese(inc.TitleJa) ||
+				models.IsChineseOrCorruptedJapanese(inc.SummaryJa) ||
+				(inc.TitleJa == "" && inc.Title != "") {
+				incidents = append(incidents, *inc)
+			}
+		} else {
+			incidents = append(incidents, *inc)
+		}
+	}
+
+	return incidents, nil
+}
+
 // GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, impact analysis, victim org, or affected product and lack English translations.
 func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error) {
 	if limit <= 0 {
