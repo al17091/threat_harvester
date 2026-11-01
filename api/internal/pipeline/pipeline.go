@@ -121,9 +121,19 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		uniqueBatch = append(uniqueBatch, item)
 	}
 
-	// Persistent store deduplication
+	// Persistent store deduplication & corporate PR notice filtering
 	var newItems []models.ThreatItem
 	for _, item := range uniqueBatch {
+		if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
+			log.Printf("[Pipeline] Discarding corporate PR notice: %s (%s)", item.Title, item.URL)
+			_ = p.store.MarkSeen(ctx, item, &models.EnrichedThreat{
+				Severity:       models.SeverityInfo,
+				JapanRelevance: models.JapanRelevanceNone,
+				TitleJa:        item.Title,
+				SummaryJa:      item.Summary,
+			}, false)
+			continue
+		}
 		seen, err := p.store.IsSeenItem(ctx, item)
 		if err != nil || !seen {
 			newItems = append(newItems, item)
@@ -161,6 +171,13 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			}
 			if enriched == nil {
 				log.Printf("[Pipeline] Missing enrichment for item: %s", item.Title)
+				continue
+			}
+
+			if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent, enriched.Title, enriched.TitleJa, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
+				log.Printf("[Pipeline] Discarding analyzed corporate PR notice: %s", item.Title)
+				enriched.Severity = models.SeverityInfo
+				_ = p.store.MarkSeen(ctx, item, enriched, false)
 				continue
 			}
 

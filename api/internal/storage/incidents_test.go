@@ -480,6 +480,147 @@ func TestIncidentClusteringByURLAndLinkedURL(t *testing.T) {
 	}
 }
 
+func TestTargetOrgAndAffectedProductClustering(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub := time.Now().UTC()
+
+	// 1. Report 1: GMO Internet Desktop Cloud Ransomware / 8 Billion Yen Extortion
+	item1 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"SecurityNext",
+		"GMOに身代金要求 - ランサム攻撃や情報公開を行うと脅迫",
+		"https://example.com/gmo-ransom-1",
+		"GMOインターネット株式会社の「お名前.com デスクトップクラウド」に不正アクセス、身代金として80億円を要求",
+		"",
+		&pub,
+		map[string]interface{}{
+			"victim":  "GMOインターネット株式会社",
+			"product": "お名前.com デスクトップクラウド",
+		},
+	)
+	enriched1 := &models.EnrichedThreat{
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Ransomware",
+		VictimOrgs:       []string{"GMOインターネット株式会社"},
+		AffectedProducts: []string{"お名前.com デスクトップクラウド"},
+		TitleJa:          "GMOインターネット：お名前.com デスクトップクラウドに対するランサムウェア身代金要求",
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, item1, enriched1, 30)
+	if err != nil {
+		t.Fatalf("failed to create initial incident: %v", err)
+	}
+	if inc1 == nil {
+		t.Fatalf("expected incident to be created, got nil")
+	}
+
+	// 2. Report 2: English news reporting the same service compromise under different org alias
+	item2 := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"WebSearch",
+		"GMO Internet Services Affected by Security Incident Involving Desktop Cloud",
+		"https://example.com/gmo-ransom-2",
+		"Attackers breached Onamae.com Desktop Cloud demanding ransom",
+		"",
+		&pub,
+		map[string]interface{}{
+			"victim":  "GMO Internet Group, Inc.",
+			"product": "Onamae.com Desktop Cloud",
+		},
+	)
+	enriched2 := &models.EnrichedThreat{
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Data Breach",
+		VictimOrgs:       []string{"GMO Internet Group, Inc."},
+		AffectedProducts: []string{"Onamae.com Desktop Cloud"},
+		TitleJa:          "GMOインターネットグループ デスクトップクラウド侵害事案",
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, item2, enriched2, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster second report: %v", err)
+	}
+	if inc2 == nil {
+		t.Fatalf("expected inc2 to be non-nil")
+	}
+	if inc2.ID != inc1.ID {
+		t.Fatalf("expected items with same target org and product to cluster together! Got %s vs %s", inc2.ID, inc1.ID)
+	}
+	if inc2.ReportCount != 2 {
+		t.Errorf("expected ReportCount 2, got %d", inc2.ReportCount)
+	}
+
+	// 3. Report 3: GMO reporting on a DIFFERENT service ("infoQ")
+	itemInfoQ := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"SecurityNext",
+		"GMOリサーチ&AI運営のアンケートサイト「infoQ」への不正アクセス、個人情報流出を確認",
+		"https://example.com/gmo-infoq",
+		"infoQサイトへの不正アクセスにより会員情報が流出",
+		"",
+		&pub,
+		map[string]interface{}{
+			"victim":  "GMOインターネットグループ",
+			"product": "infoQ",
+		},
+	)
+	enrichedInfoQ := &models.EnrichedThreat{
+		Severity:         models.SeverityHigh,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Data Breach",
+		VictimOrgs:       []string{"GMOインターネットグループ"},
+		AffectedProducts: []string{"infoQ"},
+		TitleJa:          "GMOリサーチ&AI「infoQ」個人情報流出事案",
+	}
+
+	incInfoQ, err := store.FindOrCreateIncident(ctx, itemInfoQ, enrichedInfoQ, 30)
+	if err != nil {
+		t.Fatalf("failed to process infoQ report: %v", err)
+	}
+	if incInfoQ.ID == inc1.ID {
+		t.Fatalf("expected different product 'infoQ' to NOT merge into 'お名前.com デスクトップクラウド' incident! Both had ID: %s", incInfoQ.ID)
+	}
+
+	// 4. Report 4: Corporate PR notice (sympathy money payout) -> MUST RETURN nil, nil
+	itemPR := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"SecurityNext",
+		"「お名前.com デスクトップクラウド」に不正アクセス、見舞金として一律 5,000円を支払い",
+		"https://example.com/gmo-pr",
+		"代替サービスの提供とお見舞金の支払いについて発表",
+		"",
+		&pub,
+		map[string]interface{}{
+			"victim":  "GMOインターネット株式会社",
+			"product": "お名前.com デスクトップクラウド",
+		},
+	)
+	enrichedPR := &models.EnrichedThreat{
+		Severity:         models.SeverityInfo,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Corporate Notice",
+		VictimOrgs:       []string{"GMOインターネット株式会社"},
+		AffectedProducts: []string{"お名前.com デスクトップクラウド"},
+	}
+
+	incPR, err := store.FindOrCreateIncident(ctx, itemPR, enrichedPR, 30)
+	if err != nil {
+		t.Fatalf("unexpected error on corporate PR: %v", err)
+	}
+	if incPR != nil {
+		t.Fatalf("expected corporate PR notice to be excluded from incident creation, got incident: %s", incPR.ID)
+	}
+}
+
+
 
 
 

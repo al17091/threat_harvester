@@ -71,8 +71,10 @@ func (s *SQLStore) FindOrCreateIncident(
 		attackType = enriched.AttackType
 	}
 
-	// Non-threat content, service releases, PR announcements, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
-	if (enriched != nil && enriched.Severity == models.SeverityInfo) || models.IsServiceReleaseOrNonThreat(item, enriched) {
+	// Non-threat content, service releases, PR announcements, corporate PR notices, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
+	if (enriched != nil && enriched.Severity == models.SeverityInfo) ||
+		models.IsServiceReleaseOrNonThreat(item, enriched) ||
+		models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
 		return nil, nil
 	}
 
@@ -240,6 +242,69 @@ func (s *SQLStore) FindOrCreateIncident(
 		}
 	}
 
+	// TRACK 1.5: Target Organization + Affected Product Clustering
+	// Aggregates reports concerning the same specific product/service belonging to a target organization
+	// (e.g. GMO + Onamae Desktop Cloud) regardless of attack type, while preventing false mergers
+	// across distinct products or different organizations with similarly named products.
+	if matched == nil && normVictim != "" && (normProduct != "" || rawProduct != "") {
+		prodTarget := normProduct
+		if prodTarget == "" {
+			prodTarget = strings.ToLower(rawProduct)
+		}
+		prodPattern := "%" + prodTarget + "%"
+
+		var orgProdQuery string
+		if s.isSQLite {
+			orgProdQuery = `
+				SELECT ` + incidentSelectCols + `
+				FROM incidents
+				WHERE normalized_victim_org = ?
+				  AND (
+					(affected_product IS NOT NULL AND affected_product != '' AND LOWER(affected_product) LIKE ?)
+					OR LOWER(title) LIKE ?
+					OR LOWER(title_ja) LIKE ?
+				  )
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		} else {
+			orgProdQuery = `
+				SELECT ` + incidentSelectCols + `
+				FROM incidents
+				WHERE normalized_victim_org = $1
+				  AND (
+					(affected_product IS NOT NULL AND affected_product != '' AND (affected_product ILIKE $2 OR LOWER(affected_product) LIKE $3))
+					OR title ILIKE $2
+					OR title_ja ILIKE $2
+				  )
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		}
+
+		var rows *sql.Rows
+		var err error
+		if s.isSQLite {
+			rows, err = s.db.QueryContext(ctx, orgProdQuery, normVictim, prodPattern, prodPattern, prodPattern)
+		} else {
+			rows, err = s.db.QueryContext(ctx, orgProdQuery, normVictim, prodPattern, prodPattern)
+		}
+
+		if err == nil {
+			for rows.Next() {
+				inc, err := scanIncident(rows)
+				if err != nil {
+					continue
+				}
+				if isWithinWindow(inc, itemTime, windowDuration) {
+					matched = inc
+					break
+				}
+			}
+			_ = rows.Close()
+		}
+	}
+
 	// TRACK 2: Specific Victim Org Clustering (Targeted Cyberattacks, Ransomware, Data Breaches)
 	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) {
 		query := `
@@ -267,6 +332,12 @@ func (s *SQLStore) FindOrCreateIncident(
 					continue
 				}
 				if isWithinWindow(inc, itemTime, windowDuration) {
+					// Guard: If both existing incident and incoming report identify specific distinct products,
+					// do not merge them under the general organization (e.g. GMO infoQ vs GMO Desktop Cloud).
+					incNormProd := models.NormalizeProduct(inc.AffectedProduct)
+					if incNormProd != "" && normProduct != "" && incNormProd != normProduct {
+						continue
+					}
 					matched = inc
 					break
 				}
@@ -306,7 +377,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			if matched.AttackType == "" && enriched.AttackType != "" {
 				matched.AttackType = enriched.AttackType
 			}
-			if enriched.TitleJa != "" {
+			if matched.TitleJa == "" {
 				matched.TitleJa = enriched.TitleJa
 			}
 			if matched.Summary == "" && enriched.Summary != "" {

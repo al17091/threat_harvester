@@ -627,5 +627,153 @@ func TestHasChineseCTITermsAndCorruption(t *testing.T) {
 	}
 }
 
+func TestIsCorporatePRNoticeAndRansomExceptions(t *testing.T) {
+	// 1. Pure corporate PR notices that MUST be dropped
+	prCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "GMOインターネット、「お名前.com デスクトップクラウド」への攻撃で全利用者に5,000円のお見舞金を発表",
+			summary: "代替サービスの提供と見舞金支払いを実施する",
+		},
+		{
+			title:   "「お名前.com デスクトップクラウド」に不正アクセス、見舞金として一律 5,000円を支払い",
+			summary: "契約者に対する補償対応についての案内",
+		},
+		{
+			title:   "お名前.com デスクトップクラウド不正アクセス事件：見舞金支払いと代替サービス提供",
+			summary: "ユーザーへの代替サービス提供と今後の対応",
+		},
+		{
+			title:   "お名前.com デスクトップクラウドのサーバー停止・復旧作業完了のご報告",
+			summary: "緊急メンテナンスおよびサーバー停止から復旧完了した",
+		},
+		{
+			title:   "当社サーバーへの不正アクセスに関するお詫びとお知らせ（第2報）",
+			summary: "調査委員会の設置と外部専門機関による調査の経過報告",
+		},
+		{
+			title:   "GMO Internet has made an urgent request for the Japanese government to implement active cyberdefense operations",
+			summary: "Company petitioned the government for active cyber defense application",
+		},
+		{
+			title:   "不正アクセスに関するよくあるご質問（FAQ）および再発防止策について",
+			summary: "お客様からの問い合わせ対応状況と再発防止策の策定",
+		},
+	}
+
+	for _, tc := range prCases {
+		if !IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected corporate PR notice to be dropped: %q", tc.title)
+		}
+	}
+
+	// 2. Threat articles containing ransom payment / extortion / leak intel that MUST BE RETAINED
+	ransomCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "GMOに身代金要求 - ランサム攻撃や情報公開を行うと脅迫",
+			summary: "攻撃グループが身代金を要求し、支払わない場合はデータを公開すると脅迫",
+		},
+		{
+			title:   "GMO Internet Services Exposed to Ransomware Attack, Demanding Payment of 8 Billion Japanese Yen in Ransom",
+			summary: "Attackers demanded payment of 8 billion yen in cryptocurrency",
+		},
+		{
+			title:   "東証プライム経営者向けまとめ GMO FX自動取引サービス二重脅迫→能動的サイバー防御要請経緯 及び ランサムウェア実務家向け脅威インテリジェンス",
+			summary: "二重脅迫の手口とランサムウェア実務家向けOSINT分析",
+		},
+		{
+			title:   "Astemo、ランサムウェア攻撃によるシステム障害から全面復旧（身代金の支払いは拒否）",
+			summary: "攻撃者への身代金支払いを拒否し、バックアップから復旧したと公表",
+		},
+		{
+			title:   "暗号資産で要求された身代金支払いの事実関係について",
+			summary: "ハッカーへの支払いは行わなかったと説明",
+		},
+		{
+			title:   "LockBit、ダークウェブのリークサイトに被害組織の機密データを公開",
+			summary: "身代金支払いに応じなかったためDLSに掲載",
+		},
+	}
+
+	for _, tc := range ransomCases {
+		if IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected ransom/extortion intelligence to be KEPT (not corporate PR): %q", tc.title)
+		}
+	}
+
+	// 3. Technical analysis / third-party reports that must NOT be dropped
+	techCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "お名前.com デスクトップクラウドへの不正アクセス事案のまとめ",
+			summary: "piyologによるインシデント技術分析とタイムライン",
+		},
+		{
+			title:   "PHP Windows版同梱圧縮ライブラリ「Brotli」の脆弱性修正（CVE-2026-111497）",
+			summary: "バッファオーバーフローの脆弱性を修正",
+		},
+		{
+			title:   "GMOクリック証券警戒：自動売買ツールによる不正取引の可能性",
+			summary: "金融口座への不正アクセスと不正送金被害の可能性について調査",
+		},
+	}
+
+	for _, tc := range techCases {
+		if IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected technical report to be KEPT: %q", tc.title)
+		}
+	}
+}
+
+func TestNormalizeVictimOrgAndProductEnhanced(t *testing.T) {
+	victimCases := []struct {
+		input    string
+		expected string
+	}{
+		{"GMOインターネット株式会社", "gmo"},
+		{"GMOインターネットグループ", "gmo"},
+		{"GMOインターネット", "gmo"},
+		{"GMO Internet Group, Inc.", "gmo"},
+		{"GMO Internet (Onamae.com Desktop Cloud)", "gmo"},
+		{"お名前.com デスクトップクラウド", "gmo"},
+		{"お名前.com", "gmo"},
+		{"株式会社日立Astemo", "日立astemo"},
+		{"トヨタ自動車株式会社", "トヨタ自動車"},
+	}
+
+	for _, tc := range victimCases {
+		res := NormalizeVictimOrg(tc.input)
+		if res != tc.expected {
+			t.Errorf("NormalizeVictimOrg(%q) = %q; want %q", tc.input, res, tc.expected)
+		}
+	}
+
+	productCases := []struct {
+		input    string
+		expected string
+	}{
+		{"お名前.com デスクトップクラウド", "onamae desktop cloud"},
+		{"お名前.com デスクトップ クラウド", "onamae desktop cloud"},
+		{"Onamae.com Desktop Cloud", "onamae desktop cloud"},
+		{"お名前.com桌面云服务", "onamae desktop cloud"},
+		{"GMO「デスクトップクラウド」", "onamae desktop cloud"},
+	}
+
+	for _, tc := range productCases {
+		res := NormalizeProduct(tc.input)
+		if res != tc.expected {
+			t.Errorf("NormalizeProduct(%q) = %q; want %q", tc.input, res, tc.expected)
+		}
+	}
+}
+
+
 
 
