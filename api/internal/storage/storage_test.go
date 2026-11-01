@@ -145,7 +145,7 @@ func TestStorageOperations(t *testing.T) {
 	}
 
 	// Test IsRecentlyNotified: Example Corp was notified above
-	recentlyNotified, err := store.IsRecentlyNotified(ctx, []string{"Example Corp"}, "New attack report", 48)
+	recentlyNotified, err := store.IsRecentlyNotified(ctx, []string{"Example Corp"}, "New attack report", nil, 48)
 	if err != nil {
 		t.Fatalf("IsRecentlyNotified failed: %v", err)
 	}
@@ -153,12 +153,51 @@ func TestStorageOperations(t *testing.T) {
 		t.Fatal("expected recentlyNotified to be true for Example Corp")
 	}
 
+	// Test CVE matching in IsRecentlyNotified
+	cveNotified, err := store.IsRecentlyNotified(ctx, nil, "Advisory without org", []string{"CVE-2026-99999"}, 48)
+	if err != nil {
+		t.Fatalf("IsRecentlyNotified with CVE failed: %v", err)
+	}
+	if cveNotified {
+		// No item was notified with CVE-2026-99999 yet
+	}
+
 	// Unrelated org should not trigger cooldown
-	unrelatedNotified, err := store.IsRecentlyNotified(ctx, []string{"Unrelated Org"}, "Different incident", 48)
+	unrelatedNotified, err := store.IsRecentlyNotified(ctx, []string{"Unrelated Org"}, "Different incident", nil, 48)
 	if err != nil {
 		t.Fatalf("IsRecentlyNotified failed: %v", err)
 	}
 	if unrelatedNotified {
 		t.Fatal("expected unrelatedNotified to be false")
+	}
+
+	// Test IsIncidentRecentlyNotified
+	itemWithInc := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"CERT-JP",
+		"Notified Incident Item",
+		"https://cert.org/inc-item",
+		"Incident description",
+		"",
+		&now,
+		nil,
+	)
+	itemWithInc.IncidentID = "inc-test-123"
+	_ = store.MarkSeen(ctx, itemWithInc, enriched, true)
+
+	incNotified, err := store.IsIncidentRecentlyNotified(ctx, "inc-test-123", 48)
+	if err != nil {
+		t.Fatalf("IsIncidentRecentlyNotified failed: %v", err)
+	}
+	if !incNotified {
+		t.Fatal("expected IsIncidentRecentlyNotified to be true for inc-test-123")
+	}
+
+	incUnnotified, err := store.IsIncidentRecentlyNotified(ctx, "inc-unknown-999", 48)
+	if err != nil {
+		t.Fatalf("IsIncidentRecentlyNotified failed: %v", err)
+	}
+	if incUnnotified {
+		t.Fatal("expected IsIncidentRecentlyNotified to be false for unknown incident")
 	}
 }

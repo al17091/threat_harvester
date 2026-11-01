@@ -23,6 +23,95 @@ const incidentSelectCols = `
 	COALESCE(summary, ''), COALESCE(impact_analysis, '')
 `
 
+// normalizeClusterURL sanitizes a URL for incident clustering by removing tracking query parameters and trailing slashes.
+func normalizeClusterURL(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+
+	// Strip common tracking and referral query parameters
+	if u.RawQuery != "" {
+		q := u.Query()
+		trackingParams := []string{
+			"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+			"ref", "source", "fbclid", "gclid", "yclid", "mc_cid", "mc_eid",
+		}
+		for _, p := range trackingParams {
+			q.Del(p)
+		}
+		u.RawQuery = q.Encode()
+	}
+
+	clean := u.String()
+	// Trim trailing slash for path > 1 to unify "example.com/path/" and "example.com/path"
+	if len(u.Path) > 1 && strings.HasSuffix(clean, "/") {
+		clean = strings.TrimSuffix(clean, "/")
+	}
+	return clean
+}
+
+// isClusterableURL checks if a URL is specific and stable enough to be used as an incident clustering key.
+func isClusterableURL(rawURL string) bool {
+	norm := normalizeClusterURL(rawURL)
+	if norm == "" || len(norm) < 15 {
+		return false
+	}
+	u, err := url.Parse(norm)
+	if err != nil || u.Host == "" {
+		return false
+	}
+
+	// Reject domain root URLs (no path or just "/")
+	if u.Path == "" || u.Path == "/" {
+		return false
+	}
+
+	host := strings.ToLower(u.Host)
+	path := strings.ToLower(u.Path)
+
+	// Reject social, bookmark, search redirect hubs
+	excludedHosts := []string{
+		"b.hatena.ne.jp", "twitter.com", "x.com", "t.co", "facebook.com",
+		"vertexaisearch.cloud.google.com", "google.com", "search.yahoo.co.jp",
+		"bing.com", "duckduckgo.com",
+	}
+	for _, eh := range excludedHosts {
+		if host == eh || strings.HasSuffix(host, "."+eh) {
+			return false
+		}
+	}
+
+	// Reject common generic catalog/definition directories
+	genericPaths := []string{
+		"/known-exploited-vulnerabilities-catalog",
+		"/data/definitions",
+		"/rss", "/feed", "/atom",
+	}
+	for _, gp := range genericPaths {
+		if path == gp || strings.HasSuffix(path, gp) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func sliceContainsExact(list []string, target string) bool {
+	for _, s := range list {
+		if normalizeClusterURL(s) == target || s == target {
+			return true
+		}
+	}
+	return false
+}
+
 // isWithinWindow checks if itemTime falls within sliding window of the incident.
 func isWithinWindow(inc *models.Incident, itemTime time.Time, windowDuration time.Duration) bool {
 	if !itemTime.Before(inc.LastSeenAt) {
@@ -57,8 +146,9 @@ func (s *SQLStore) FindOrCreateIncident(
 
 	rawVictim, normVictim := models.ExtractVictimOrg(item, enriched)
 
-	// Extract CVEs from raw texts + enriched metadata
-	cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
+	// Extract CVEs strictly from targeted report fields (Title, Summary, enriched.CVEs).
+	// Do NOT extract from RawContent or URL, which contain third-party crawler noise, linked articles, and external summaries.
+	cves := models.ExtractCVEs(item.Title, item.Summary)
 	if enriched != nil && len(enriched.CVEs) > 0 {
 		cves = models.ExtractCVEs(append(cves, enriched.CVEs...)...)
 	}
@@ -90,19 +180,25 @@ func (s *SQLStore) FindOrCreateIncident(
 		HarvestedAt: item.HarvestedAt,
 	}
 
+	// Canonical article URLs for exact Track 0 clustering
+	// Only valid, specific, article-level URLs are allowed (domain roots, search redirects, and generic catalogs are excluded).
 	var candidateURLs []string
-	if item.URL != "" {
-		candidateURLs = append(candidateURLs, item.URL)
+	if isClusterableURL(item.URL) {
+		candidateURLs = append(candidateURLs, normalizeClusterURL(item.URL))
 	}
 	if item.Metadata != nil {
 		if rawLinks, ok := item.Metadata["linked_urls"]; ok {
 			switch links := rawLinks.(type) {
 			case []string:
-				candidateURLs = append(candidateURLs, links...)
+				for _, l := range links {
+					if isClusterableURL(l) {
+						candidateURLs = append(candidateURLs, normalizeClusterURL(l))
+					}
+				}
 			case []interface{}:
 				for _, l := range links {
-					if str, ok := l.(string); ok && str != "" {
-						candidateURLs = append(candidateURLs, str)
+					if str, ok := l.(string); ok && isClusterableURL(str) {
+						candidateURLs = append(candidateURLs, normalizeClusterURL(str))
 					}
 				}
 			}
@@ -112,15 +208,11 @@ func (s *SQLStore) FindOrCreateIncident(
 
 	var matched *models.Incident
 
-	// TRACK 0: Direct URL or Linked URL Matching
-	// If the item URL or any of its recursively followed links match an existing incident,
-	// cluster them into the exact same incident bundle.
+	// TRACK 0: Exact Canonical Article URL Matching
+	// Matches incoming reports sharing the exact same specific external article/advisory URL.
+	// Uses exact element matching to prevent substring collision across different articles.
 	for _, candURL := range candidateURLs {
-		trimmedCand := strings.TrimSpace(candURL)
-		if trimmedCand == "" || len(trimmedCand) < 10 {
-			continue
-		}
-		candPattern := "%" + trimmedCand + "%"
+		candPattern := "%\"" + candURL + "\"%"
 		var urlQuery string
 		if s.isSQLite {
 			urlQuery = `
@@ -140,7 +232,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			`
 		}
 
-		rows, err := s.db.QueryContext(ctx, urlQuery, trimmedCand, candPattern)
+		rows, err := s.db.QueryContext(ctx, urlQuery, candURL, candPattern)
 		if err == nil {
 			for rows.Next() {
 				inc, err := scanIncident(rows)
@@ -148,8 +240,10 @@ func (s *SQLStore) FindOrCreateIncident(
 					continue
 				}
 				if isWithinWindow(inc, itemTime, windowDuration) {
-					matched = inc
-					break
+					if inc.PrimaryURL == candURL || sliceContainsExact(inc.SourceURLs, candURL) {
+						matched = inc
+						break
+					}
 				}
 			}
 			_ = rows.Close()
@@ -194,6 +288,20 @@ func (s *SQLStore) FindOrCreateIncident(
 						cveWindow = 60 * 24 * time.Hour
 					}
 					if isWithinWindow(inc, itemTime, cveWindow) {
+						// Disjoint CVE guard: must share at least one identical CVE
+						if !hasOverlappingCVEs(cves, inc.CVEs) {
+							continue
+						}
+						// Product mismatch guard: if both identify products and they differ, do not merge
+						incNorm := models.NormalizeProduct(inc.AffectedProduct)
+						if normProduct != "" && incNorm != "" && normProduct != incNorm {
+							continue
+						}
+						// Aggregated digest guard: if existing incident already holds >= 5 CVEs (patch roundup),
+						// do not merge an incoming single-product report into the digest
+						if len(inc.CVEs) >= 5 && normProduct != "" && incNorm == "" {
+							continue
+						}
 						matched = inc
 						break
 					}
@@ -256,7 +364,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// Aggregates reports concerning the same specific product/service belonging to a target organization
 	// (e.g. GMO + Onamae Desktop Cloud) regardless of attack type, while preventing false mergers
 	// across distinct products or different organizations with similarly named products.
-	if matched == nil && normVictim != "" && (normProduct != "" || rawProduct != "") {
+	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) && (normProduct != "" || rawProduct != "") {
 		prodTarget := normProduct
 		if prodTarget == "" {
 			prodTarget = strings.ToLower(rawProduct)
@@ -307,6 +415,10 @@ func (s *SQLStore) FindOrCreateIncident(
 					continue
 				}
 				if isWithinWindow(inc, itemTime, windowDuration) {
+					// Guard: Disjoint CVEs indicate separate vulnerabilities even within the same organization/product
+					if len(cves) > 0 && len(inc.CVEs) > 0 && !hasOverlappingCVEs(cves, inc.CVEs) {
+						continue
+					}
 					matched = inc
 					break
 				}
@@ -348,6 +460,10 @@ func (s *SQLStore) FindOrCreateIncident(
 					if incNormProd != "" && normProduct != "" && incNormProd != normProduct {
 						continue
 					}
+					// Guard: Disjoint CVEs indicate distinct security advisories
+					if len(cves) > 0 && len(inc.CVEs) > 0 && !hasOverlappingCVEs(cves, inc.CVEs) {
+						continue
+					}
 					matched = inc
 					break
 				}
@@ -364,7 +480,18 @@ func (s *SQLStore) FindOrCreateIncident(
 		if itemTime.Before(matched.FirstSeenAt) {
 			matched.FirstSeenAt = itemTime
 		}
-		matched.ReportCount++
+
+		// Prevent double counting of the same report if it was already processed or scraped
+		alreadyContained := false
+		for _, sd := range matched.SourcesDetail {
+			if (item.URL != "" && sd.URL == item.URL) || (item.Title != "" && sd.Title == item.Title) {
+				alreadyContained = true
+				break
+			}
+		}
+		if !alreadyContained {
+			matched.ReportCount++
+		}
 
 		matched.CVEs = mergeUniqueStrings(matched.CVEs, cves)
 		if matched.AffectedProduct == "" && rawProduct != "" {
@@ -461,13 +588,14 @@ func (s *SQLStore) FindOrCreateIncident(
 			}
 		}
 
-		if matched.PrimaryURL == "" && item.URL != "" {
+		if matched.PrimaryURL == "" && len(candidateURLs) > 0 {
+			matched.PrimaryURL = candidateURLs[0]
+		} else if matched.PrimaryURL == "" && item.URL != "" {
 			matched.PrimaryURL = item.URL
 		}
+
 		for _, u := range candidateURLs {
-			if u != "" {
-				matched.SourceURLs = appendUniqueString(matched.SourceURLs, u)
-			}
+			matched.SourceURLs = appendUniqueString(matched.SourceURLs, u)
 		}
 		matched.SourcesDetail = appendSourceDetail(matched.SourcesDetail, detail)
 		if item.Metadata != nil {
@@ -1622,7 +1750,8 @@ func isJapaneseText(s string) bool {
 	return false
 }
 
-// UpdateIncidentTranslations updates title, summary, impact analysis, victim_org_en, and affected_product_en of an incident and syncs child threat items.
+// UpdateIncidentTranslations updates title, summary, impact analysis, victim_org_en, and affected_product_en of an incident.
+// Child threat_items preserve their original article-specific enrichment to prevent cross-contamination.
 func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, summary, impact, victimEn, productEn string, actions []string) error {
 	var query string
 	nowStr := time.Now().UTC().Format(time.RFC3339)
@@ -1637,80 +1766,24 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 			updated_at = ?
 		WHERE id = ?`
 		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
-		if err != nil {
-			return err
-		}
-	} else {
-		query = `UPDATE incidents SET
-			title_ja = CASE WHEN title_ja IS NULL OR title_ja = '' THEN title ELSE title_ja END,
-			summary_ja = CASE WHEN summary_ja IS NULL OR summary_ja = '' THEN summary ELSE summary_ja END,
-			impact_analysis_ja = CASE WHEN impact_analysis_ja IS NULL OR impact_analysis_ja = '' THEN impact_analysis ELSE impact_analysis_ja END,
-			title = $1, summary = $2, impact_analysis = $3,
-			victim_org_en = COALESCE(NULLIF($4, ''), victim_org_en),
-			affected_product_en = COALESCE(NULLIF($5, ''), affected_product_en),
-			updated_at = $6
-		WHERE id = $7`
-		_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
-	// Update child threat_items' enriched_data to include English fields and recommended actions
-	var cQuery string
-	if s.isSQLite {
-		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = ?`
-	} else {
-		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = $1`
-	}
-	rows, err := s.db.QueryContext(ctx, cQuery, id)
-	if err == nil {
-		type childItem struct {
-			id string
-			ed map[string]interface{}
-		}
-		var itemsToUpdate []childItem
-		for rows.Next() {
-			var cid, edStr sql.NullString
-			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
-				var ed map[string]interface{}
-				if edStr.Valid && edStr.String != "" {
-					_ = json.Unmarshal([]byte(edStr.String), &ed)
-				}
-				if ed == nil {
-					ed = make(map[string]interface{})
-				}
-				ed["title"] = title
-				ed["summary"] = summary
-				ed["impact_analysis"] = impact
-				if victimEn != "" {
-					ed["victim_org_en"] = victimEn
-				}
-				if productEn != "" {
-					ed["affected_product_en"] = productEn
-				}
-				if len(actions) > 0 {
-					ed["recommended_actions"] = actions
-				}
-				itemsToUpdate = append(itemsToUpdate, childItem{id: cid.String, ed: ed})
-			}
-		}
-		_ = rows.Close()
-
-		for _, item := range itemsToUpdate {
-			newBytes, _ := json.Marshal(item.ed)
-			if s.isSQLite {
-				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(newBytes), item.id)
-			} else {
-				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(newBytes), item.id)
-			}
-		}
-	}
-
-	return nil
+	query = `UPDATE incidents SET
+		title_ja = CASE WHEN title_ja IS NULL OR title_ja = '' THEN title ELSE title_ja END,
+		summary_ja = CASE WHEN summary_ja IS NULL OR summary_ja = '' THEN summary ELSE summary_ja END,
+		impact_analysis_ja = CASE WHEN impact_analysis_ja IS NULL OR impact_analysis_ja = '' THEN impact_analysis ELSE impact_analysis_ja END,
+		title = $1, summary = $2, impact_analysis = $3,
+		victim_org_en = COALESCE(NULLIF($4, ''), victim_org_en),
+		affected_product_en = COALESCE(NULLIF($5, ''), affected_product_en),
+		updated_at = $6
+	WHERE id = $7`
+	_, err := s.db.ExecContext(ctx, query, title, summary, impact, victimEn, productEn, nowStr, id)
+	return err
 }
 
-// UpdateIncidentJapaneseTranslations updates title_ja, summary_ja, impact_analysis_ja of an incident and syncs child threat items.
+// UpdateIncidentJapaneseTranslations updates title_ja, summary_ja, impact_analysis_ja of an incident.
+// Child threat_items preserve their original article-specific enrichment to prevent cross-contamination.
 func (s *SQLStore) UpdateIncidentJapaneseTranslations(ctx context.Context, id, titleJa, summaryJa, impactJa string, actions []string) error {
 	var query string
 	nowStr := time.Now().UTC().Format(time.RFC3339)
@@ -1719,65 +1792,14 @@ func (s *SQLStore) UpdateIncidentJapaneseTranslations(ctx context.Context, id, t
 			title_ja = ?, summary_ja = ?, impact_analysis_ja = ?, updated_at = ?
 		WHERE id = ?`
 		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
-		if err != nil {
-			return err
-		}
-	} else {
-		query = `UPDATE incidents SET
-			title_ja = $1, summary_ja = $2, impact_analysis_ja = $3, updated_at = $4
-		WHERE id = $5`
-		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
-	// Update child threat_items' enriched_data to sync Japanese fields
-	var cQuery string
-	if s.isSQLite {
-		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = ?`
-	} else {
-		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = $1`
-	}
-	rows, err := s.db.QueryContext(ctx, cQuery, id)
-	if err == nil {
-		type childItem struct {
-			id string
-			ed map[string]interface{}
-		}
-		var itemsToUpdate []childItem
-		for rows.Next() {
-			var cid, edStr sql.NullString
-			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
-				var ed map[string]interface{}
-				if edStr.Valid && edStr.String != "" {
-					_ = json.Unmarshal([]byte(edStr.String), &ed)
-				}
-				if ed == nil {
-					ed = make(map[string]interface{})
-				}
-				ed["title_ja"] = titleJa
-				ed["summary_ja"] = summaryJa
-				ed["impact_analysis_ja"] = impactJa
-				if len(actions) > 0 {
-					ed["recommended_actions_ja"] = actions
-				}
-				itemsToUpdate = append(itemsToUpdate, childItem{id: cid.String, ed: ed})
-			}
-		}
-		rows.Close()
-
-		for _, item := range itemsToUpdate {
-			updatedJSON, _ := json.Marshal(item.ed)
-			if s.isSQLite {
-				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(updatedJSON), item.id)
-			} else {
-				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(updatedJSON), item.id)
-			}
-		}
-	}
-
-	return nil
+	query = `UPDATE incidents SET
+		title_ja = $1, summary_ja = $2, impact_analysis_ja = $3, updated_at = $4
+	WHERE id = $5`
+	_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
+	return err
 }
 
 // CleanChineseCTITermsInDatabase performs direct SQL replacements of prominent Chinese CTI terms in title_ja and summary_ja.

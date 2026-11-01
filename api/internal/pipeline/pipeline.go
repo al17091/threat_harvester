@@ -200,6 +200,19 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
 				i+itemIdx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)
 
+			// Cluster into STIX 2.1 parent incident (30-day dynamic sliding window) BEFORE notification evaluation.
+			// This attaches the item to its canonical parent incident, enabling parent-level duplicate suppression.
+			incident, err := p.store.FindOrCreateIncident(ctx, item, enriched, 30)
+			if err != nil {
+				log.Printf("[Pipeline] Error clustering incident for item %s: %v", item.Title, err)
+			} else if incident != nil {
+				item.IncidentID = incident.ID
+				log.Printf("[Pipeline] Clustered item into parent incident: %s (Total reports: %d, Victim: %s)",
+					incident.ID, incident.ReportCount, incident.VictimOrg)
+			} else {
+				item.IncidentID = ""
+			}
+
 			cfg := config.GetSettings().GetConfig()
 			notifyLang := cfg.Pipeline.NotifyLanguage
 			circuitBreakerMax := cfg.Pipeline.CircuitBreakerMaxAlerts
@@ -232,15 +245,32 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			}
 
 			// Suppress notifications for older historical incidents (> 7 days old)
-			if shouldNotify && item.PublishedAt != nil && time.Since(*item.PublishedAt) > 7*24*time.Hour {
-				log.Printf("[Pipeline] Suppressing notification for older incident (published %s): %s",
-					item.PublishedAt.Format("2006-01-02"), enriched.TitleJa)
-				shouldNotify = false
+			if shouldNotify {
+				if item.PublishedAt != nil && time.Since(*item.PublishedAt) > 7*24*time.Hour {
+					log.Printf("[Pipeline] Suppressing notification for older incident (published %s): %s",
+						item.PublishedAt.Format("2006-01-02"), enriched.TitleJa)
+					shouldNotify = false
+				} else if item.PublishedAt == nil && !item.HarvestedAt.IsZero() && time.Since(item.HarvestedAt) > 7*24*time.Hour {
+					log.Printf("[Pipeline] Suppressing notification for older incident (harvested %s): %s",
+						item.HarvestedAt.Format("2006-01-02"), enriched.TitleJa)
+					shouldNotify = false
+				}
+			}
+
+			// Suppress duplicate alerts if parent incident was already notified within 48h (unless severity elevated to Critical)
+			if shouldNotify && incident != nil && incident.ReportCount > 1 {
+				isIncNotified, err := p.store.IsIncidentRecentlyNotified(ctx, incident.ID, 48)
+				if err == nil && isIncNotified {
+					if enriched.Severity != models.SeverityCritical {
+						log.Printf("[Pipeline] Suppressing alert: parent incident %s already notified within 48h: %s", incident.ID, enriched.TitleJa)
+						shouldNotify = false
+					}
+				}
 			}
 
 			// Suppress duplicate alerts for same victim organization or CVE within 48 hours
 			if shouldNotify {
-				isRecent, err := p.store.IsRecentlyNotified(ctx, enriched.VictimOrgs, enriched.TitleJa, 48)
+				isRecent, err := p.store.IsRecentlyNotified(ctx, enriched.VictimOrgs, enriched.TitleJa, enriched.CVEs, 48)
 				if err == nil && isRecent {
 					log.Printf("[Pipeline] Suppressing alert due to 48h cooldown for victim/CVE: %s", enriched.TitleJa)
 					shouldNotify = false
@@ -282,19 +312,6 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 						}
 					}
 				}
-			}
-
-			// Cluster into STIX 2.1 parent incident (30-day dynamic sliding window)
-			// Non-threat items or Info severity items return nil, nil and will not create parent incidents.
-			incident, err := p.store.FindOrCreateIncident(ctx, item, enriched, 30)
-			if err != nil {
-				log.Printf("[Pipeline] Error clustering incident for item %s: %v", item.Title, err)
-			} else if incident != nil {
-				item.IncidentID = incident.ID
-				log.Printf("[Pipeline] Clustered item into parent incident: %s (Total reports: %d, Victim: %s)",
-					incident.ID, incident.ReportCount, incident.VictimOrg)
-			} else {
-				item.IncidentID = ""
 			}
 
 			if err := p.store.MarkSeen(ctx, item, enriched, notified); err != nil {

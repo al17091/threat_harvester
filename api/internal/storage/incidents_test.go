@@ -746,6 +746,156 @@ func TestSeverityPrecedenceAndDisjointCVEIsolation(t *testing.T) {
 	}
 }
 
+func TestBlackholeClusteringPrevention(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub := time.Now().UTC()
+
+	// 1. Initial FortiOS critical vulnerability incident
+	itemForti := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"Fortinet Security Advisory",
+		"FortiOS SSL-VPN Authentication Bypass RCE",
+		"https://fortiguard.com/psirt/FG-IR-26-001",
+		"FortiOS VPN vulnerability exploited in the wild",
+		"Raw body with links to https://securityaffairs.com and https://cisa.gov/known-exploited-vulnerabilities-catalog",
+		&pub,
+		map[string]interface{}{
+			"linked_urls": []string{
+				"https://securityaffairs.com/",
+				"https://cisa.gov/known-exploited-vulnerabilities-catalog",
+			},
+		},
+	)
+	enrichedForti := &models.EnrichedThreat{
+		Title:            "FortiOS SSL-VPN Remote Code Execution",
+		TitleJa:          "FortiOS SSL-VPNにおけるリモートコード実行の脆弱性（CVE-2026-12345）",
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceIndirect,
+		AttackType:       "Zero-day",
+		CVEs:             []string{"CVE-2026-12345"},
+		AffectedProducts: []string{"FortiOS"},
+	}
+
+	incForti, err := store.FindOrCreateIncident(ctx, itemForti, enrichedForti, 30)
+	if err != nil {
+		t.Fatalf("failed to create FortiOS incident: %v", err)
+	}
+
+	// 2. Trend Micro report linking to domain root https://securityaffairs.com
+	// Must NOT cluster with FortiOS via Track 0 domain root or substring matching!
+	itemTrend := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"Trend Micro Research",
+		"AI-driven Cyber Attack Infrastructure Discovered",
+		"https://trendmicro.com/en_us/research/26/ai-infrastructure.html",
+		"Global cybercrime infrastructure report",
+		"Body linking to https://securityaffairs.com",
+		&pub,
+		map[string]interface{}{
+			"linked_urls": []string{"https://securityaffairs.com/"},
+		},
+	)
+	enrichedTrend := &models.EnrichedThreat{
+		Title:          "AI-driven Cyber Attack Infrastructure Discovered",
+		TitleJa:        "AI駆動型サイバー攻撃インフラの発見",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceNone,
+		AttackType:     "Cybercrime",
+	}
+
+	incTrend, err := store.FindOrCreateIncident(ctx, itemTrend, enrichedTrend, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster Trend Micro report: %v", err)
+	}
+	if incTrend.ID == incForti.ID {
+		t.Fatalf("blackhole bug reproduced: Trend Micro report falsely merged into FortiOS incident via domain root!")
+	}
+
+	// 3. Apple iOS zero-day with distinct CVE and product. Must NOT merge into FortiOS!
+	itemApple := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"Apple Security",
+		"Apple iOS 18.7 Zero-day Exploit",
+		"https://support.apple.com/en-us/HT214000",
+		"Apple releases emergency patch for iOS",
+		"Apple iOS kernel vulnerability CVE-2026-86950",
+		&pub,
+		nil,
+	)
+	enrichedApple := &models.EnrichedThreat{
+		Title:            "Apple iOS Kernel Zero-day",
+		TitleJa:          "Apple iOSにおける悪用確認済みのゼロデイ脆弱性（CVE-2026-86950）",
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceIndirect,
+		AttackType:       "Zero-day",
+		CVEs:             []string{"CVE-2026-86950"},
+		AffectedProducts: []string{"Apple iOS"},
+	}
+
+	incApple, err := store.FindOrCreateIncident(ctx, itemApple, enrichedApple, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster Apple report: %v", err)
+	}
+	if incApple.ID == incForti.ID {
+		t.Fatalf("blackhole bug reproduced: Apple iOS report merged into FortiOS incident!")
+	}
+
+	// 4. Generic victim org reports (e.g. Multiple Organizations / Japanese enterprises)
+	// Must NOT merge into each other under generic victim clustering!
+	itemGeneric1 := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"Report 1",
+		"Cyber Threat Landscape Survey",
+		"https://example.com/survey-2026",
+		"Annual survey",
+		"Summary",
+		&pub,
+		nil,
+	)
+	enrichedGeneric1 := &models.EnrichedThreat{
+		Title:          "Cyber Threat Landscape Survey",
+		TitleJa:        "2026年サイバー脅威動向調査",
+		Severity:       models.SeverityMedium,
+		JapanRelevance: models.JapanRelevanceIndirect,
+		VictimOrgs:     []string{"Multiple Organizations (Global Trend Report)"},
+	}
+	incGen1, err := store.FindOrCreateIncident(ctx, itemGeneric1, enrichedGeneric1, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster generic report 1: %v", err)
+	}
+
+	itemGeneric2 := models.NewThreatItem(
+		models.SourceTypeWebSearch,
+		"Report 2",
+		"IDC Frontier Ransomware Incident",
+		"https://example.com/idc-incident",
+		"IDC Frontier breach",
+		"Summary",
+		&pub,
+		nil,
+	)
+	enrichedGeneric2 := &models.EnrichedThreat{
+		Title:          "IDC Frontier Ransomware Incident",
+		TitleJa:        "IDCフロンティアにおけるランサムウェア被害",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		VictimOrgs:     []string{"Multiple Organizations (Global Trend Report)"}, // noisy extraction
+	}
+	incGen2, err := store.FindOrCreateIncident(ctx, itemGeneric2, enrichedGeneric2, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster generic report 2: %v", err)
+	}
+	if incGen1.ID == incGen2.ID {
+		t.Fatalf("generic victim org falsely clustered unrelated reports together!")
+	}
+}
+
 
 
 
