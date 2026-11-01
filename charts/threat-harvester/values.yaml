@@ -148,8 +148,8 @@ config:
     extractor: "qwen"
     refiner: "gemini"
     translator: "gemini"
-    refineSeverities: "CRITICAL,HIGH"
-    refineJapanOnly: false
+    refineSeverities: "CRITICAL"
+    refineJapanOnly: true
   searxngUrl: "https://searxng.lab.internal/search"
   searxngResearchUrl: "https://searxng-research.lab.internal/search"
   checkIntervalHours: 1
