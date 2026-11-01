@@ -463,4 +463,28 @@ func TestThreatActorValidationAndGrounding(t *testing.T) {
 	}
 }
 
+func TestIsJapaneseText(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected bool
+	}{
+		{"石油資源開発が利用するラクスライトクラウドのASPサービス「blastmail」に不正アクセス", true}, // Natural Japanese with Hiragana & Katakana
+		{"脆弱性情報に関する注意喚起", true},                                                // Japanese with Hiragana
+		{"マルウェア感染インシデント", true},                                                // Japanese with Katakana
+		{"JAPEX邮件杂志服务遭受不正当访问，可能导致个人数据泄露", false},                         // Pure Chinese (Hanzi)
+		{"关于某些黑客组织利用某某漏洞的分析报告", false},                                         // Pure Chinese
+		{"Healthcare Sector Cyberattack Report: Ransomware and Data Breaches", false}, // English
+		{"LockBit Ransomware Advisory 2026", false},                                   // English
+		{"", false},                                                                   // Empty
+	}
+
+	for _, tc := range testCases {
+		res := IsJapaneseText(tc.input)
+		if res != tc.expected {
+			t.Errorf("IsJapaneseText(%q) = %v; want %v", tc.input, res, tc.expected)
+		}
+	}
+}
+
+
 

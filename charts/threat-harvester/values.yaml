@@ -215,3 +215,7 @@ persistence:
   accessMode: ReadWriteOnce
   size: 5Gi
   storageClass: ""
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+

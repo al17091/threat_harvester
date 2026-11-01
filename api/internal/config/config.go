@@ -348,7 +348,7 @@ func DefaultConfig() AppConfig {
 			CheckIntervalHours:      1,
 			NotifyDirectOnly:        false,
 			SchedulerEnabled:        true,
-			NotifyLanguage:          "en",
+			NotifyLanguage:          "ja",
 			CircuitBreakerMaxAlerts: 5,
 			NotifyDryRun:            false,
 		},
