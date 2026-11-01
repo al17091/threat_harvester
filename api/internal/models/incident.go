@@ -66,6 +66,18 @@ var genericVictimWords = map[string]bool{
 	"multiple": true, "unknown": true, "n/a": true, "none": true, "various": true,
 	"victim": true, "target": true, "organization": true, "company": true,
 	"企業": true, "病院": true, "大学": true, "自治体": true, "学校": true,
+	"multiple organizations": true, "japanese enterprises": true, "not specified": true,
+	"various organizations": true, "various companies": true, "domestic companies": true,
+	"各社": true, "複数社": true, "不特定": true, "未特定": true,
+}
+
+var genericVictimSubstrings = []string{
+	"multiple organization", "multiple enterprise", "multiple compan",
+	"global trend report", "trend report", "annual report", "survey report", "cybersecurity survey",
+	"not specified", "unspecified", "not identified", "unknown organization", "unknown victim",
+	"various organization", "various compan", "japanese enterprise", "japanese organization",
+	"domestic enterprise", "domestic compan", "国内の企業", "国内の組織", "不特定の", "複数の企業",
+	"複数の組織", "各企業", "複数企業", "各組織", "複数組織", "サプライチェーン", "調査レポート",
 }
 
 // IsGenericVictimOrg checks if a victim organization name is too generic to cluster on safely.
@@ -74,7 +86,15 @@ func IsGenericVictimOrg(name string) bool {
 	if cleaned == "" || len([]rune(cleaned)) < 2 {
 		return true
 	}
-	return genericVictimWords[cleaned]
+	if genericVictimWords[cleaned] {
+		return true
+	}
+	for _, sub := range genericVictimSubstrings {
+		if strings.Contains(cleaned, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 var invalidActorSubstrings = []string{
