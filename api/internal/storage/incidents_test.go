@@ -620,6 +620,132 @@ func TestTargetOrgAndAffectedProductClustering(t *testing.T) {
 	}
 }
 
+func TestSeverityPrecedenceAndDisjointCVEIsolation(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to init store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub1 := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
+	pub2 := pub1.Add(1 * time.Hour)
+	pub3 := pub1.Add(2 * time.Hour)
+
+	// Report 1: Critical RCE Zero-Day on PAN-OS (CVE-2026-0322)
+	item1 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"The Hacker News",
+		"PAN-OS RCE Flaw Exploited in the Wild (CVE-2026-0322)",
+		"https://thehackernews.com/cve-2026-0322",
+		"Active exploitation of PAN-OS RCE",
+		"CVE-2026-0322 active exploitation details",
+		&pub1,
+		nil,
+	)
+	enriched1 := &models.EnrichedThreat{
+		Title:            "Palo Alto Networks Patches Actively Exploited PAN-OS RCE Vulnerability (CVE-2026-0322)",
+		TitleJa:          "Palo Alto Networks PAN-OSにおける悪用確認済みのRCEゼロデイ脆弱性（CVE-2026-0322）",
+		Summary:          "Palo Alto Networks has released patches for an actively exploited RCE zero-day.",
+		SummaryJa:        "Palo Alto Networksは、悪用が確認されたPAN-OSのRCEゼロデイ脆弱性に対する修正パッチを公開しました。",
+		ImpactAnalysisJa: "管理インターフェイスが露出している場合、完全な侵害を受ける危険性があります。",
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		AttackType:       "Zero-day",
+		CVEs:             []string{"CVE-2026-0322"},
+		AffectedProducts: []string{"Palo Alto Networks PAN-OS"},
+	}
+
+	inc1, err := store.FindOrCreateIncident(ctx, item1, enriched1, 30)
+	if err != nil {
+		t.Fatalf("failed to create incident 1: %v", err)
+	}
+	if inc1.Severity != models.SeverityCritical {
+		t.Fatalf("expected Critical severity, got %s", inc1.Severity)
+	}
+
+	// Report 2: Same CVE-2026-0322, but High severity vendor notice with different (lower-priority) summary
+	item2 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"Vendor Advisory",
+		"Palo Alto Networks Advisory on CVE-2026-0322",
+		"https://securityadvisories.paloaltonetworks.com/cve-2026-0322",
+		"Vendor advisory for PAN-OS CVE-2026-0322",
+		"Vendor advisory details",
+		&pub2,
+		nil,
+	)
+	enriched2 := &models.EnrichedThreat{
+		Title:            "Vendor Advisory: PAN-OS CVE-2026-0322",
+		TitleJa:          "Palo Alto NetworksによるCVE-2026-0322アドバイザリ",
+		Summary:          "Minor vendor advisory summary",
+		SummaryJa:        "ベンダーによるパッチ適用の案内",
+		ImpactAnalysisJa: "パッチ適用により影響は限定的になります。",
+		Severity:         models.SeverityHigh, // Lower than Critical!
+		JapanRelevance:   models.JapanRelevanceIndirect,
+		AttackType:       "Vulnerability",
+		CVEs:             []string{"CVE-2026-0322"},
+		AffectedProducts: []string{"Palo Alto Networks PAN-OS"},
+	}
+
+	inc2, err := store.FindOrCreateIncident(ctx, item2, enriched2, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster report 2: %v", err)
+	}
+	if inc2.ID != inc1.ID {
+		t.Fatalf("expected report 2 to cluster into inc1 due to shared CVE, got %s", inc2.ID)
+	}
+	// Verify that the Critical title and summary were PRESERVED and not overwritten by the lower-severity report!
+	if inc2.Severity != models.SeverityCritical {
+		t.Errorf("expected Severity to remain Critical, got %s", inc2.Severity)
+	}
+	if inc2.TitleJa != enriched1.TitleJa {
+		t.Errorf("expected TitleJa to be preserved from Critical report: %q, got: %q", enriched1.TitleJa, inc2.TitleJa)
+	}
+	if inc2.SummaryJa != enriched1.SummaryJa {
+		t.Errorf("expected SummaryJa to be preserved from Critical report: %q, got: %q", enriched1.SummaryJa, inc2.SummaryJa)
+	}
+
+	// Report 3: Disjoint CVE on PAN-OS (CVE-2026-9999, DoS advisory, High severity)
+	item3 := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"Vendor Advisory",
+		"Palo Alto Networks PAN-OS DoS Advisory (CVE-2026-9999)",
+		"https://securityadvisories.paloaltonetworks.com/cve-2026-9999",
+		"Denial of service advisory for PAN-OS",
+		"CVE-2026-9999 DoS details",
+		&pub3,
+		nil,
+	)
+	enriched3 := &models.EnrichedThreat{
+		Title:            "Palo Alto Networks PAN-OS Denial of Service Vulnerability Advisory",
+		TitleJa:          "Palo Alto Networks PAN-OSのサービス拒否（DoS）脆弱性に関するアドバイザリ",
+		Summary:          "DoS vulnerability in PAN-OS",
+		SummaryJa:        "PAN-OSにおけるサービス拒否脆弱性",
+		ImpactAnalysisJa: "ファイアウォールがメンテナンスモードになる恐れがあります。",
+		Severity:         models.SeverityHigh,
+		JapanRelevance:   models.JapanRelevanceIndirect,
+		AttackType:       "Vulnerability",
+		CVEs:             []string{"CVE-2026-9999"}, // Disjoint from CVE-2026-0322!
+		AffectedProducts: []string{"Palo Alto Networks PAN-OS"},
+	}
+
+	inc3, err := store.FindOrCreateIncident(ctx, item3, enriched3, 30)
+	if err != nil {
+		t.Fatalf("failed to cluster report 3: %v", err)
+	}
+	// Must NOT cluster with inc1 because CVEs are disjoint and attack types/severities differ!
+	if inc3.ID == inc1.ID {
+		t.Fatalf("expected report 3 with disjoint CVE to create separate incident, but clustered into inc1: %s", inc3.ID)
+	}
+	if inc3.Severity != models.SeverityHigh {
+		t.Errorf("expected report 3 to have Severity High, got %s", inc3.Severity)
+	}
+	if inc3.TitleJa != enriched3.TitleJa {
+		t.Errorf("expected report 3 to have its own TitleJa, got: %q", inc3.TitleJa)
+	}
+}
+
 
 
 

@@ -232,6 +232,16 @@ func (s *SQLStore) FindOrCreateIncident(
 					if isWithinWindow(inc, itemTime, windowDuration) {
 						incNorm := models.NormalizeProduct(inc.AffectedProduct)
 						if incNorm == normProduct || strings.Contains(strings.ToLower(inc.Title), normProduct) {
+							// Disjoint CVE guard: If both have CVEs and none overlap, they are different vulnerabilities!
+							if len(cves) > 0 && len(inc.CVEs) > 0 && !hasOverlappingCVEs(cves, inc.CVEs) {
+								continue
+							}
+							// Zero-day / active exploit isolation guard: Don't cluster an active zero-day RCE with a generic advisory/DoS without shared CVE
+							incIsZeroDay := strings.EqualFold(inc.AttackType, "Zero-day") || inc.Severity == models.SeverityCritical
+							itemIsZeroDay := strings.EqualFold(attackType, "Zero-day") || (enriched != nil && enriched.Severity == models.SeverityCritical)
+							if incIsZeroDay != itemIsZeroDay && (len(cves) == 0 || len(inc.CVEs) == 0) {
+								continue
+							}
 							matched = inc
 							break
 						}
@@ -362,40 +372,76 @@ func (s *SQLStore) FindOrCreateIncident(
 		}
 
 		if enriched != nil {
-			if matched.Title == "" || (isJapaneseText(matched.Title) && enriched.Title != "") {
+			newSevScore := models.SeverityScore(enriched.Severity)
+			oldSevScore := models.SeverityScore(matched.Severity)
+
+			// Elevate severity & relevance to the highest observed level across all clustered reports
+			matched.Severity = models.HigherSeverity(matched.Severity, enriched.Severity)
+			matched.JapanRelevance = models.HigherRelevance(matched.JapanRelevance, enriched.JapanRelevance)
+
+			// Priority update for title, summary, and impact analysis:
+			// If incoming report has strictly HIGHER severity score, its title/summary/impact takes precedence.
+			// If incoming report has LOWER severity, do NOT overwrite the existing higher-severity title/summary.
+			// If EQUAL severity, fill in empty fields only.
+			if newSevScore > oldSevScore {
 				if enriched.Title != "" {
 					matched.Title = enriched.Title
 				}
+				if enriched.TitleJa != "" {
+					matched.TitleJa = enriched.TitleJa
+				}
+				if enriched.Summary != "" {
+					matched.Summary = enriched.Summary
+				}
+				if enriched.SummaryJa != "" {
+					matched.SummaryJa = enriched.SummaryJa
+				}
+				if enriched.ImpactAnalysis != "" {
+					matched.ImpactAnalysis = enriched.ImpactAnalysis
+				}
+				if enriched.ImpactAnalysisJa != "" {
+					matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
+				}
+				if enriched.AttackType != "" {
+					matched.AttackType = enriched.AttackType
+				}
+			} else {
+				// Equal or lower severity: only fill in missing fields, never overwrite existing higher/equal
+				if matched.Title == "" && enriched.Title != "" {
+					matched.Title = enriched.Title
+				} else if isJapaneseText(matched.Title) && enriched.Title != "" && !isJapaneseText(enriched.Title) {
+					// Prefer English canonical title for matched.Title if previously assigned Japanese text
+					matched.Title = enriched.Title
+				}
+				if matched.TitleJa == "" && enriched.TitleJa != "" {
+					matched.TitleJa = enriched.TitleJa
+				}
+				if matched.Summary == "" && enriched.Summary != "" {
+					matched.Summary = enriched.Summary
+				}
+				if (matched.SummaryJa == "" || matched.SummaryJa == matched.Summary) && enriched.SummaryJa != "" && enriched.SummaryJa != enriched.Summary {
+					matched.SummaryJa = enriched.SummaryJa
+				} else if matched.SummaryJa == "" && enriched.SummaryJa != "" {
+					matched.SummaryJa = enriched.SummaryJa
+				}
+				if matched.ImpactAnalysis == "" && enriched.ImpactAnalysis != "" {
+					matched.ImpactAnalysis = enriched.ImpactAnalysis
+				}
+				if (matched.ImpactAnalysisJa == "" || matched.ImpactAnalysisJa == matched.ImpactAnalysis) && enriched.ImpactAnalysisJa != "" && enriched.ImpactAnalysisJa != enriched.ImpactAnalysis {
+					matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
+				} else if matched.ImpactAnalysisJa == "" && enriched.ImpactAnalysisJa != "" {
+					matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
+				}
+				if matched.AttackType == "" && enriched.AttackType != "" {
+					matched.AttackType = enriched.AttackType
+				}
 			}
-			matched.Severity = models.HigherSeverity(matched.Severity, enriched.Severity)
-			matched.JapanRelevance = models.HigherRelevance(matched.JapanRelevance, enriched.JapanRelevance)
+
 			matched.ThreatActors = models.FilterGroundedThreatActors(
 				mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors),
 				matched.Title, matched.TitleJa, matched.RawContent, matched.Summary, matched.SummaryJa,
 				item.Title, item.RawContent, item.Summary,
 			)
-			if matched.AttackType == "" && enriched.AttackType != "" {
-				matched.AttackType = enriched.AttackType
-			}
-			if matched.TitleJa == "" {
-				matched.TitleJa = enriched.TitleJa
-			}
-			if matched.Summary == "" && enriched.Summary != "" {
-				matched.Summary = enriched.Summary
-			}
-			if enriched.SummaryJa != "" {
-				matched.SummaryJa = enriched.SummaryJa
-			} else if matched.SummaryJa == "" && enriched.Summary != "" {
-				matched.SummaryJa = enriched.Summary
-			}
-			if matched.ImpactAnalysis == "" && enriched.ImpactAnalysis != "" {
-				matched.ImpactAnalysis = enriched.ImpactAnalysis
-			}
-			if enriched.ImpactAnalysisJa != "" {
-				matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
-			} else if matched.ImpactAnalysisJa == "" && enriched.ImpactAnalysis != "" {
-				matched.ImpactAnalysisJa = enriched.ImpactAnalysis
-			}
 		}
 
 		if matched.AttackType == "" && isVuln {
@@ -412,23 +458,6 @@ func (s *SQLStore) FindOrCreateIncident(
 				matched.RawContent += "\n\n---\n\n" + newRaw
 			} else {
 				matched.RawContent = newRaw
-			}
-		}
-		if enriched != nil {
-			if matched.Summary == "" && enriched.Summary != "" {
-				matched.Summary = enriched.Summary
-			}
-			if (matched.SummaryJa == "" || matched.SummaryJa == matched.Summary) && enriched.SummaryJa != "" && enriched.SummaryJa != enriched.Summary {
-				matched.SummaryJa = enriched.SummaryJa
-			}
-			if matched.ImpactAnalysis == "" && enriched.ImpactAnalysis != "" {
-				matched.ImpactAnalysis = enriched.ImpactAnalysis
-			}
-			if (matched.ImpactAnalysisJa == "" || matched.ImpactAnalysisJa == matched.ImpactAnalysis) && enriched.ImpactAnalysisJa != "" && enriched.ImpactAnalysisJa != enriched.ImpactAnalysis {
-				matched.ImpactAnalysisJa = enriched.ImpactAnalysisJa
-			}
-			if matched.TitleJa == "" && enriched.TitleJa != "" {
-				matched.TitleJa = enriched.TitleJa
 			}
 		}
 
@@ -1540,6 +1569,23 @@ func mergeUniqueStrings(existing, incoming []string) []string {
 		}
 	}
 	return res
+}
+
+func hasOverlappingCVEs(a, b []string) bool {
+	set := make(map[string]struct{}, len(a))
+	for _, c := range a {
+		norm := strings.ToUpper(strings.TrimSpace(c))
+		if norm != "" {
+			set[norm] = struct{}{}
+		}
+	}
+	for _, c := range b {
+		norm := strings.ToUpper(strings.TrimSpace(c))
+		if _, ok := set[norm]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func appendUniqueString(list []string, item string) []string {
