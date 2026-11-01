@@ -640,6 +640,48 @@ func TestAPIIncidentFormatsAndLang(t *testing.T) {
 			}
 		}
 	}
+
+	// 6. Test incident with Chinese text in JA view: must not leak Chinese in title/summary/actions
+	cnItem := models.ThreatItem{
+		ID:          "cn-item-1",
+		Title:       "Unauthorized Access to Subsidiary by TSE Listed Company",
+		URL:         "https://example.com/cn-incident",
+		Summary:     "Investigation shows potential breach of customer data.",
+		PublishedAt: &now,
+		HarvestedAt: now,
+	}
+	cnEnriched := &models.EnrichedThreat{
+		ItemID:         "cn-item-1",
+		Item:           cnItem,
+		Title:          "Unauthorized Access to Subsidiary by TSE Listed Company",
+		TitleJa:        "Park24子公司遭遇的不正访问导致客户データ漏洩",
+		Summary:        "Investigation shows potential breach of customer data.",
+		SummaryJa:      "东证主板上市公司Park24公司発表，其子公司被害を受け了未認可の的网络访问。导致约160万用户个人信息窃取取。",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		VictimOrgs:     []string{"Park24"},
+		CVEs:           []string{"CVE-2026-2222"},
+	}
+	cnInc, _ := store.FindOrCreateIncident(ctx, cnItem, cnEnriched, 30)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/incidents/"+cnInc.ID+"?lang=ja", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on cn incident in JA view, got %d", w.Code)
+	}
+	var jaResBody map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &jaResBody); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	jaTitle, _ := jaResBody["title"].(string)
+	if models.HasChineseCTITerms(jaTitle) {
+		t.Errorf("expected JA title to not contain Chinese markers, got '%s'", jaTitle)
+	}
+	jaSummary, _ := jaResBody["summary"].(string)
+	if models.HasChineseCTITerms(jaSummary) {
+		t.Errorf("expected JA summary to not contain Chinese markers, got '%s'", jaSummary)
+	}
 }
 
 func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {

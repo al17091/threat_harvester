@@ -1706,6 +1706,32 @@ func (s *SQLStore) CleanChineseCTITermsInDatabase(ctx context.Context) (int64, e
 		{"漏洞", "脆弱性"},
 		{"黑客", "攻撃者"},
 		{"钓鱼", "フィッシング"},
+		{"非法访问", "不正アクセス"},
+		{"子公司", "子会社"},
+		{"遭遇的", ""},
+		{"导致", "により"},
+		{"客户", "顧客"},
+		{"东证主板上市公司", "東証プライム上場企業の"},
+		{"公司発表，其", "社は、その"},
+		{"电商巨头", "大手小売"},
+		{"巨头", "大手"},
+		{"其服务器", "サーバーが"},
+		{"导致约", "約"},
+		{"名会员的个人信息被漏洩", "名の会員の個人情報が漏洩"},
+		{"该公司已暂停相关服务并通知受影响的客户", "同社は関連サービスを停止し、影響を受ける顧客に通知を行っています"},
+		{"用户个人信息", "ユーザーの個人情報"},
+		{"窃取取", "窃取"},
+		{"盗取", "窃取"},
+		{"超过", "超の"},
+		{"个电子邮件地址及其他信息", "件のメールアドレスおよびその他の個人情報"},
+		{"个人身份信息", "個人情報"},
+		{"的网络访问", "のネットワークアクセス"},
+		{"调查结果显示约", "調査の結果、約"},
+		{"已漏洩", "漏洩した可能性があります"},
+		{"已暂停", "停止し"},
+		{"相关服务", "関連サービス"},
+		{"受影响的客户", "影響を受ける顧客"},
+		{"非法", "不正"},
 	}
 
 	var totalAffected int64
@@ -1713,21 +1739,27 @@ func (s *SQLStore) CleanChineseCTITermsInDatabase(ctx context.Context) (int64, e
 		var q string
 		if s.isSQLite {
 			q = `UPDATE incidents SET
+				title = REPLACE(title, ?, ?),
+				summary = REPLACE(summary, ?, ?),
+				impact_analysis = REPLACE(impact_analysis, ?, ?),
 				title_ja = REPLACE(title_ja, ?, ?),
 				summary_ja = REPLACE(summary_ja, ?, ?),
 				impact_analysis_ja = REPLACE(impact_analysis_ja, ?, ?)
-			WHERE title_ja LIKE '%' || ? || '%' OR summary_ja LIKE '%' || ? || '%' OR impact_analysis_ja LIKE '%' || ? || '%'`
-			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.cn, p.cn)
+			WHERE title LIKE '%' || ? || '%' OR summary LIKE '%' || ? || '%' OR impact_analysis LIKE '%' || ? || '%' OR title_ja LIKE '%' || ? || '%' OR summary_ja LIKE '%' || ? || '%' OR impact_analysis_ja LIKE '%' || ? || '%'`
+			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.cn, p.cn, p.cn, p.cn, p.cn)
 			if err == nil && res != nil {
 				n, _ := res.RowsAffected()
 				totalAffected += n
 			}
 		} else {
 			q = `UPDATE incidents SET
+				title = REPLACE(title, $1, $2),
+				summary = REPLACE(summary, $1, $2),
+				impact_analysis = REPLACE(impact_analysis, $1, $2),
 				title_ja = REPLACE(title_ja, $1, $2),
 				summary_ja = REPLACE(summary_ja, $1, $2),
 				impact_analysis_ja = REPLACE(impact_analysis_ja, $1, $2)
-			WHERE title_ja LIKE '%' || $1 || '%' OR summary_ja LIKE '%' || $1 || '%' OR impact_analysis_ja LIKE '%' || $1 || '%'`
+			WHERE title LIKE '%' || $1 || '%' OR summary LIKE '%' || $1 || '%' OR impact_analysis LIKE '%' || $1 || '%' OR title_ja LIKE '%' || $1 || '%' OR summary_ja LIKE '%' || $1 || '%' OR impact_analysis_ja LIKE '%' || $1 || '%'`
 			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja)
 			if err == nil && res != nil {
 				n, _ := res.RowsAffected()

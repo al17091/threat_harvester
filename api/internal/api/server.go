@@ -728,7 +728,9 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["title"] = tJaClean
 		} else if isCleanJapanese(tEnClean) {
 			inc["title"] = tEnClean
-		} else if tJaClean != "" {
+		} else if tEnClean != "" && !models.IsChineseOrCorruptedJapanese(tEnClean) {
+			inc["title"] = tEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(tJaClean) && tJaClean != "" {
 			inc["title"] = tJaClean
 		}
 
@@ -740,7 +742,9 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["summary"] = sJaClean
 		} else if isCleanJapanese(sEnClean) {
 			inc["summary"] = sEnClean
-		} else if sJaClean != "" {
+		} else if sEnClean != "" && !models.IsChineseOrCorruptedJapanese(sEnClean) {
+			inc["summary"] = sEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(sJaClean) && sJaClean != "" {
 			inc["summary"] = sJaClean
 		}
 
@@ -752,7 +756,9 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["impact_analysis"] = iJaClean
 		} else if isCleanJapanese(iEnClean) {
 			inc["impact_analysis"] = iEnClean
-		} else if iJaClean != "" {
+		} else if iEnClean != "" && !models.IsChineseOrCorruptedJapanese(iEnClean) {
+			inc["impact_analysis"] = iEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(iJaClean) && iJaClean != "" {
 			inc["impact_analysis"] = iJaClean
 		}
 
