@@ -974,6 +974,132 @@ Input items:
 	return results, nil
 }
 
+// TranslateBatchToJapanese translates multiple incidents into natural, professional Japanese in a single Gemini call.
+// It strictly forbids Chinese / Simplified Chinese characters and runs CleanChineseCTITerms as a safeguard.
+func (a *GeminiThreatAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []BatchTranslateItem) ([]BatchTranslateResult, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	cfg := config.GetSettings().GetConfig()
+	apiKey := cfg.AI.GeminiAPIKey
+	if apiKey == "" {
+		apiKey = cfg.AI.Escalation.GeminiAPIKey
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("no gemini api key configured")
+	}
+	model := cfg.AI.GeminiModel
+	if model == "" {
+		model = "gemini-3.5-flash-lite"
+	}
+
+	itemsJSON, _ := json.Marshal(items)
+	prompt := fmt.Sprintf(`You are an expert Cyber Threat Intelligence (CTI) editor and translator specializing in Japanese cybersecurity terminology.
+Translate each incident item in the JSON array from English into professional, fluent, cybersecurity-standard Japanese (suitable for JPCERT/CC or IPA security advisories).
+
+CRITICAL RULES:
+1. STRICTLY NO CHINESE CHARACTERS OR PHRASINGS (簡体字や中国語表現は一切禁止):
+   - Do NOT use Chinese terms like: 恶意软件 (malware), 攻击者/威胁行为者 (threat actor), 漏洞 (vulnerability), 勒索软件 (ransomware), 钓鱼 (phishing), 数据泄露/泄露 (data breach), 网络安全 (cybersecurity), 不正当访问 (unauthorized access), 个人数据 (personal data), 遭受 (suffered), 宣布 (announced).
+   - Use standard Japanese cybersecurity terminology:
+     - Malware -> マルウェア
+     - Threat actor / Cybercrime group -> 攻撃グループ / 脅威アクター / 攻撃者
+     - Vulnerability -> 脆弱性
+     - Ransomware -> ランサムウェア
+     - Data breach / Leak -> 情報漏洩 / データ侵害
+     - Unauthorized access -> 不正アクセス
+     - Personal data -> 個人情報
+     - Zero-day -> ゼロデイ
+     - Exploitation / Attack -> 悪用 / 攻撃
+2. MUST CONTAIN HIRAGANA AND KATAKANA:
+   - Output MUST be natural Japanese sentences containing Hiragana and Katakana.
+3. Keep the 'id' field exactly as provided in the input.
+4. 'title' -> concise Japanese headline (title_ja).
+5. 'summary' -> 2-3 sentence Japanese technical summary (summary_ja).
+6. 'impact_analysis' -> concrete impact and risk evaluation in Japanese (impact_analysis_ja).
+7. 'recommended_actions' -> array of strings in Japanese.
+8. Return ONLY a valid JSON array corresponding to the input items.
+
+Input items:
+%s
+`, string(itemsJSON))
+
+	reqBody := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: prompt}}},
+		},
+		GenerationConfig: &geminiGenConfig{
+			ResponseMimeType: "application/json",
+		},
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini batch status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var geminiResp geminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil || len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("empty batch response from gemini")
+	}
+
+	type rawResult struct {
+		ID                 string          `json:"id"`
+		Title              string          `json:"title"`
+		Summary            string          `json:"summary"`
+		ImpactAnalysis     string          `json:"impact_analysis"`
+		RecommendedActions json.RawMessage `json:"recommended_actions"`
+	}
+
+	rawJSONText := cleanJSONFences(geminiResp.Candidates[0].Content.Parts[0].Text)
+	var rawList []rawResult
+	if err := json.Unmarshal([]byte(rawJSONText), &rawList); err != nil {
+		var wrapped map[string]json.RawMessage
+		if err2 := json.Unmarshal([]byte(rawJSONText), &wrapped); err2 == nil {
+			for _, val := range wrapped {
+				var subList []rawResult
+				if err3 := json.Unmarshal(val, &subList); err3 == nil && len(subList) > 0 {
+					rawList = subList
+					break
+				}
+			}
+		}
+		if len(rawList) == 0 {
+			return nil, fmt.Errorf("failed to parse batch translation json: %w", err)
+		}
+	}
+
+	results := make([]BatchTranslateResult, 0, len(rawList))
+	for _, raw := range rawList {
+		results = append(results, BatchTranslateResult{
+			ID:                 raw.ID,
+			Title:              CleanChineseCTITerms(strings.TrimSpace(raw.Title), true),
+			Summary:            CleanChineseCTITerms(strings.TrimSpace(raw.Summary), true),
+			ImpactAnalysis:     CleanChineseCTITerms(strings.TrimSpace(raw.ImpactAnalysis), true),
+			RecommendedActions: ParseActionsFlexible(raw.RecommendedActions),
+		})
+	}
+
+	return results, nil
+}
+
 // TranslateFieldsToJapanese translates English CTI fields into natural, professional Japanese
 // adhering strictly to JPCERT/CC and IPA cybersecurity terminology, with zero Chinese characters/expressions.
 func (a *GeminiThreatAnalyzer) TranslateFieldsToJapanese(ctx context.Context, title, summary, impact string, actions []string) (string, string, string, []string, error) {
@@ -1109,9 +1235,9 @@ func (a *GeminiThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	if err != nil {
 		return err
 	}
-	enriched.TitleJa = tTitle
-	enriched.SummaryJa = tSummary
-	enriched.ImpactAnalysisJa = tImpact
+	enriched.TitleJa = CleanChineseCTITerms(tTitle, true)
+	enriched.SummaryJa = CleanChineseCTITerms(tSummary, true)
+	enriched.ImpactAnalysisJa = CleanChineseCTITerms(tImpact, true)
 	enriched.RecommendedActionsJa = tActions
 	return nil
 }

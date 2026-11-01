@@ -121,9 +121,19 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		uniqueBatch = append(uniqueBatch, item)
 	}
 
-	// Persistent store deduplication
+	// Persistent store deduplication & corporate PR notice filtering
 	var newItems []models.ThreatItem
 	for _, item := range uniqueBatch {
+		if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
+			log.Printf("[Pipeline] Discarding corporate PR notice: %s (%s)", item.Title, item.URL)
+			_ = p.store.MarkSeen(ctx, item, &models.EnrichedThreat{
+				Severity:       models.SeverityInfo,
+				JapanRelevance: models.JapanRelevanceNone,
+				TitleJa:        item.Title,
+				SummaryJa:      item.Summary,
+			}, false)
+			continue
+		}
 		seen, err := p.store.IsSeenItem(ctx, item)
 		if err != nil || !seen {
 			newItems = append(newItems, item)
@@ -164,8 +174,26 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				continue
 			}
 
+			if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent, enriched.Title, enriched.TitleJa, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
+				log.Printf("[Pipeline] Discarding analyzed corporate PR notice: %s", item.Title)
+				enriched.Severity = models.SeverityInfo
+				_ = p.store.MarkSeen(ctx, item, enriched, false)
+				continue
+			}
+
 			if models.IsServiceReleaseOrNonThreat(item, enriched) {
 				enriched.Severity = models.SeverityInfo
+			}
+
+			// Enforce guardrails on Japan Direct relevance (prevent Unknown/foreign CVEs from becoming Direct)
+			enriched.JapanRelevance = models.RefineJapanRelevance(item, enriched)
+
+			// Demote pure vulnerability advisories without active exploitation, PoC, or real-world breach
+			if models.IsPureVulnerabilityAdvisory(item, enriched) {
+				if enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh {
+					log.Printf("[Pipeline] Demoting pure vulnerability advisory from %s to Low: %s", enriched.Severity, item.Title)
+					enriched.Severity = models.SeverityLow
+				}
 			}
 
 			analyzedCount++
@@ -275,11 +303,11 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		}
 	}
 
-	// Translate any newly added Japanese incidents into English
-	if len(newItems) > 0 && p.analyzer != nil {
+	// Translate any Japanese incidents into English (runs every pipeline cycle to ensure zero untranslated backlog)
+	if p.analyzer != nil {
 		needingTrans, err := p.store.GetIncidentsNeedingTranslation(ctx, 50)
 		if err == nil && len(needingTrans) > 0 {
-			log.Printf("[Pipeline] Translating %d newly created incidents into English...", len(needingTrans))
+			log.Printf("[Pipeline] Translating %d incidents into English...", len(needingTrans))
 			var transItems []analyzer.BatchTranslateItem
 			for _, inc := range needingTrans {
 				sum := inc.Summary
@@ -290,9 +318,13 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				if imp == "" {
 					imp = inc.ImpactAnalysisJa
 				}
+				title := inc.Title
+				if title == "" {
+					title = inc.TitleJa
+				}
 				transItems = append(transItems, analyzer.BatchTranslateItem{
 					ID:              inc.ID,
-					Title:           inc.Title,
+					Title:           title,
 					Summary:         sum,
 					ImpactAnalysis:  imp,
 					VictimOrg:       inc.VictimOrg,

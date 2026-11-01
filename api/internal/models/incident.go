@@ -205,8 +205,10 @@ func NormalizeVictimOrg(org string) string {
 
 	// Remove common Japanese corporate affixes
 	jpAffixes := []string{
+		"インターネットグループ", "インターネット",
 		"株式会社", "有限会社", "合同会社", "一般社団法人", "公益財団法人",
 		"独立行政法人", "学校法人", "医療法人",
+		"ホールディングス", "グループ", "集團", "集团",
 	}
 	for _, affix := range jpAffixes {
 		lower = strings.ReplaceAll(lower, affix, "")
@@ -215,11 +217,17 @@ func NormalizeVictimOrg(org string) string {
 	// Remove English corporate affixes (longest phrases first)
 	enAffixes := []string{
 		"corporation", "co., ltd.", "co.,ltd.", "co. ltd.", "co. ltd",
+		"internet group", "internet",
 		"holdings", "holding", "group", "corp.", "corp", "inc.", "inc",
 		"ltd.", "ltd", "llc", "plc",
 	}
 	for _, affix := range enAffixes {
 		lower = strings.ReplaceAll(lower, affix, "")
+	}
+
+	// Canonical brand / service mapping to parent organizations
+	if strings.Contains(lower, "お名前.com") || strings.Contains(lower, "お名前com") || strings.Contains(lower, "onamae") {
+		return "gmo"
 	}
 
 	// Remove symbols and extra spaces
@@ -308,9 +316,113 @@ func SeverityScore(s Severity) int {
 	}
 }
 
+// HasRansomOrExtortionIntel checks whether the provided texts contain active threat intelligence
+// regarding ransom demands, ransom payments, financial extortion, or dark web leak site publications.
+// Such reports MUST be retained as threat intelligence even if they originate from corporate announcements.
+func HasRansomOrExtortionIntel(texts ...string) bool {
+	combined := strings.ToLower(strings.Join(texts, " "))
+	if strings.TrimSpace(combined) == "" {
+		return false
+	}
+
+	// 1. Explicit ransom and extortion keywords
+	ransomTerms := []string{
+		"身代金", "二重脅迫", "多重脅迫", "金銭要求", "金銭の要求",
+		"暗号資産で要求", "ビットコインで要求", "btcで要求", "仮想通貨で要求",
+		"攻撃者に支払", "攻撃者への支払", "犯人に支払", "犯人への支払", "ハッカーに支払", "ハッカーへの支払",
+		"身代金の支払", "身代金支払", "身代金支払い",
+		"ransom payment", "paid the ransom", "paid ransom", "demanded ransom", "demanding ransom",
+		"demanding payment", "extortion demand", "extortion payment", "double extortion",
+		"leak site", "data leak site", "リークサイト", "ダークウェブ", "dark web",
+		"懸賞金", "bug bounty", "bounty",
+	}
+	for _, term := range ransomTerms {
+		if strings.Contains(combined, term) {
+			return true
+		}
+	}
+
+	// 2. Ransom / extortion context combined with payment, demand, or cryptocurrency
+	isRansomContext := strings.Contains(combined, "ランサム") ||
+		strings.Contains(combined, "ransom") ||
+		strings.Contains(combined, "脅迫") ||
+		strings.Contains(combined, "恐喝") ||
+		strings.Contains(combined, "extortion")
+
+	if isRansomContext {
+		demandOrPayment := []string{
+			"支払", "要求", "ビットコイン", "bitcoin", "btc", "暗号資産", "仮想通貨",
+			"cryptocurrency", "億", "万ドル", "usd", "pay", "demand", "million",
+		}
+		for _, dop := range demandOrPayment {
+			if strings.Contains(combined, dop) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// IsCorporatePRNotice determines if an item is a purely corporate public relations (PR),
+// post-incident customer communication, apology, service recovery update, user sympathy payment,
+// or administrative petition that should not be handled as a cyber threat incident in the application.
+//
+// Exception: If the item contains active threat intelligence regarding ransom payments, ransom demands,
+// or extortion (e.g., whether a ransom was paid or demanded), it returns false so it is retained.
+func IsCorporatePRNotice(texts ...string) bool {
+	combined := strings.ToLower(strings.Join(texts, " "))
+	if strings.TrimSpace(combined) == "" {
+		return false
+	}
+
+	// Exception: If the report contains ransom or extortion intel, DO NOT drop.
+	if HasRansomOrExtortionIntel(texts...) {
+		return false
+	}
+
+	corporatePRMarkers := []string{
+		// Apology & generic corporate notices
+		"お詫びとお知らせ", "お詫びとご報告", "お詫びとお願い", "深くお詫び", "に関するお詫び", "不正アクセスに関するお詫び",
+		"notice of apology", "apology and notice", "apology regarding",
+		// Progress, intermediate, and third-party investigation reports
+		"経過報告", "進捗報告", "調査結果のご報告", "調査結果について", "調査結果中間報告", "中間報告",
+		"調査委員会", "特別調査委員会", "第三者委員会", "第三者調査機関", "外部専門機関による調査",
+		"progress report", "interim report", "investigation committee", "third-party investigation",
+		// Outage, maintenance, and service restoration notices
+		"サーバー停止", "サーバー再開", "サービス停止", "サービス再開", "サービス一時停止", "サービスの一時停止",
+		"復旧状況", "復旧進捗", "復旧報告", "復旧作業", "復旧のお知らせ", "復旧完了", "復旧のご報告",
+		"メンテナンスのお知らせ", "緊急メンテナンス", "メンテナンス作業", "障害報告", "システム障害のお詫び",
+		"service restoration", "restoration progress", "service outage update", "maintenance notice", "service resumed",
+		// Customer sympathy / compensation payouts (distinguished from ransom payment)
+		"見舞金", "お見舞金", "代替サービス提供", "代替サービスのご案内", "補償対応", "迷惑料", "クオカード", "ギフト券を進呈",
+		"sympathy money", "gift payment", "user compensation", "alternative service provision",
+		// Preventative measures, FAQs, and administrative follow-ups
+		"再発防止策", "再発防止に向けた", "今後の対応", "対応状況", "よくあるご質問", "よくある質問",
+		"preventive measures", "reoccurrence prevention", "frequently asked questions",
+		// Petitions / requests to authorities
+		"能動的サイバー防御の適用要請", "能動的サイバー防御を要請", "適用を要請", "警察への被害届", "警察に被害届",
+		"active cyber defense", "active cyberdefense", "cyberdefense operations", "petition to government",
+	}
+
+	for _, marker := range corporatePRMarkers {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // IsServiceReleaseOrNonThreat detects service releases, PR announcements, marketing, or general non-threat content.
 func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool {
+	if IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
+		return true
+	}
 	if enriched != nil {
+		if IsCorporatePRNotice(enriched.Title, enriched.TitleJa, enriched.Summary, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
+			return true
+		}
 		if enriched.Severity == SeverityInfo {
 			return true
 		}
@@ -390,6 +502,134 @@ func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool
 	}
 
 	return false
+}
+
+// IsPureVulnerabilityAdvisory determines if an item is merely a security patch announcement,
+// routine vendor advisory, or general vulnerability disclosure without active exploitation,
+// weaponized PoC, or verified breach incident.
+func IsPureVulnerabilityAdvisory(item ThreatItem, enriched *EnrichedThreat) bool {
+	// If it's a confirmed incident type, it's not a pure advisory
+	if enriched != nil {
+		switch strings.ToLower(enriched.AttackType) {
+		case "ransomware", "data breach", "zero-day", "supply chain", "ddos", "phishing":
+			return false
+		}
+	}
+
+	combined := item.Title + " " + item.Summary + " " + item.RawContent
+	if enriched != nil {
+		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa + " " + enriched.ImpactAnalysis + " " + enriched.ImpactAnalysisJa
+	}
+	lower := strings.ToLower(combined)
+
+	// Threat evidence: if any active exploit, weaponized PoC, or real-world compromise indicator is present, do NOT treat as pure advisory
+	threatEvidence := []string{
+		"in the wild", "in-the-wild", "actively exploited", "exploited in the wild", "active exploitation",
+		"under active exploit", "zero-day", "0-day", "ゼロデイ", "悪用が確認", "悪用確認",
+		"weaponized", "proof of concept", "poc available", "exploit code released", "poc demonstrates",
+		"pocコード", "実証コード", "悪用コード",
+		"compromised", "breached", "data breach", "data leak", "stolen data", "ransomware",
+		"threat actor", "apt", "cybercrime", "unauthorized access",
+		"情報漏洩", "データ漏洩", "情報流出", "不正アクセスにより", "身代金", "ランサムウェア",
+		"被害が発生", "被害を受けた", "侵害された",
+	}
+	for _, te := range threatEvidence {
+		if strings.Contains(lower, te) {
+			return false
+		}
+	}
+
+	// Advisory & patch announcement markers
+	advisoryMarkers := []string{
+		"security advisory", "security advisories", "security update", "security updates",
+		"monthly security", "monthly update", "patch tuesday",
+		"patches flaw", "patches vulnerability", "patches vulnerabilities",
+		"fixes flaw", "fixes vulnerability", "fixes vulnerabilities",
+		"addresses flaw", "addresses vulnerability", "addresses vulnerabilities",
+		"releases patch", "releases update", "released security update",
+		"vulnerabilities released", "vulnerability released",
+		"vulnerability in", "flaw in", "bug in",
+		"receives patent", "patent for",
+		"セキュリティ更新プログラム", "セキュリティアップデート", "脆弱性の公表",
+		"脆弱性を修正", "修正プログラム", "アップデートを公開", "アップデートの提供",
+		"注意喚起", "脆弱性情報", "修正パッチ", "バグ修正",
+	}
+	for _, am := range advisoryMarkers {
+		if strings.Contains(lower, am) {
+			return true
+		}
+	}
+
+	// If attack_type is explicitly Vulnerability and no threat evidence was found, it's an advisory
+	if enriched != nil && strings.EqualFold(enriched.AttackType, "Vulnerability") {
+		return true
+	}
+
+	return false
+}
+
+// RefineJapanRelevance enforces strict guardrails on JapanRelevanceDirect.
+// A threat is ONLY Direct if:
+// 1. A recognized Japanese victim organization is explicitly identified, OR
+// 2. The title/summary explicitly mentions domestic Japanese impact (e.g. "国内組織", "日本企業", "国内").
+// General global enterprise product vulnerabilities (Fortinet, Cisco, etc.) without specific Japanese victims
+// are downgraded to Indirect.
+func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanRelevance {
+	if enriched == nil {
+		return JapanRelevanceNone
+	}
+	if enriched.JapanRelevance != JapanRelevanceDirect {
+		return enriched.JapanRelevance
+	}
+
+	// Check if any specific Japanese victim organization is present
+	hasJapaneseVictim := false
+	for _, org := range enriched.VictimOrgs {
+		cleaned := strings.TrimSpace(org)
+		if cleaned == "" || IsGenericVictimOrg(cleaned) {
+			continue
+		}
+		// If org contains Japanese characters or ends with .jp, it's domestic
+		for _, r := range cleaned {
+			if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
+				hasJapaneseVictim = true
+				break
+			}
+		}
+		if hasJapaneseVictim {
+			break
+		}
+		lowerOrg := strings.ToLower(cleaned)
+		if strings.HasSuffix(lowerOrg, ".jp") || strings.Contains(lowerOrg, "japan") || strings.Contains(lowerOrg, "japanese") {
+			hasJapaneseVictim = true
+			break
+		}
+	}
+	if hasJapaneseVictim {
+		return JapanRelevanceDirect
+	}
+
+	// Check if title or summary explicitly mentions domestic Japanese victim/target context
+	combined := item.Title + " " + item.Summary
+	if enriched != nil {
+		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa
+	}
+	lower := strings.ToLower(combined)
+
+	domesticIndicators := []string{
+		"国内組織", "国内企業", "日本企業", "日本組織", "国内自治体", "国内大学", "国内病院",
+		"日本の組織", "日本の企業", "日本国内", "targeting japanese", "targeting japan",
+		"japanese entities", "japanese organizations", "japanese companies",
+		"jpcert", "ipa", "警察庁", "デジタル庁", "内閣サイバー", "nisc",
+	}
+	for _, di := range domesticIndicators {
+		if strings.Contains(lower, di) {
+			return JapanRelevanceDirect
+		}
+	}
+
+	// If victim is Unknown or foreign vendor, downgrade to Indirect
+	return JapanRelevanceIndirect
 }
 
 // HigherSeverity returns the higher of two severities.
@@ -502,6 +742,8 @@ func NormalizeProduct(prod string) string {
 		return "gitlab"
 	case strings.Contains(lower, "github"):
 		return "github"
+	case strings.Contains(lower, "お名前") || strings.Contains(lower, "onamae") || strings.Contains(lower, "デスクトップクラウド") || strings.Contains(lower, "桌面云"):
+		return "onamae desktop cloud"
 	}
 
 	// Strip noise words
@@ -586,6 +828,10 @@ func ExtractAffectedProduct(item ThreatItem, enriched *EnrichedThreat) (string, 
 		{"confluence", "Atlassian Confluence", "atlassian confluence"},
 		{"jira", "Atlassian Jira", "atlassian jira"},
 		{"gitlab", "GitLab", "gitlab"},
+		{"onamae", "GMO お名前.com デスクトップクラウド", "onamae desktop cloud"},
+		{"お名前", "GMO お名前.com デスクトップクラウド", "onamae desktop cloud"},
+		{"デスクトップクラウド", "GMO お名前.com デスクトップクラウド", "onamae desktop cloud"},
+		{"桌面云", "GMO お名前.com デスクトップクラウド", "onamae desktop cloud"},
 	}
 
 	for _, kp := range known {
@@ -665,5 +911,63 @@ func ExtractActorSnippet(text, actor string, maxRunes int) string {
 	}
 	return snippet
 }
+
+// IsJapaneseText checks whether a string contains Japanese text.
+// It requires Japanese Hiragana (0x3040-0x309F) or Katakana (0x30A0-0x30FF)
+// to avoid falsely classifying pure Chinese (Hanzi) text as Japanese.
+func IsJapaneseText(s string) bool {
+	for _, r := range s {
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasChineseCTITerms checks if a string contains known Simplified Chinese cybersecurity terms or phrasings.
+func HasChineseCTITerms(s string) bool {
+	if s == "" {
+		return false
+	}
+	chineseMarkers := []string{
+		"关于", "不正当", "泄露", "个人数据", "数据泄露", "服务器遭受",
+		"未经授权", "不法访问", "被盗", "两阶段", "兩階段", "针对",
+		"更新版本", "修复旧版本", "解决了", "会员管理", "官方应用",
+		"受影响", "未提及", "未确认", "攻击活动", "恶意软件", "漏洞",
+		"钓鱼", "黑客", "木马", "后门", "云计算", "邮件杂志", "零日漏洞",
+		"非法入侵", "遭勒索", "赎金", "公布调查", "宣布", "遭受",
+		"非法访问", "非法", "导致", "巨头", "电商", "个人身份", "子公司",
+		"窃取取", "超过", "东证", "主板", "网络访问", "已漏洩", "客户",
+	}
+	for _, m := range chineseMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsChineseOrCorruptedJapanese returns true if the string contains Chinese CTI terms,
+// or contains Kanji/Hanzi but lacks any Hiragana or Katakana.
+func IsChineseOrCorruptedJapanese(s string) bool {
+	if s == "" {
+		return false
+	}
+	if HasChineseCTITerms(s) {
+		return true
+	}
+	hasHanzi := false
+	hasKana := false
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FAF {
+			hasHanzi = true
+		}
+		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) {
+			hasKana = true
+		}
+	}
+	return hasHanzi && !hasKana
+}
+
 
 

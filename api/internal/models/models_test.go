@@ -292,6 +292,111 @@ func TestIsServiceReleaseOrNonThreat(t *testing.T) {
 	}
 }
 
+func TestIsPureVulnerabilityAdvisory(t *testing.T) {
+	// Routine monthly security advisory without active exploitation
+	routineAdvisory := ThreatItem{
+		Title:   "Adobe Releases Security Advisories Addressing Multiple Vulnerabilities Across 11 Products",
+		Summary: "Adobe has published its monthly security updates fixing several flaws.",
+	}
+	enrichedAdvisory := &EnrichedThreat{
+		AttackType: "Vulnerability",
+		Severity:   SeverityHigh,
+	}
+	if !IsPureVulnerabilityAdvisory(routineAdvisory, enrichedAdvisory) {
+		t.Errorf("expected routine Adobe advisory to be identified as pure advisory")
+	}
+
+	// Splunk routine security update
+	splunkUpdate := ThreatItem{
+		Title:   "Critical Security Updates for Splunk Enterprise: CVE-2026-76299, CVE-2026-76302",
+		Summary: "Splunk releases patches for multiple vulnerabilities.",
+	}
+	if !IsPureVulnerabilityAdvisory(splunkUpdate, nil) {
+		t.Errorf("expected Splunk patch release to be identified as pure advisory")
+	}
+
+	// In-the-wild exploitation: MUST NOT be treated as pure advisory
+	inTheWild := ThreatItem{
+		Title:   "Cisco FMC flaws exploited by ransomware gang, state-sponsored hackers",
+		Summary: "Actively exploited zero-day vulnerability observed in cyber attacks.",
+	}
+	enrichedInTheWild := &EnrichedThreat{
+		AttackType: "Vulnerability",
+		Severity:   SeverityCritical,
+	}
+	if IsPureVulnerabilityAdvisory(inTheWild, enrichedInTheWild) {
+		t.Errorf("expected in-the-wild exploit to NOT be identified as pure advisory")
+	}
+
+	// EC-CUBE exploited in the wild
+	ecCube := ThreatItem{
+		Title:   "Vulnerability in AmazonPay Plugin for EC-CUBE 4 Exploited in the Wild",
+		Summary: "JPCERT warns of active attacks exploiting plugin flaw.",
+	}
+	enrichedECCube := &EnrichedThreat{
+		AttackType: "Zero-day",
+		Severity:   SeverityCritical,
+	}
+	if IsPureVulnerabilityAdvisory(ecCube, enrichedECCube) {
+		t.Errorf("expected EC-CUBE active attack to NOT be identified as pure advisory")
+	}
+
+	// Ransomware breach: MUST NOT be treated as advisory
+	ransomware := ThreatItem{
+		Title:   "Japan Digital Agency Data Breach Affects Multiple Ministries",
+		Summary: "Unauthorized access via VPN leads to personal information leakage.",
+	}
+	enrichedRansom := &EnrichedThreat{
+		AttackType: "Data Breach",
+		Severity:   SeverityHigh,
+	}
+	if IsPureVulnerabilityAdvisory(ransomware, enrichedRansom) {
+		t.Errorf("expected data breach to NOT be identified as pure advisory")
+	}
+}
+
+func TestRefineJapanRelevance(t *testing.T) {
+	// Unknown victim on global vulnerability: must downgrade to Indirect
+	globalVuln := ThreatItem{
+		Title:   "Critical Security Updates for Splunk Enterprise",
+		Summary: "Patches released for enterprise customers.",
+	}
+	enrichedGlobal := &EnrichedThreat{
+		VictimOrgs:     []string{"Unknown"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	refined := RefineJapanRelevance(globalVuln, enrichedGlobal)
+	if refined != JapanRelevanceIndirect {
+		t.Errorf("expected global vuln with Unknown victim to be downgraded to Indirect, got %s", refined)
+	}
+
+	// Domestic Japanese organization victim: must remain Direct
+	domesticThreat := ThreatItem{
+		Title:   "不正アクセスによる情報漏洩の可能性に関するお知らせ",
+		Summary: "社内サーバへの侵害が確認された",
+	}
+	enrichedDomestic := &EnrichedThreat{
+		VictimOrgs:     []string{"株式会社エグザンプル (example.co.jp)"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	if RefineJapanRelevance(domesticThreat, enrichedDomestic) != JapanRelevanceDirect {
+		t.Errorf("expected domestic victim org to remain Direct")
+	}
+
+	// Unknown victim, but title explicitly targets Japan: must remain Direct
+	targetingJapan := ThreatItem{
+		Title:   "国内組織を標的としたランサムウェア攻撃キャンペーンが観測される",
+		Summary: "国内企業および自治体への不審メールが急増",
+	}
+	enrichedTargeting := &EnrichedThreat{
+		VictimOrgs:     []string{"Unknown"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	if RefineJapanRelevance(targetingJapan, enrichedTargeting) != JapanRelevanceDirect {
+		t.Errorf("expected explicit domestic target to remain Direct")
+	}
+}
+
 func TestThreatActorsCleaningAndValidation(t *testing.T) {
 	actors := []string{
 		"APT28",
@@ -462,5 +567,213 @@ func TestThreatActorValidationAndGrounding(t *testing.T) {
 		t.Fatalf("expected empty actors when source has no mentions, got: %v", hallucinated)
 	}
 }
+
+func TestIsJapaneseText(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected bool
+	}{
+		{"石油資源開発が利用するラクスライトクラウドのASPサービス「blastmail」に不正アクセス", true}, // Natural Japanese with Hiragana & Katakana
+		{"脆弱性情報に関する注意喚起", true},                                                // Japanese with Hiragana
+		{"マルウェア感染インシデント", true},                                                // Japanese with Katakana
+		{"JAPEX邮件杂志服务遭受不正当访问，可能导致个人数据泄露", false},                         // Pure Chinese (Hanzi)
+		{"关于某些黑客组织利用某某漏洞的分析报告", false},                                         // Pure Chinese
+		{"Healthcare Sector Cyberattack Report: Ransomware and Data Breaches", false}, // English
+		{"LockBit Ransomware Advisory 2026", false},                                   // English
+		{"", false},                                                                   // Empty
+	}
+
+	for _, tc := range testCases {
+		res := IsJapaneseText(tc.input)
+		if res != tc.expected {
+			t.Errorf("IsJapaneseText(%q) = %v; want %v", tc.input, res, tc.expected)
+		}
+	}
+}
+
+func TestHasChineseCTITermsAndCorruption(t *testing.T) {
+	chineseInputs := []string{
+		"大和証券株式会社关于SC社不正当访问事件的公告",
+		"「焼肉きんぐ」公式アプリ会員情報泄露事件：1078万8963件の个人数据被盗",
+		"佐川急便荷物問合サービス个人数据泄露调查结果公布",
+		"MrMax公司数据泄露事件：1735,154名会员信息被盗取",
+		"CAPCOM ID服务泄露11774247个电子邮件地址及其他信息",
+		"GMOインターネット服务遭勒索攻击，要求支付80亿日元赎金",
+	}
+
+	for _, s := range chineseInputs {
+		if !HasChineseCTITerms(s) {
+			t.Errorf("expected HasChineseCTITerms(%q) = true, got false", s)
+		}
+		if !IsChineseOrCorruptedJapanese(s) {
+			t.Errorf("expected IsChineseOrCorruptedJapanese(%q) = true, got false", s)
+		}
+	}
+
+	pureJapaneseInputs := []string{
+		"大和証券株式会社、SC社への不正アクセスに関する報告書を公表",
+		"「焼肉きんぐ」公式アプリ会員情報漏洩事件：個人情報が流出",
+		"佐川急便荷物問い合わせサービスにおける個人情報漏洩の調査結果を発表",
+		"株式会社ミスターマックス・ホールディングスにおける不正アクセス被害について",
+	}
+
+	for _, s := range pureJapaneseInputs {
+		if HasChineseCTITerms(s) {
+			t.Errorf("expected HasChineseCTITerms(%q) = false, got true", s)
+		}
+		if IsChineseOrCorruptedJapanese(s) {
+			t.Errorf("expected IsChineseOrCorruptedJapanese(%q) = false, got true", s)
+		}
+	}
+}
+
+func TestIsCorporatePRNoticeAndRansomExceptions(t *testing.T) {
+	// 1. Pure corporate PR notices that MUST be dropped
+	prCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "GMOインターネット、「お名前.com デスクトップクラウド」への攻撃で全利用者に5,000円のお見舞金を発表",
+			summary: "代替サービスの提供と見舞金支払いを実施する",
+		},
+		{
+			title:   "「お名前.com デスクトップクラウド」に不正アクセス、見舞金として一律 5,000円を支払い",
+			summary: "契約者に対する補償対応についての案内",
+		},
+		{
+			title:   "お名前.com デスクトップクラウド不正アクセス事件：見舞金支払いと代替サービス提供",
+			summary: "ユーザーへの代替サービス提供と今後の対応",
+		},
+		{
+			title:   "お名前.com デスクトップクラウドのサーバー停止・復旧作業完了のご報告",
+			summary: "緊急メンテナンスおよびサーバー停止から復旧完了した",
+		},
+		{
+			title:   "当社サーバーへの不正アクセスに関するお詫びとお知らせ（第2報）",
+			summary: "調査委員会の設置と外部専門機関による調査の経過報告",
+		},
+		{
+			title:   "GMO Internet has made an urgent request for the Japanese government to implement active cyberdefense operations",
+			summary: "Company petitioned the government for active cyber defense application",
+		},
+		{
+			title:   "不正アクセスに関するよくあるご質問（FAQ）および再発防止策について",
+			summary: "お客様からの問い合わせ対応状況と再発防止策の策定",
+		},
+	}
+
+	for _, tc := range prCases {
+		if !IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected corporate PR notice to be dropped: %q", tc.title)
+		}
+	}
+
+	// 2. Threat articles containing ransom payment / extortion / leak intel that MUST BE RETAINED
+	ransomCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "GMOに身代金要求 - ランサム攻撃や情報公開を行うと脅迫",
+			summary: "攻撃グループが身代金を要求し、支払わない場合はデータを公開すると脅迫",
+		},
+		{
+			title:   "GMO Internet Services Exposed to Ransomware Attack, Demanding Payment of 8 Billion Japanese Yen in Ransom",
+			summary: "Attackers demanded payment of 8 billion yen in cryptocurrency",
+		},
+		{
+			title:   "東証プライム経営者向けまとめ GMO FX自動取引サービス二重脅迫→能動的サイバー防御要請経緯 及び ランサムウェア実務家向け脅威インテリジェンス",
+			summary: "二重脅迫の手口とランサムウェア実務家向けOSINT分析",
+		},
+		{
+			title:   "Astemo、ランサムウェア攻撃によるシステム障害から全面復旧（身代金の支払いは拒否）",
+			summary: "攻撃者への身代金支払いを拒否し、バックアップから復旧したと公表",
+		},
+		{
+			title:   "暗号資産で要求された身代金支払いの事実関係について",
+			summary: "ハッカーへの支払いは行わなかったと説明",
+		},
+		{
+			title:   "LockBit、ダークウェブのリークサイトに被害組織の機密データを公開",
+			summary: "身代金支払いに応じなかったためDLSに掲載",
+		},
+	}
+
+	for _, tc := range ransomCases {
+		if IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected ransom/extortion intelligence to be KEPT (not corporate PR): %q", tc.title)
+		}
+	}
+
+	// 3. Technical analysis / third-party reports that must NOT be dropped
+	techCases := []struct {
+		title   string
+		summary string
+	}{
+		{
+			title:   "お名前.com デスクトップクラウドへの不正アクセス事案のまとめ",
+			summary: "piyologによるインシデント技術分析とタイムライン",
+		},
+		{
+			title:   "PHP Windows版同梱圧縮ライブラリ「Brotli」の脆弱性修正（CVE-2026-111497）",
+			summary: "バッファオーバーフローの脆弱性を修正",
+		},
+		{
+			title:   "GMOクリック証券警戒：自動売買ツールによる不正取引の可能性",
+			summary: "金融口座への不正アクセスと不正送金被害の可能性について調査",
+		},
+	}
+
+	for _, tc := range techCases {
+		if IsCorporatePRNotice(tc.title, tc.summary) {
+			t.Errorf("expected technical report to be KEPT: %q", tc.title)
+		}
+	}
+}
+
+func TestNormalizeVictimOrgAndProductEnhanced(t *testing.T) {
+	victimCases := []struct {
+		input    string
+		expected string
+	}{
+		{"GMOインターネット株式会社", "gmo"},
+		{"GMOインターネットグループ", "gmo"},
+		{"GMOインターネット", "gmo"},
+		{"GMO Internet Group, Inc.", "gmo"},
+		{"GMO Internet (Onamae.com Desktop Cloud)", "gmo"},
+		{"お名前.com デスクトップクラウド", "gmo"},
+		{"お名前.com", "gmo"},
+		{"株式会社日立Astemo", "日立astemo"},
+		{"トヨタ自動車株式会社", "トヨタ自動車"},
+	}
+
+	for _, tc := range victimCases {
+		res := NormalizeVictimOrg(tc.input)
+		if res != tc.expected {
+			t.Errorf("NormalizeVictimOrg(%q) = %q; want %q", tc.input, res, tc.expected)
+		}
+	}
+
+	productCases := []struct {
+		input    string
+		expected string
+	}{
+		{"お名前.com デスクトップクラウド", "onamae desktop cloud"},
+		{"お名前.com デスクトップ クラウド", "onamae desktop cloud"},
+		{"Onamae.com Desktop Cloud", "onamae desktop cloud"},
+		{"お名前.com桌面云服务", "onamae desktop cloud"},
+		{"GMO「デスクトップクラウド」", "onamae desktop cloud"},
+	}
+
+	for _, tc := range productCases {
+		res := NormalizeProduct(tc.input)
+		if res != tc.expected {
+			t.Errorf("NormalizeProduct(%q) = %q; want %q", tc.input, res, tc.expected)
+		}
+	}
+}
+
+
 
 

@@ -103,10 +103,14 @@ interface Incident {
     harvested_at?: string;
   }>;
   victim_org?: string;
+  victim_org_en?: string;
+  victim_org_ja?: string;
   normalized_victim_org?: string;
   attack_type?: string;
   cves?: string[];
   affected_product?: string;
+  affected_product_en?: string;
+  affected_product_ja?: string;
   threat_actors?: string[];
   threat_actor_reasons?: Record<string, string>;
   threat_actor_reasons_ja?: Record<string, string>;
@@ -133,12 +137,16 @@ interface Incident {
     impact_analysis?: string;
     impact_analysis_ja?: string;
     victim_orgs?: string[];
+    victim_org_en?: string;
+    victim_org_ja?: string;
     threat_actors?: string[];
     threat_actor_reasons?: Record<string, string>;
     threat_actor_reasons_ja?: Record<string, string>;
     attack_type?: string;
     cves?: string[];
     affected_products?: string[];
+    affected_product_en?: string;
+    affected_product_ja?: string;
     recommended_actions?: string[];
     recommended_actions_ja?: string[];
   } | null;
@@ -248,8 +256,13 @@ function getRawContentText(inc: Incident | null): string {
   return "";
 }
 
+function containsJapanese(s?: string): boolean {
+  if (!s) return false;
+  return /[\u3040-\u30ff\u4e00-\u9faf]/.test(s);
+}
+
 function getCleanDisplayTitle(
-  inc: { title?: string; title_ja?: string; enriched_parsed?: { title?: string; title_ja?: string } | null } | null,
+  inc: { title?: string; title_ja?: string; enriched_parsed?: { title?: string; title_ja?: string } | null; victim_org_en?: string; victim_org?: string; cves?: string[] } | null,
   lang: "en" | "ja" = "en"
 ): string {
   if (!inc) return "";
@@ -257,7 +270,27 @@ function getCleanDisplayTitle(
   if (lang === "ja") {
     title = inc.title_ja || inc.enriched_parsed?.title_ja || inc.title || inc.enriched_parsed?.title || "";
   } else {
-    title = inc.enriched_parsed?.title || inc.title || inc.title_ja || inc.enriched_parsed?.title_ja || "";
+    // English view: strictly prefer non-Japanese titles
+    const epTitle = inc.enriched_parsed?.title;
+    const directTitle = inc.title;
+    if (epTitle && !containsJapanese(epTitle)) {
+      title = epTitle;
+    } else if (directTitle && !containsJapanese(directTitle)) {
+      title = directTitle;
+    } else {
+      // Both contain Japanese or are missing. Generate clean English title fallback if metadata exists
+      const vOrg = inc.victim_org_en || (!containsJapanese(inc.victim_org) ? inc.victim_org : "");
+      const cves = inc.cves || [];
+      if (vOrg && vOrg !== "Unknown" && cves.length > 0) {
+        title = `Cyber Incident targeting ${vOrg} (${cves.join(", ")})`;
+      } else if (cves.length > 0) {
+        title = `Vulnerability Advisory (${cves.join(", ")})`;
+      } else if (vOrg && vOrg !== "Unknown") {
+        title = `Cyber Incident targeting ${vOrg}`;
+      } else {
+        title = "Cyber Threat Incident (Translation Pending)";
+      }
+    }
   }
   title = title.replace(/\s*\(\s*\)$/, "").trim();
   return title || "Untitled Incident";
@@ -276,10 +309,9 @@ function getCleanDisplaySummary(
     return sJa || s || "";
   } else {
     const s = inc.enriched_parsed?.summary || inc.summary;
-    if (s && !s.startsWith("Group: ") && !s.startsWith("Victim: ")) return s;
-    const sJa = inc.enriched_parsed?.summary_ja || inc.summary_ja;
-    if (sJa && !sJa.startsWith("Group: ") && !sJa.startsWith("Victim: ")) return sJa;
-    return s || sJa || "";
+    if (s && !s.startsWith("Group: ") && !s.startsWith("Victim: ") && !containsJapanese(s)) return s;
+    // Do NOT leak Japanese summary into English view
+    return "(Summary translation in progress. Detailed intelligence report being processed.)";
   }
 }
 
@@ -357,6 +389,12 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       setCurrentLang(lang);
     }
   }, [lang]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.documentElement.lang = currentLang;
+    }
+  }, [currentLang]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -2049,11 +2087,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     {item.enriched_parsed?.victim_orgs && item.enriched_parsed.victim_orgs.length > 0 && (
                       <div className="flex items-center space-x-1">
                         <span className="text-slate-500">{currentLang === "ja" ? "対象組織:" : "Victim:"}</span>
-                        {item.enriched_parsed.victim_orgs.map((org) => (
-                          <span key={org} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                            {org}
-                          </span>
-                        ))}
+                        {item.enriched_parsed.victim_orgs.map((org) => {
+                          let displayOrg = org;
+                          if (currentLang === "en") {
+                            const enV = item.victim_org_en || item.enriched_parsed?.victim_org_en;
+                            if (enV) displayOrg = enV;
+                          }
+                          return (
+                            <span key={org} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                              {displayOrg}
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
 
@@ -2081,7 +2126,16 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       <div className="flex items-center space-x-1 ml-1">
                         <span className="text-slate-500">{currentLang === "ja" ? "影響製品:" : "Product:"}</span>
                         <span className="px-1.5 py-0.5 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/80 font-mono text-[11px]">
-                          {item.affected_product || item.enriched_parsed?.affected_products?.[0]}
+                          {(() => {
+                            if (currentLang === "en") {
+                              const enP = item.affected_product_en || item.enriched_parsed?.affected_product_en;
+                              if (enP) return enP;
+                              const rawP = item.affected_product || item.enriched_parsed?.affected_products?.[0];
+                              if (rawP && !containsJapanese(rawP)) return rawP;
+                              return "Multiple / General";
+                            }
+                            return item.affected_product || item.enriched_parsed?.affected_products?.[0];
+                          })()}
                         </span>
                       </div>
                     )}
@@ -3673,26 +3727,41 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   <p className="text-slate-300 bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
                     {currentLang === "ja"
                       ? (selectedIncident.impact_analysis_ja || selectedIncident.enriched_parsed?.impact_analysis_ja || selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis)
-                      : (selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis || selectedIncident.impact_analysis_ja || selectedIncident.enriched_parsed?.impact_analysis_ja)}
+                      : (() => {
+                          const enImpact = selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis;
+                          if (enImpact && !containsJapanese(enImpact)) return enImpact;
+                          return "(Impact assessment translation in progress.)";
+                        })()}
                   </p>
                 </div>
               )}
 
-              {((selectedIncident.enriched_parsed?.recommended_actions && selectedIncident.enriched_parsed.recommended_actions.length > 0) ||
-                (selectedIncident.enriched_parsed?.recommended_actions_ja && selectedIncident.enriched_parsed.recommended_actions_ja.length > 0)) && (
+              {(() => {
+                let actions: string[] = [];
+                if (currentLang === "ja") {
+                  actions = (selectedIncident.enriched_parsed?.recommended_actions_ja && selectedIncident.enriched_parsed.recommended_actions_ja.length > 0)
+                    ? selectedIncident.enriched_parsed.recommended_actions_ja
+                    : (selectedIncident.enriched_parsed?.recommended_actions || []);
+                } else {
+                  const enRaw = selectedIncident.enriched_parsed?.recommended_actions || [];
+                  actions = enRaw.filter((a: string) => a && !containsJapanese(a));
+                }
+                if (actions.length === 0) {
+                  return null;
+                }
+                return (
                   <div>
                     <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">
                       {currentLang === "ja" ? "推奨アクション・緩和策" : "Recommended Mitigations & Action Items"}
                     </h4>
                     <ul className="list-disc list-inside bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 text-slate-300">
-                      {(currentLang === "ja" && selectedIncident.enriched_parsed?.recommended_actions_ja && selectedIncident.enriched_parsed.recommended_actions_ja.length > 0
-                        ? selectedIncident.enriched_parsed.recommended_actions_ja
-                        : (selectedIncident.enriched_parsed?.recommended_actions || selectedIncident.enriched_parsed?.recommended_actions_ja || [])).map((action, idx) => (
+                      {actions.map((action, idx) => (
                         <li key={idx}>{action}</li>
                       ))}
                     </ul>
                   </div>
-                )}
+                );
+              })()}
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">

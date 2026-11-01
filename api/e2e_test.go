@@ -33,7 +33,7 @@ func (m *mockE2EAnalyzer) Analyze(ctx context.Context, item models.ThreatItem) (
 		JapanRelevance:   models.JapanRelevanceDirect,
 		AttackType:       "Ransomware",
 		ThreatActors:     []string{"LockBit"},
-		VictimOrgs:       []string{"Cyber Defense Inc"},
+		VictimOrgs:       []string{"Cyber Defense Japan Inc"},
 		CVEs:             []string{"CVE-2024-9999"},
 		AffectedProducts: []string{"Firewall OS"},
 	}, nil
@@ -81,6 +81,19 @@ func (m *mockE2EAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.B
 			Title:          "Translated " + it.Title,
 			Summary:        "Translated " + it.Summary,
 			ImpactAnalysis: "Translated " + it.ImpactAnalysis,
+		})
+	}
+	return results, nil
+}
+
+func (m *mockE2EAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	var results []analyzer.BatchTranslateResult
+	for _, it := range items {
+		results = append(results, analyzer.BatchTranslateResult{
+			ID:             it.ID,
+			Title:          "日本語要約: " + it.Title,
+			Summary:        "日本語要約: " + it.Summary,
+			ImpactAnalysis: "日本語影響: " + it.ImpactAnalysis,
 		})
 	}
 	return results, nil

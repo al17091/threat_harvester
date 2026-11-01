@@ -71,8 +71,10 @@ func (s *SQLStore) FindOrCreateIncident(
 		attackType = enriched.AttackType
 	}
 
-	// Non-threat content, service releases, PR announcements, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
-	if (enriched != nil && enriched.Severity == models.SeverityInfo) || models.IsServiceReleaseOrNonThreat(item, enriched) {
+	// Non-threat content, service releases, PR announcements, corporate PR notices, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
+	if (enriched != nil && enriched.Severity == models.SeverityInfo) ||
+		models.IsServiceReleaseOrNonThreat(item, enriched) ||
+		models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
 		return nil, nil
 	}
 
@@ -240,6 +242,69 @@ func (s *SQLStore) FindOrCreateIncident(
 		}
 	}
 
+	// TRACK 1.5: Target Organization + Affected Product Clustering
+	// Aggregates reports concerning the same specific product/service belonging to a target organization
+	// (e.g. GMO + Onamae Desktop Cloud) regardless of attack type, while preventing false mergers
+	// across distinct products or different organizations with similarly named products.
+	if matched == nil && normVictim != "" && (normProduct != "" || rawProduct != "") {
+		prodTarget := normProduct
+		if prodTarget == "" {
+			prodTarget = strings.ToLower(rawProduct)
+		}
+		prodPattern := "%" + prodTarget + "%"
+
+		var orgProdQuery string
+		if s.isSQLite {
+			orgProdQuery = `
+				SELECT ` + incidentSelectCols + `
+				FROM incidents
+				WHERE normalized_victim_org = ?
+				  AND (
+					(affected_product IS NOT NULL AND affected_product != '' AND LOWER(affected_product) LIKE ?)
+					OR LOWER(title) LIKE ?
+					OR LOWER(title_ja) LIKE ?
+				  )
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		} else {
+			orgProdQuery = `
+				SELECT ` + incidentSelectCols + `
+				FROM incidents
+				WHERE normalized_victim_org = $1
+				  AND (
+					(affected_product IS NOT NULL AND affected_product != '' AND (affected_product ILIKE $2 OR LOWER(affected_product) LIKE $3))
+					OR title ILIKE $2
+					OR title_ja ILIKE $2
+				  )
+				ORDER BY last_seen_at DESC
+				LIMIT 5
+			`
+		}
+
+		var rows *sql.Rows
+		var err error
+		if s.isSQLite {
+			rows, err = s.db.QueryContext(ctx, orgProdQuery, normVictim, prodPattern, prodPattern, prodPattern)
+		} else {
+			rows, err = s.db.QueryContext(ctx, orgProdQuery, normVictim, prodPattern, prodPattern)
+		}
+
+		if err == nil {
+			for rows.Next() {
+				inc, err := scanIncident(rows)
+				if err != nil {
+					continue
+				}
+				if isWithinWindow(inc, itemTime, windowDuration) {
+					matched = inc
+					break
+				}
+			}
+			_ = rows.Close()
+		}
+	}
+
 	// TRACK 2: Specific Victim Org Clustering (Targeted Cyberattacks, Ransomware, Data Breaches)
 	if matched == nil && normVictim != "" && !models.IsGenericVictimOrg(rawVictim) {
 		query := `
@@ -267,6 +332,12 @@ func (s *SQLStore) FindOrCreateIncident(
 					continue
 				}
 				if isWithinWindow(inc, itemTime, windowDuration) {
+					// Guard: If both existing incident and incoming report identify specific distinct products,
+					// do not merge them under the general organization (e.g. GMO infoQ vs GMO Desktop Cloud).
+					incNormProd := models.NormalizeProduct(inc.AffectedProduct)
+					if incNormProd != "" && normProduct != "" && incNormProd != normProduct {
+						continue
+					}
 					matched = inc
 					break
 				}
@@ -306,7 +377,7 @@ func (s *SQLStore) FindOrCreateIncident(
 			if matched.AttackType == "" && enriched.AttackType != "" {
 				matched.AttackType = enriched.AttackType
 			}
-			if enriched.TitleJa != "" {
+			if matched.TitleJa == "" {
 				matched.TitleJa = enriched.TitleJa
 			}
 			if matched.Summary == "" && enriched.Summary != "" {
@@ -1593,8 +1664,186 @@ func (s *SQLStore) UpdateIncidentTranslations(ctx context.Context, id, title, su
 	return nil
 }
 
-// GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, or impact analysis.
-func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error) {
+// UpdateIncidentJapaneseTranslations updates title_ja, summary_ja, impact_analysis_ja of an incident and syncs child threat items.
+func (s *SQLStore) UpdateIncidentJapaneseTranslations(ctx context.Context, id, titleJa, summaryJa, impactJa string, actions []string) error {
+	var query string
+	nowStr := time.Now().UTC().Format(time.RFC3339)
+	if s.isSQLite {
+		query = `UPDATE incidents SET
+			title_ja = ?, summary_ja = ?, impact_analysis_ja = ?, updated_at = ?
+		WHERE id = ?`
+		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
+		if err != nil {
+			return err
+		}
+	} else {
+		query = `UPDATE incidents SET
+			title_ja = $1, summary_ja = $2, impact_analysis_ja = $3, updated_at = $4
+		WHERE id = $5`
+		_, err := s.db.ExecContext(ctx, query, titleJa, summaryJa, impactJa, nowStr, id)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Update child threat_items' enriched_data to sync Japanese fields
+	var cQuery string
+	if s.isSQLite {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = ?`
+	} else {
+		cQuery = `SELECT id, enriched_data FROM threat_items WHERE incident_id = $1`
+	}
+	rows, err := s.db.QueryContext(ctx, cQuery, id)
+	if err == nil {
+		type childItem struct {
+			id string
+			ed map[string]interface{}
+		}
+		var itemsToUpdate []childItem
+		for rows.Next() {
+			var cid, edStr sql.NullString
+			if err := rows.Scan(&cid, &edStr); err == nil && cid.Valid {
+				var ed map[string]interface{}
+				if edStr.Valid && edStr.String != "" {
+					_ = json.Unmarshal([]byte(edStr.String), &ed)
+				}
+				if ed == nil {
+					ed = make(map[string]interface{})
+				}
+				ed["title_ja"] = titleJa
+				ed["summary_ja"] = summaryJa
+				ed["impact_analysis_ja"] = impactJa
+				if len(actions) > 0 {
+					ed["recommended_actions_ja"] = actions
+				}
+				itemsToUpdate = append(itemsToUpdate, childItem{id: cid.String, ed: ed})
+			}
+		}
+		rows.Close()
+
+		for _, item := range itemsToUpdate {
+			updatedJSON, _ := json.Marshal(item.ed)
+			if s.isSQLite {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = ? WHERE id = ?`, string(updatedJSON), item.id)
+			} else {
+				_, _ = s.db.ExecContext(ctx, `UPDATE threat_items SET enriched_data = $1 WHERE id = $2`, string(updatedJSON), item.id)
+			}
+		}
+	}
+
+	return nil
+}
+
+// CleanChineseCTITermsInDatabase performs direct SQL replacements of prominent Chinese CTI terms in title_ja and summary_ja.
+func (s *SQLStore) CleanChineseCTITermsInDatabase(ctx context.Context) (int64, error) {
+	type pair struct {
+		cn string
+		ja string
+	}
+	pairs := []pair{
+		{"不正当访问", "不正アクセス"},
+		{"不正当", "不正な"},
+		{"非法入侵", "不正アクセス"},
+		{"不法访问", "不正アクセス"},
+		{"未经授权的访问", "不正アクセス"},
+		{"未经授权", "未認可の"},
+		{"个人数据泄露", "個人情報漏洩"},
+		{"个人数据", "個人情報"},
+		{"数据泄露", "データ漏洩"},
+		{"泄露", "漏洩"},
+		{"被盗", "窃取"},
+		{"遭勒索", "ランサムウェア被害を受け"},
+		{"两阶段认证", "2段階認証"},
+		{"兩階段認證", "2段階認証"},
+		{"关于", "に関する"},
+		{"修复旧版本中的安全漏洞", "旧バージョンのセキュリティ脆弱性を修正"},
+		{"更新版本", "アップデート"},
+		{"解决了", "修正しました"},
+		{"调查结果公布", "調査結果公表"},
+		{"宣布", "発表"},
+		{"遭受", "被害を受け"},
+		{"邮件杂志", "メールマガジン"},
+		{"零日漏洞", "ゼロデイ脆弱性"},
+		{"后门", "バックドア"},
+		{"木马", "トロイの木馬"},
+		{"间谍软件", "スパイウェア"},
+		{"攻击活动", "攻撃活動"},
+		{"恶意软件", "マルウェア"},
+		{"勒索软件", "ランサムウェア"},
+		{"云计算", "クラウド"},
+		{"报道指出", "報道によると"},
+		{"据悉", "報道によると"},
+		{"根据报告", "レポートによると"},
+		{"漏洞", "脆弱性"},
+		{"黑客", "攻撃者"},
+		{"钓鱼", "フィッシング"},
+		{"非法访问", "不正アクセス"},
+		{"子公司", "子会社"},
+		{"遭遇的", ""},
+		{"导致", "により"},
+		{"客户", "顧客"},
+		{"东证主板上市公司", "東証プライム上場企業の"},
+		{"公司発表，其", "社は、その"},
+		{"电商巨头", "大手小売"},
+		{"巨头", "大手"},
+		{"其服务器", "サーバーが"},
+		{"导致约", "約"},
+		{"名会员的个人信息被漏洩", "名の会員の個人情報が漏洩"},
+		{"该公司已暂停相关服务并通知受影响的客户", "同社は関連サービスを停止し、影響を受ける顧客に通知を行っています"},
+		{"用户个人信息", "ユーザーの個人情報"},
+		{"窃取取", "窃取"},
+		{"盗取", "窃取"},
+		{"超过", "超の"},
+		{"个电子邮件地址及其他信息", "件のメールアドレスおよびその他の個人情報"},
+		{"个人身份信息", "個人情報"},
+		{"的网络访问", "のネットワークアクセス"},
+		{"调查结果显示约", "調査の結果、約"},
+		{"已漏洩", "漏洩した可能性があります"},
+		{"已暂停", "停止し"},
+		{"相关服务", "関連サービス"},
+		{"受影响的客户", "影響を受ける顧客"},
+		{"非法", "不正"},
+	}
+
+	var totalAffected int64
+	for _, p := range pairs {
+		var q string
+		if s.isSQLite {
+			q = `UPDATE incidents SET
+				title = REPLACE(title, ?, ?),
+				summary = REPLACE(summary, ?, ?),
+				impact_analysis = REPLACE(impact_analysis, ?, ?),
+				title_ja = REPLACE(title_ja, ?, ?),
+				summary_ja = REPLACE(summary_ja, ?, ?),
+				impact_analysis_ja = REPLACE(impact_analysis_ja, ?, ?)
+			WHERE title LIKE '%' || ? || '%' OR summary LIKE '%' || ? || '%' OR impact_analysis LIKE '%' || ? || '%' OR title_ja LIKE '%' || ? || '%' OR summary_ja LIKE '%' || ? || '%' OR impact_analysis_ja LIKE '%' || ? || '%'`
+			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.ja, p.cn, p.cn, p.cn, p.cn, p.cn, p.cn)
+			if err == nil && res != nil {
+				n, _ := res.RowsAffected()
+				totalAffected += n
+			}
+		} else {
+			q = `UPDATE incidents SET
+				title = REPLACE(title, $1, $2),
+				summary = REPLACE(summary, $1, $2),
+				impact_analysis = REPLACE(impact_analysis, $1, $2),
+				title_ja = REPLACE(title_ja, $1, $2),
+				summary_ja = REPLACE(summary_ja, $1, $2),
+				impact_analysis_ja = REPLACE(impact_analysis_ja, $1, $2)
+			WHERE title LIKE '%' || $1 || '%' OR summary LIKE '%' || $1 || '%' OR impact_analysis LIKE '%' || $1 || '%' OR title_ja LIKE '%' || $1 || '%' OR summary_ja LIKE '%' || $1 || '%' OR impact_analysis_ja LIKE '%' || $1 || '%'`
+			res, err := s.db.ExecContext(ctx, q, p.cn, p.ja)
+			if err == nil && res != nil {
+				n, _ := res.RowsAffected()
+				totalAffected += n
+			}
+		}
+	}
+	return totalAffected, nil
+}
+
+// GetIncidentsNeedingJapaneseRemediation returns incidents where title_ja or summary_ja has Chinese CTI terms,
+// contains Hanzi/Kanji without Kana, or is completely missing Japanese localization.
+func (s *SQLStore) GetIncidentsNeedingJapaneseRemediation(ctx context.Context, limit int) ([]models.Incident, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -1604,7 +1853,6 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title LIKE '%[あ-ん]%' OR summary LIKE '%[あ-ん]%' OR (COALESCE(summary, '') = '' AND COALESCE(summary_ja, '') != ''))
 			ORDER BY last_seen_at DESC
 			LIMIT ?
 		`
@@ -1612,7 +1860,13 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 		query = `
 			SELECT ` + incidentSelectCols + `
 			FROM incidents
-			WHERE (title ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR summary ~ '[\u3040-\u30ff\u4e00-\u9faf]' OR (COALESCE(summary, '') = '' AND summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]'))
+			WHERE (
+				title_ja ~ '(关于|不正当|泄露|数据|服务|攻击|漏洞|恶意|黑客|据悉|报道|宣布|遭受|未经授权|被盗|不法访问|更新版本|针对|修复旧版本|解决了|两阶段|两阶段认证|官方应用|会员管理系统|已暂停|通用漏洞披露|网络安全和基础设施安全局)'
+				OR summary_ja ~ '(关于|不正当|泄露|数据|服务|攻击|漏洞|恶意|黑客|据悉|报道|宣布|遭受|未经授权|被盗|不法访问|更新版本|针对|修复旧版本|解决了|两阶段|两阶段认证|官方应用|会员管理系统|已暂停|通用漏洞披露|网络安全和基础设施安全局)'
+				OR (title_ja ~ '[\u4e00-\u9faf]' AND title_ja !~ '[\u3040-\u30ff]')
+				OR (summary_ja ~ '[\u4e00-\u9faf]' AND summary_ja !~ '[\u3040-\u30ff]')
+				OR (COALESCE(title_ja, '') = '' AND COALESCE(title, '') != '')
+			)
 			ORDER BY last_seen_at DESC
 			LIMIT $1
 		`
@@ -1631,7 +1885,71 @@ func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int
 			continue
 		}
 		if s.isSQLite {
-			if isJapaneseText(inc.Title) || isJapaneseText(inc.Summary) || (inc.Summary == "" && isJapaneseText(inc.SummaryJa)) {
+			if models.IsChineseOrCorruptedJapanese(inc.TitleJa) ||
+				models.IsChineseOrCorruptedJapanese(inc.SummaryJa) ||
+				(inc.TitleJa == "" && inc.Title != "") {
+				incidents = append(incidents, *inc)
+			}
+		} else {
+			incidents = append(incidents, *inc)
+		}
+	}
+
+	return incidents, nil
+}
+
+// GetIncidentsNeedingTranslation returns incidents that have Japanese characters in their title, summary, impact analysis, victim org, or affected product and lack English translations.
+func (s *SQLStore) GetIncidentsNeedingTranslation(ctx context.Context, limit int) ([]models.Incident, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var query string
+	if s.isSQLite {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			ORDER BY last_seen_at DESC
+			LIMIT ?
+		`
+	} else {
+		query = `
+			SELECT ` + incidentSelectCols + `
+			FROM incidents
+			WHERE (
+				title ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR summary ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR (COALESCE(summary, '') = '' AND summary_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+				OR impact_analysis ~ '[\u3040-\u30ff\u4e00-\u9faf]'
+				OR (COALESCE(impact_analysis, '') = '' AND impact_analysis_ja ~ '[\u3040-\u30ff\u4e00-\u9faf]')
+				OR (victim_org ~ '[\u3040-\u30ff\u4e00-\u9faf]' AND COALESCE(victim_org_en, '') = '')
+				OR (affected_product ~ '[\u3040-\u30ff\u4e00-\u9faf]' AND COALESCE(affected_product_en, '') = '')
+			)
+			ORDER BY last_seen_at DESC
+			LIMIT $1
+		`
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var incidents []models.Incident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			continue
+		}
+		if s.isSQLite {
+			if isJapaneseText(inc.Title) ||
+				isJapaneseText(inc.Summary) ||
+				(inc.Summary == "" && isJapaneseText(inc.SummaryJa)) ||
+				isJapaneseText(inc.ImpactAnalysis) ||
+				(inc.ImpactAnalysis == "" && isJapaneseText(inc.ImpactAnalysisJa)) ||
+				(isJapaneseText(inc.VictimOrg) && inc.VictimOrgEn == "") ||
+				(isJapaneseText(inc.AffectedProduct) && inc.AffectedProductEn == "") {
 				incidents = append(incidents, *inc)
 			}
 		} else {

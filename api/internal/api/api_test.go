@@ -60,6 +60,17 @@ func (m *mockAPIAnalyzer) TranslateBatch(ctx context.Context, items []analyzer.B
 	}
 	return res, nil
 }
+func (m *mockAPIAnalyzer) TranslateBatchToJapanese(ctx context.Context, items []analyzer.BatchTranslateItem) ([]analyzer.BatchTranslateResult, error) {
+	var res []analyzer.BatchTranslateResult
+	for _, it := range items {
+		res = append(res, analyzer.BatchTranslateResult{
+			ID: it.ID,
+			Title: "日本語要約: " + it.Title,
+			Summary: "日本語要約: " + it.Summary,
+		})
+	}
+	return res, nil
+}
 
 
 func TestAPIRoutes(t *testing.T) {
@@ -349,7 +360,22 @@ func TestAPIConfigEndpoints(t *testing.T) {
 		t.Errorf("expected 200 on /api/config/compliance, got %d", w.Code)
 	}
 
-	// 5. POST /api/config/sources (toggle & delete)
+	// 5. POST /api/config/sources (add, toggle & delete)
+	addPayload, _ := json.Marshal(map[string]interface{}{
+		"source_type": "vendor_rss",
+		"action":      "add",
+		"data": map[string]interface{}{
+			"name": "Config Test Feed",
+			"url":  "https://example.com/test_feed.rss",
+		},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/config/sources", bytes.NewReader(addPayload))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on add source, got %d", w.Code)
+	}
+
 	togglePayload, _ := json.Marshal(map[string]interface{}{
 		"action":      "toggle",
 		"source_type": "vendor_rss",
@@ -495,6 +521,7 @@ func TestAPIIncidentFormatsAndLang(t *testing.T) {
 	defer store.Close()
 
 	srv := NewServer(store)
+	srv.pipeline.SetAnalyzer(&mockAPIAnalyzer{})
 	ctx := context.Background()
 
 	now := time.Now().UTC()
@@ -561,6 +588,100 @@ func TestAPIIncidentFormatsAndLang(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 on lang=en incident, got %d", w.Code)
 	}
+
+	// 5. Test Untranslated Japanese-only incident in EN view: must not leak Japanese in title/summary/actions
+	jaOnlyItem := models.ThreatItem{
+		ID:          "ja-only-item",
+		Title:       "国内大手企業への不正アクセス被害の発生について",
+		URL:         "https://example.com/ja-incident",
+		Summary:     "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		PublishedAt: &now,
+		HarvestedAt: now,
+	}
+	jaOnlyEnriched := &models.EnrichedThreat{
+		ItemID:         "ja-only-item",
+		Item:           jaOnlyItem,
+		Title:          "国内大手企業への不正アクセス被害の発生について",
+		TitleJa:        "国内大手企業への不正アクセス被害の発生について",
+		Summary:        "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		SummaryJa:      "攻撃者による認証情報の不正利用により社内サーバーへアクセスされた事案を報告します。",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		VictimOrgs:     []string{"株式会社テスト企業"},
+		CVEs:           []string{"CVE-2026-1111"},
+		RecommendedActions: []string{"認証情報を初期化する", "通信ログを調査する"},
+	}
+	jaInc, _ := store.FindOrCreateIncident(ctx, jaOnlyItem, jaOnlyEnriched, 30)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/incidents/"+jaInc.ID+"?lang=en", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on ja incident in EN view, got %d", w.Code)
+	}
+	var resBody map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resBody); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	titleRes, _ := resBody["title"].(string)
+	if isJapaneseText(titleRes) {
+		t.Errorf("expected EN title to not contain Japanese, got '%s'", titleRes)
+	}
+	summaryRes, _ := resBody["summary"].(string)
+	if isJapaneseText(summaryRes) {
+		t.Errorf("expected EN summary to not contain Japanese, got '%s'", summaryRes)
+	}
+	if ep, ok := resBody["enriched_parsed"].(map[string]interface{}); ok {
+		if ra, ok := ep["recommended_actions"].([]interface{}); ok {
+			for _, a := range ra {
+				if as, ok := a.(string); ok && isJapaneseText(as) {
+					t.Errorf("expected recommended_actions in EN view to not contain Japanese, got '%s'", as)
+				}
+			}
+		}
+	}
+
+	// 6. Test incident with Chinese text in JA view: must not leak Chinese in title/summary/actions
+	cnItem := models.ThreatItem{
+		ID:          "cn-item-1",
+		Title:       "Unauthorized Access to Subsidiary by TSE Listed Company",
+		URL:         "https://example.com/cn-incident",
+		Summary:     "Investigation shows potential breach of customer data.",
+		PublishedAt: &now,
+		HarvestedAt: now,
+	}
+	cnEnriched := &models.EnrichedThreat{
+		ItemID:         "cn-item-1",
+		Item:           cnItem,
+		Title:          "Unauthorized Access to Subsidiary by TSE Listed Company",
+		TitleJa:        "Park24子公司遭遇的不正访问导致客户データ漏洩",
+		Summary:        "Investigation shows potential breach of customer data.",
+		SummaryJa:      "东证主板上市公司Park24公司発表，其子公司被害を受け了未認可の的网络访问。导致约160万用户个人信息窃取取。",
+		Severity:       models.SeverityHigh,
+		JapanRelevance: models.JapanRelevanceDirect,
+		VictimOrgs:     []string{"Park24"},
+		CVEs:           []string{"CVE-2026-2222"},
+	}
+	cnInc, _ := store.FindOrCreateIncident(ctx, cnItem, cnEnriched, 30)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/incidents/"+cnInc.ID+"?lang=ja", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on cn incident in JA view, got %d", w.Code)
+	}
+	var jaResBody map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &jaResBody); err != nil {
+		t.Fatalf("failed to parse json response: %v", err)
+	}
+	jaTitle, _ := jaResBody["title"].(string)
+	if models.HasChineseCTITerms(jaTitle) {
+		t.Errorf("expected JA title to not contain Chinese markers, got '%s'", jaTitle)
+	}
+	jaSummary, _ := jaResBody["summary"].(string)
+	if models.HasChineseCTITerms(jaSummary) {
+		t.Errorf("expected JA summary to not contain Chinese markers, got '%s'", jaSummary)
+	}
 }
 
 func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
@@ -605,7 +726,7 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 		t.Fatalf("failed to insert incident: %v", err)
 	}
 
-	// 1. GET /rss
+	// 1. GET /rss (defaults to Japanese)
 	req := httptest.NewRequest(http.MethodGet, "/rss", nil)
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
@@ -613,8 +734,20 @@ func TestAPIRSSFeedAndAdvancedRoutes(t *testing.T) {
 		t.Errorf("expected 200 on /rss, got %d", w.Code)
 	}
 	rssBody := w.Body.String()
-	if !strings.Contains(rssBody, "<rss") || !strings.Contains(rssBody, "Critical Zero-Day Exploit") {
+	if !strings.Contains(rssBody, "<rss") || (!strings.Contains(rssBody, "Critical Zero-Day Exploit") && !strings.Contains(rssBody, "ゼロデイ脆弱性の悪用")) {
 		t.Errorf("expected valid RSS XML containing incident title, got: %s", rssBody)
+	}
+
+	// 1b. GET /rss?lang=en
+	reqEn := httptest.NewRequest(http.MethodGet, "/rss?lang=en", nil)
+	wEn := httptest.NewRecorder()
+	srv.ServeHTTP(wEn, reqEn)
+	if wEn.Code != http.StatusOK {
+		t.Errorf("expected 200 on /rss?lang=en, got %d", wEn.Code)
+	}
+	rssEnBody := wEn.Body.String()
+	if !strings.Contains(rssEnBody, "<rss") || !strings.Contains(rssEnBody, "Critical Zero-Day Exploit") {
+		t.Errorf("expected valid English RSS XML containing incident title, got: %s", rssEnBody)
 	}
 
 	// 2. GET /rss with filters

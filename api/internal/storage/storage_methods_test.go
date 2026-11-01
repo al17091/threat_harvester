@@ -449,3 +449,78 @@ func TestIncidentsFilterConditions(t *testing.T) {
 	}
 }
 
+func TestJapaneseRemediationStorage(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	sqlStore := store.(*SQLStore)
+
+	// Insert an incident with Chinese CTI terms
+	insertSQL := `INSERT INTO incidents (
+		id, victim_org, normalized_victim_org, title, title_ja, summary, summary_ja,
+		severity, japan_relevance, first_seen_at, last_seen_at, created_at, updated_at
+	) VALUES (
+		'inc-cn-1', 'Yamada Corp', 'yamada',
+		'Yamada Corp Unauthorized Access', '大和証券株式会社关于SC社不正当访问事件的公告',
+		'Yamada Corp server was accessed without authorization', '大和证券公司宣布，其外部供应商SC公司遭受了不正当访问，导致数据泄露。',
+		'High', 'Direct', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+	)`
+	if _, err := sqlStore.db.ExecContext(ctx, insertSQL); err != nil {
+		t.Fatalf("failed to insert test incident: %v", err)
+	}
+
+	// 1. Verify GetIncidentsNeedingJapaneseRemediation finds it
+	remedial, err := sqlStore.GetIncidentsNeedingJapaneseRemediation(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetIncidentsNeedingJapaneseRemediation failed: %v", err)
+	}
+	if len(remedial) != 1 || remedial[0].ID != "inc-cn-1" {
+		t.Fatalf("expected 1 incident needing remediation, got: %v", remedial)
+	}
+
+	// 2. Test CleanChineseCTITermsInDatabase replaces basic terms
+	affected, err := sqlStore.CleanChineseCTITermsInDatabase(ctx)
+	if err != nil {
+		t.Fatalf("CleanChineseCTITermsInDatabase failed: %v", err)
+	}
+	if affected == 0 {
+		t.Errorf("expected affected rows > 0, got 0")
+	}
+
+	// 3. Test UpdateIncidentJapaneseTranslations
+	cleanTitleJa := "大和証券株式会社、SC社への不正アクセスに関する報告書を公表"
+	cleanSummaryJa := "大和証券株式会社は、外部委託先SC社のサーバーが第三者による不正アクセスを受け、情報漏洩の可能性があると発表しました。"
+	cleanImpactJa := "顧客情報の流出および信用毀損リスクが存在します。"
+	cleanActions := []string{"委託先のセキュリティ監査の実施", "不正アクセスの経路遮断"}
+
+	err = sqlStore.UpdateIncidentJapaneseTranslations(ctx, "inc-cn-1", cleanTitleJa, cleanSummaryJa, cleanImpactJa, cleanActions)
+	if err != nil {
+		t.Fatalf("UpdateIncidentJapaneseTranslations failed: %v", err)
+	}
+
+	// Verify updated record
+	incMap, err := sqlStore.GetIncident(ctx, "inc-cn-1")
+	if err != nil {
+		t.Fatalf("GetIncident failed: %v", err)
+	}
+	if incMap["title_ja"] != cleanTitleJa {
+		t.Errorf("expected title_ja = %q, got %q", cleanTitleJa, incMap["title_ja"])
+	}
+	if incMap["summary_ja"] != cleanSummaryJa {
+		t.Errorf("expected summary_ja = %q, got %q", cleanSummaryJa, incMap["summary_ja"])
+	}
+
+	// Verify it no longer needs remediation
+	remedialAfter, err := sqlStore.GetIncidentsNeedingJapaneseRemediation(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetIncidentsNeedingJapaneseRemediation failed: %v", err)
+	}
+	if len(remedialAfter) != 0 {
+		t.Errorf("expected 0 incidents needing remediation, got %d", len(remedialAfter))
+	}
+}
+

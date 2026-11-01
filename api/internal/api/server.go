@@ -61,6 +61,12 @@ func NewServer(store storage.Store) *Server {
 	}
 	s.setupRoutes()
 	s.triggerAsyncHealthChecks(cfg)
+	go func() {
+		time.Sleep(3 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		s.RunIncidentJapaneseRemediation(ctx, 200)
+	}()
 	return s
 }
 
@@ -110,6 +116,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
 		r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
 		r.Post("/pipeline/translate-incidents", s.handleTranslateIncidents)
+		r.Post("/pipeline/remediate-japanese", s.handleRemediateJapanese)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
 		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
@@ -469,9 +476,13 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 						inc["title_ja"] = title
 					}
 					inc["summary"] = transOut.Summary
-					inc["summary_ja"] = transOut.Summary
+					if isJapaneseText(summary) && (inc["summary_ja"] == nil || inc["summary_ja"] == "") {
+						inc["summary_ja"] = summary
+					}
 					inc["impact_analysis"] = transOut.ImpactAnalysis
-					inc["impact_analysis_ja"] = transOut.ImpactAnalysis
+					if isJapaneseText(impact) && (inc["impact_analysis_ja"] == nil || inc["impact_analysis_ja"] == "") {
+						inc["impact_analysis_ja"] = impact
+					}
 					if transOut.VictimOrgEn != "" {
 						inc["victim_org_en"] = transOut.VictimOrgEn
 					}
@@ -560,11 +571,93 @@ func (s *Server) handleTranslateIncidents(w http.ResponseWriter, r *http.Request
 	go func() {
 		ctx := context.Background()
 		s.RunIncidentBatchTranslation(ctx, 200)
+		s.RunIncidentJapaneseRemediation(ctx, 200)
 	}()
 	jsonResponse(w, http.StatusOK, map[string]string{
 		"status":  "started",
-		"message": "Background incident translation started",
+		"message": "Background incident translation and Japanese remediation started",
 	})
+}
+
+func (s *Server) handleRemediateJapanese(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		ctx := context.Background()
+		s.RunIncidentJapaneseRemediation(ctx, 200)
+	}()
+	jsonResponse(w, http.StatusOK, map[string]string{
+		"status":  "started",
+		"message": "Background incident Japanese remediation started",
+	})
+}
+
+// RunIncidentJapaneseRemediation cleans up legacy Chinese terms and re-translates Chinese/corrupted incidents into clean Japanese.
+func (s *Server) RunIncidentJapaneseRemediation(ctx context.Context, maxItems int) int {
+	if maxItems <= 0 {
+		maxItems = 200
+	}
+
+	// 1. Direct term-level cleanup in DB
+	cleanedRows, err := s.store.CleanChineseCTITermsInDatabase(ctx)
+	if err == nil && cleanedRows > 0 {
+		log.Printf("[Remediator] Cleaned Chinese CTI terms in %d database records", cleanedRows)
+	}
+
+	// 2. Fetch incidents that need full Japanese translation or repair
+	incidents, err := s.store.GetIncidentsNeedingJapaneseRemediation(ctx, maxItems)
+	if err != nil || len(incidents) == 0 {
+		return int(cleanedRows)
+	}
+
+	log.Printf("[Remediator] Found %d incidents needing Japanese remediation/translation. Starting batch...", len(incidents))
+	remediatedCount := 0
+	batchSize := 15
+	for i := 0; i < len(incidents); i += batchSize {
+		end := i + batchSize
+		if end > len(incidents) {
+			end = len(incidents)
+		}
+		chunk := incidents[i:end]
+
+		var items []analyzer.BatchTranslateItem
+		for _, inc := range chunk {
+			sum := inc.Summary
+			if sum == "" {
+				sum = inc.SummaryJa
+			}
+			imp := inc.ImpactAnalysis
+			if imp == "" {
+				imp = inc.ImpactAnalysisJa
+			}
+			tit := inc.Title
+			if tit == "" {
+				tit = inc.TitleJa
+			}
+			items = append(items, analyzer.BatchTranslateItem{
+				ID:              inc.ID,
+				Title:           tit,
+				Summary:         sum,
+				ImpactAnalysis:  imp,
+				VictimOrg:       inc.VictimOrg,
+				AffectedProduct: inc.AffectedProduct,
+			})
+		}
+
+		results, err := s.pipeline.Analyzer().TranslateBatchToJapanese(ctx, items)
+		if err != nil {
+			log.Printf("[Remediator] Batch translation to Japanese failed: %v", err)
+			continue
+		}
+
+		for _, res := range results {
+			if res.Title != "" || res.Summary != "" || res.ImpactAnalysis != "" {
+				_ = s.store.UpdateIncidentJapaneseTranslations(ctx, res.ID, res.Title, res.Summary, res.ImpactAnalysis, res.RecommendedActions)
+				remediatedCount++
+			}
+		}
+	}
+
+	log.Printf("[Remediator] Successfully remediated and updated %d incidents in Japanese", remediatedCount)
+	return remediatedCount
 }
 
 // RunIncidentBatchTranslation translates Japanese incidents in batches using Gemini/Qwen and persists results.
@@ -629,32 +722,44 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 		// JA VIEW:
 		tJa, _ := inc["title_ja"].(string)
 		tEn, _ := inc["title"].(string)
-		if isJapaneseText(tJa) {
-			inc["title"] = tJa
-		} else if isJapaneseText(tEn) {
-			inc["title"] = tEn
-		} else if tJa != "" {
-			inc["title"] = tJa
+		tJaClean := analyzer.CleanChineseCTITerms(tJa, true)
+		tEnClean := analyzer.CleanChineseCTITerms(tEn, true)
+		if isCleanJapanese(tJaClean) {
+			inc["title"] = tJaClean
+		} else if isCleanJapanese(tEnClean) {
+			inc["title"] = tEnClean
+		} else if tEnClean != "" && !models.IsChineseOrCorruptedJapanese(tEnClean) {
+			inc["title"] = tEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(tJaClean) && tJaClean != "" {
+			inc["title"] = tJaClean
 		}
 
 		sJa, _ := inc["summary_ja"].(string)
 		sEn, _ := inc["summary"].(string)
-		if isJapaneseText(sJa) {
-			inc["summary"] = sJa
-		} else if isJapaneseText(sEn) {
-			inc["summary"] = sEn
-		} else if sJa != "" {
-			inc["summary"] = sJa
+		sJaClean := analyzer.CleanChineseCTITerms(sJa, true)
+		sEnClean := analyzer.CleanChineseCTITerms(sEn, true)
+		if isCleanJapanese(sJaClean) {
+			inc["summary"] = sJaClean
+		} else if isCleanJapanese(sEnClean) {
+			inc["summary"] = sEnClean
+		} else if sEnClean != "" && !models.IsChineseOrCorruptedJapanese(sEnClean) {
+			inc["summary"] = sEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(sJaClean) && sJaClean != "" {
+			inc["summary"] = sJaClean
 		}
 
 		iJa, _ := inc["impact_analysis_ja"].(string)
 		iEn, _ := inc["impact_analysis"].(string)
-		if isJapaneseText(iJa) {
-			inc["impact_analysis"] = iJa
-		} else if isJapaneseText(iEn) {
-			inc["impact_analysis"] = iEn
-		} else if iJa != "" {
-			inc["impact_analysis"] = iJa
+		iJaClean := analyzer.CleanChineseCTITerms(iJa, true)
+		iEnClean := analyzer.CleanChineseCTITerms(iEn, true)
+		if isCleanJapanese(iJaClean) {
+			inc["impact_analysis"] = iJaClean
+		} else if isCleanJapanese(iEnClean) {
+			inc["impact_analysis"] = iEnClean
+		} else if iEnClean != "" && !models.IsChineseOrCorruptedJapanese(iEnClean) {
+			inc["impact_analysis"] = iEnClean
+		} else if !models.IsChineseOrCorruptedJapanese(iJaClean) && iJaClean != "" {
+			inc["impact_analysis"] = iJaClean
 		}
 
 		if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
@@ -693,6 +798,28 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["title"] = tEn
 		} else if tJa != "" && !isJapaneseText(tJa) {
 			inc["title"] = tJa
+		} else {
+			// Both contain Japanese or are empty. If title contains Japanese, preserve it in title_ja
+			if isJapaneseText(tEn) && (tJa == "" || !isJapaneseText(tJa)) {
+				inc["title_ja"] = tEn
+			}
+			// Construct an informative English title from structured metadata instead of leaking raw Japanese
+			cves, _ := inc["cves"].([]string)
+			vOrg, _ := inc["victim_org_en"].(string)
+			if vOrg == "" {
+				if vo, _ := inc["victim_org"].(string); vo != "" && !isJapaneseText(vo) && vo != "Unknown" {
+					vOrg = vo
+				}
+			}
+			if len(cves) > 0 && vOrg != "" {
+				inc["title"] = fmt.Sprintf("Cyber Incident targeting %s (%s)", vOrg, strings.Join(cves, ", "))
+			} else if len(cves) > 0 {
+				inc["title"] = fmt.Sprintf("Vulnerability Advisory (%s)", strings.Join(cves, ", "))
+			} else if vOrg != "" {
+				inc["title"] = fmt.Sprintf("Cyber Incident targeting %s", vOrg)
+			} else if isJapaneseText(tEn) {
+				inc["title"] = "(Cyber Incident Report - Translation Pending)"
+			}
 		}
 
 		sEn, _ := inc["summary"].(string)
@@ -701,6 +828,13 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["summary"] = sEn
 		} else if sJa != "" && !isJapaneseText(sJa) {
 			inc["summary"] = sJa
+		} else {
+			if isJapaneseText(sEn) && (sJa == "" || !isJapaneseText(sJa)) {
+				inc["summary_ja"] = sEn
+			}
+			if isJapaneseText(sEn) {
+				inc["summary"] = "(Summary translation in progress. Detailed intelligence report being processed.)"
+			}
 		}
 
 		iEn, _ := inc["impact_analysis"].(string)
@@ -709,6 +843,13 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["impact_analysis"] = iEn
 		} else if iJa != "" && !isJapaneseText(iJa) {
 			inc["impact_analysis"] = iJa
+		} else {
+			if isJapaneseText(iEn) && (iJa == "" || !isJapaneseText(iJa)) {
+				inc["impact_analysis_ja"] = iEn
+			}
+			if isJapaneseText(iEn) {
+				inc["impact_analysis"] = "(Impact analysis translation in progress.)"
+			}
 		}
 
 		if vEn, ok := inc["victim_org_en"].(string); ok && vEn != "" {
@@ -716,14 +857,41 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["victim_orgs"] = []string{vEn}
 			}
+		} else if vRaw, ok := inc["victim_org"].(string); ok && isJapaneseText(vRaw) {
+			if _, hasJa := inc["victim_org_ja"]; !hasJa || inc["victim_org_ja"] == "" {
+				inc["victim_org_ja"] = vRaw
+			}
 		}
+
 		if pEn, ok := inc["affected_product_en"].(string); ok && pEn != "" {
 			inc["affected_product"] = pEn
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["affected_products"] = []string{pEn}
 			}
+		} else if pRaw, ok := inc["affected_product"].(string); ok && isJapaneseText(pRaw) {
+			if _, hasJa := inc["affected_product_ja"]; !hasJa || inc["affected_product_ja"] == "" {
+				inc["affected_product_ja"] = pRaw
+			}
 		}
+
+		// Ensure enriched_parsed does not leak Japanese actions or descriptions in English view
 		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+			var enActions []string
+			if ra, ok := ep["recommended_actions"].([]string); ok {
+				for _, a := range ra {
+					if as := strings.TrimSpace(a); as != "" && !isJapaneseText(as) {
+						enActions = append(enActions, as)
+					}
+				}
+			} else if rai, ok := ep["recommended_actions"].([]interface{}); ok {
+				for _, a := range rai {
+					if as, ok := a.(string); ok && strings.TrimSpace(as) != "" && !isJapaneseText(as) {
+						enActions = append(enActions, strings.TrimSpace(as))
+					}
+				}
+			}
+			ep["recommended_actions"] = enActions
+
 			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
 				ep["title"] = tFinal
 			}
@@ -737,13 +905,17 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 	}
 }
 
+func isCleanJapanese(s string) bool {
+	return models.IsJapaneseText(s) && !models.HasChineseCTITerms(s)
+}
+
 func isJapaneseText(s string) bool {
 	for _, r := range s {
 		if (r >= 0x3040 && r <= 0x309F) || (r >= 0x30A0 && r <= 0x30FF) || (r >= 0x4E00 && r <= 0x9FAF) {
 			return true
 		}
 	}
-	return false
+	return models.HasChineseCTITerms(s)
 }
 
 func hasJapaneseItem(items []string) bool {

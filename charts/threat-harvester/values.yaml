@@ -148,14 +148,14 @@ config:
     extractor: "qwen"
     refiner: "gemini"
     translator: "gemini"
-    refineSeverities: "CRITICAL,HIGH"
-    refineJapanOnly: false
+    refineSeverities: "CRITICAL"
+    refineJapanOnly: true
   searxngUrl: "https://searxng.lab.internal/search"
   searxngResearchUrl: "https://searxng-research.lab.internal/search"
   checkIntervalHours: 1
   enableScheduler: false
   notifyDirectOnly: false
-  notifyLanguage: "en"
+  notifyLanguage: "ja"
   circuitBreakerMaxAlerts: 5
   notifyDryRun: false
   browserlessUrl: ""
@@ -215,3 +215,7 @@ persistence:
   accessMode: ReadWriteOnce
   size: 5Gi
   storageClass: ""
+
+nodeSelector:
+  kubernetes.io/arch: amd64
+
