@@ -33,7 +33,7 @@ func (m *mockE2EAnalyzer) Analyze(ctx context.Context, item models.ThreatItem) (
 		JapanRelevance:   models.JapanRelevanceDirect,
 		AttackType:       "Ransomware",
 		ThreatActors:     []string{"LockBit"},
-		VictimOrgs:       []string{"Cyber Defense Inc"},
+		VictimOrgs:       []string{"Cyber Defense Japan Inc"},
 		CVEs:             []string{"CVE-2024-9999"},
 		AffectedProducts: []string{"Firewall OS"},
 	}, nil

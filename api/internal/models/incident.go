@@ -392,6 +392,134 @@ func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool
 	return false
 }
 
+// IsPureVulnerabilityAdvisory determines if an item is merely a security patch announcement,
+// routine vendor advisory, or general vulnerability disclosure without active exploitation,
+// weaponized PoC, or verified breach incident.
+func IsPureVulnerabilityAdvisory(item ThreatItem, enriched *EnrichedThreat) bool {
+	// If it's a confirmed incident type, it's not a pure advisory
+	if enriched != nil {
+		switch strings.ToLower(enriched.AttackType) {
+		case "ransomware", "data breach", "zero-day", "supply chain", "ddos", "phishing":
+			return false
+		}
+	}
+
+	combined := item.Title + " " + item.Summary + " " + item.RawContent
+	if enriched != nil {
+		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa + " " + enriched.ImpactAnalysis + " " + enriched.ImpactAnalysisJa
+	}
+	lower := strings.ToLower(combined)
+
+	// Threat evidence: if any active exploit, weaponized PoC, or real-world compromise indicator is present, do NOT treat as pure advisory
+	threatEvidence := []string{
+		"in the wild", "in-the-wild", "actively exploited", "exploited in the wild", "active exploitation",
+		"under active exploit", "zero-day", "0-day", "ゼロデイ", "悪用が確認", "悪用確認",
+		"weaponized", "proof of concept", "poc available", "exploit code released", "poc demonstrates",
+		"pocコード", "実証コード", "悪用コード",
+		"compromised", "breached", "data breach", "data leak", "stolen data", "ransomware",
+		"threat actor", "apt", "cybercrime", "unauthorized access",
+		"情報漏洩", "データ漏洩", "情報流出", "不正アクセスにより", "身代金", "ランサムウェア",
+		"被害が発生", "被害を受けた", "侵害された",
+	}
+	for _, te := range threatEvidence {
+		if strings.Contains(lower, te) {
+			return false
+		}
+	}
+
+	// Advisory & patch announcement markers
+	advisoryMarkers := []string{
+		"security advisory", "security advisories", "security update", "security updates",
+		"monthly security", "monthly update", "patch tuesday",
+		"patches flaw", "patches vulnerability", "patches vulnerabilities",
+		"fixes flaw", "fixes vulnerability", "fixes vulnerabilities",
+		"addresses flaw", "addresses vulnerability", "addresses vulnerabilities",
+		"releases patch", "releases update", "released security update",
+		"vulnerabilities released", "vulnerability released",
+		"vulnerability in", "flaw in", "bug in",
+		"receives patent", "patent for",
+		"セキュリティ更新プログラム", "セキュリティアップデート", "脆弱性の公表",
+		"脆弱性を修正", "修正プログラム", "アップデートを公開", "アップデートの提供",
+		"注意喚起", "脆弱性情報", "修正パッチ", "バグ修正",
+	}
+	for _, am := range advisoryMarkers {
+		if strings.Contains(lower, am) {
+			return true
+		}
+	}
+
+	// If attack_type is explicitly Vulnerability and no threat evidence was found, it's an advisory
+	if enriched != nil && strings.EqualFold(enriched.AttackType, "Vulnerability") {
+		return true
+	}
+
+	return false
+}
+
+// RefineJapanRelevance enforces strict guardrails on JapanRelevanceDirect.
+// A threat is ONLY Direct if:
+// 1. A recognized Japanese victim organization is explicitly identified, OR
+// 2. The title/summary explicitly mentions domestic Japanese impact (e.g. "国内組織", "日本企業", "国内").
+// General global enterprise product vulnerabilities (Fortinet, Cisco, etc.) without specific Japanese victims
+// are downgraded to Indirect.
+func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanRelevance {
+	if enriched == nil {
+		return JapanRelevanceNone
+	}
+	if enriched.JapanRelevance != JapanRelevanceDirect {
+		return enriched.JapanRelevance
+	}
+
+	// Check if any specific Japanese victim organization is present
+	hasJapaneseVictim := false
+	for _, org := range enriched.VictimOrgs {
+		cleaned := strings.TrimSpace(org)
+		if cleaned == "" || IsGenericVictimOrg(cleaned) {
+			continue
+		}
+		// If org contains Japanese characters or ends with .jp, it's domestic
+		for _, r := range cleaned {
+			if unicode.In(r, unicode.Hiragana, unicode.Katakana, unicode.Han) {
+				hasJapaneseVictim = true
+				break
+			}
+		}
+		if hasJapaneseVictim {
+			break
+		}
+		lowerOrg := strings.ToLower(cleaned)
+		if strings.HasSuffix(lowerOrg, ".jp") || strings.Contains(lowerOrg, "japan") || strings.Contains(lowerOrg, "japanese") {
+			hasJapaneseVictim = true
+			break
+		}
+	}
+	if hasJapaneseVictim {
+		return JapanRelevanceDirect
+	}
+
+	// Check if title or summary explicitly mentions domestic Japanese victim/target context
+	combined := item.Title + " " + item.Summary
+	if enriched != nil {
+		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa
+	}
+	lower := strings.ToLower(combined)
+
+	domesticIndicators := []string{
+		"国内組織", "国内企業", "日本企業", "日本組織", "国内自治体", "国内大学", "国内病院",
+		"日本の組織", "日本の企業", "日本国内", "targeting japanese", "targeting japan",
+		"japanese entities", "japanese organizations", "japanese companies",
+		"jpcert", "ipa", "警察庁", "デジタル庁", "内閣サイバー", "nisc",
+	}
+	for _, di := range domesticIndicators {
+		if strings.Contains(lower, di) {
+			return JapanRelevanceDirect
+		}
+	}
+
+	// If victim is Unknown or foreign vendor, downgrade to Indirect
+	return JapanRelevanceIndirect
+}
+
 // HigherSeverity returns the higher of two severities.
 func HigherSeverity(a, b Severity) Severity {
 	if SeverityScore(b) > SeverityScore(a) {

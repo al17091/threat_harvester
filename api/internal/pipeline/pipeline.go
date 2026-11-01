@@ -168,6 +168,17 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				enriched.Severity = models.SeverityInfo
 			}
 
+			// Enforce guardrails on Japan Direct relevance (prevent Unknown/foreign CVEs from becoming Direct)
+			enriched.JapanRelevance = models.RefineJapanRelevance(item, enriched)
+
+			// Demote pure vulnerability advisories without active exploitation, PoC, or real-world breach
+			if models.IsPureVulnerabilityAdvisory(item, enriched) {
+				if enriched.Severity == models.SeverityCritical || enriched.Severity == models.SeverityHigh {
+					log.Printf("[Pipeline] Demoting pure vulnerability advisory from %s to Low: %s", enriched.Severity, item.Title)
+					enriched.Severity = models.SeverityLow
+				}
+			}
+
 			analyzedCount++
 			log.Printf("[Pipeline] [%d/%d] Analysis result: Severity=%s | Japan=%s | Actor=%v",
 				i+itemIdx+1, len(newItems), enriched.Severity, enriched.JapanRelevance, enriched.ThreatActors)

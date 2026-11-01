@@ -292,6 +292,111 @@ func TestIsServiceReleaseOrNonThreat(t *testing.T) {
 	}
 }
 
+func TestIsPureVulnerabilityAdvisory(t *testing.T) {
+	// Routine monthly security advisory without active exploitation
+	routineAdvisory := ThreatItem{
+		Title:   "Adobe Releases Security Advisories Addressing Multiple Vulnerabilities Across 11 Products",
+		Summary: "Adobe has published its monthly security updates fixing several flaws.",
+	}
+	enrichedAdvisory := &EnrichedThreat{
+		AttackType: "Vulnerability",
+		Severity:   SeverityHigh,
+	}
+	if !IsPureVulnerabilityAdvisory(routineAdvisory, enrichedAdvisory) {
+		t.Errorf("expected routine Adobe advisory to be identified as pure advisory")
+	}
+
+	// Splunk routine security update
+	splunkUpdate := ThreatItem{
+		Title:   "Critical Security Updates for Splunk Enterprise: CVE-2026-76299, CVE-2026-76302",
+		Summary: "Splunk releases patches for multiple vulnerabilities.",
+	}
+	if !IsPureVulnerabilityAdvisory(splunkUpdate, nil) {
+		t.Errorf("expected Splunk patch release to be identified as pure advisory")
+	}
+
+	// In-the-wild exploitation: MUST NOT be treated as pure advisory
+	inTheWild := ThreatItem{
+		Title:   "Cisco FMC flaws exploited by ransomware gang, state-sponsored hackers",
+		Summary: "Actively exploited zero-day vulnerability observed in cyber attacks.",
+	}
+	enrichedInTheWild := &EnrichedThreat{
+		AttackType: "Vulnerability",
+		Severity:   SeverityCritical,
+	}
+	if IsPureVulnerabilityAdvisory(inTheWild, enrichedInTheWild) {
+		t.Errorf("expected in-the-wild exploit to NOT be identified as pure advisory")
+	}
+
+	// EC-CUBE exploited in the wild
+	ecCube := ThreatItem{
+		Title:   "Vulnerability in AmazonPay Plugin for EC-CUBE 4 Exploited in the Wild",
+		Summary: "JPCERT warns of active attacks exploiting plugin flaw.",
+	}
+	enrichedECCube := &EnrichedThreat{
+		AttackType: "Zero-day",
+		Severity:   SeverityCritical,
+	}
+	if IsPureVulnerabilityAdvisory(ecCube, enrichedECCube) {
+		t.Errorf("expected EC-CUBE active attack to NOT be identified as pure advisory")
+	}
+
+	// Ransomware breach: MUST NOT be treated as advisory
+	ransomware := ThreatItem{
+		Title:   "Japan Digital Agency Data Breach Affects Multiple Ministries",
+		Summary: "Unauthorized access via VPN leads to personal information leakage.",
+	}
+	enrichedRansom := &EnrichedThreat{
+		AttackType: "Data Breach",
+		Severity:   SeverityHigh,
+	}
+	if IsPureVulnerabilityAdvisory(ransomware, enrichedRansom) {
+		t.Errorf("expected data breach to NOT be identified as pure advisory")
+	}
+}
+
+func TestRefineJapanRelevance(t *testing.T) {
+	// Unknown victim on global vulnerability: must downgrade to Indirect
+	globalVuln := ThreatItem{
+		Title:   "Critical Security Updates for Splunk Enterprise",
+		Summary: "Patches released for enterprise customers.",
+	}
+	enrichedGlobal := &EnrichedThreat{
+		VictimOrgs:     []string{"Unknown"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	refined := RefineJapanRelevance(globalVuln, enrichedGlobal)
+	if refined != JapanRelevanceIndirect {
+		t.Errorf("expected global vuln with Unknown victim to be downgraded to Indirect, got %s", refined)
+	}
+
+	// Domestic Japanese organization victim: must remain Direct
+	domesticThreat := ThreatItem{
+		Title:   "不正アクセスによる情報漏洩の可能性に関するお知らせ",
+		Summary: "社内サーバへの侵害が確認された",
+	}
+	enrichedDomestic := &EnrichedThreat{
+		VictimOrgs:     []string{"株式会社エグザンプル (example.co.jp)"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	if RefineJapanRelevance(domesticThreat, enrichedDomestic) != JapanRelevanceDirect {
+		t.Errorf("expected domestic victim org to remain Direct")
+	}
+
+	// Unknown victim, but title explicitly targets Japan: must remain Direct
+	targetingJapan := ThreatItem{
+		Title:   "国内組織を標的としたランサムウェア攻撃キャンペーンが観測される",
+		Summary: "国内企業および自治体への不審メールが急増",
+	}
+	enrichedTargeting := &EnrichedThreat{
+		VictimOrgs:     []string{"Unknown"},
+		JapanRelevance: JapanRelevanceDirect,
+	}
+	if RefineJapanRelevance(targetingJapan, enrichedTargeting) != JapanRelevanceDirect {
+		t.Errorf("expected explicit domestic target to remain Direct")
+	}
+}
+
 func TestThreatActorsCleaningAndValidation(t *testing.T) {
 	actors := []string{
 		"APT28",
