@@ -2061,7 +2061,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         ) : (
                           <>
                             <span className="text-[10px] text-slate-500 mr-1.5 uppercase font-sans font-normal">
-                              {currentLang === "ja" ? "初検知:" : "Harvested:"}
+                              {currentLang === "ja" ? "収集日:" : "Collected:"}
                             </span>
                             {formatDate(item.harvested_at)}
                           </>
@@ -3452,7 +3452,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 <div className="flex flex-wrap items-center gap-4 mt-2.5 text-xs text-slate-400 font-mono">
                   <div>
                     <span className="text-slate-500 mr-1.5 uppercase font-sans">
-                      {currentLang === "ja" ? "情報元公開日時 (JST):" : "Source Published (UTC):"}
+                      {currentLang === "ja" ? "情報元公開日時:" : "Source Published:"}
                     </span>
                     <span className="text-cyan-300 font-medium">
                       {selectedIncident.published_at ? formatDate(selectedIncident.published_at) : (currentLang === "ja" ? "不明 / リアルタイム" : "Unknown / Realtime")}
@@ -3460,7 +3460,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                   <div>
                     <span className="text-slate-500 mr-1.5 uppercase font-sans">
-                      {currentLang === "ja" ? "初検知・収集日時 (JST):" : "Harvest Ingested (UTC):"}
+                      {currentLang === "ja" ? "初検知・収集日時:" : "Harvest Ingested:"}
                     </span>
                     <span className="text-slate-300">{formatDate(selectedIncident.harvested_at)}</span>
                   </div>
@@ -3978,11 +3978,20 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                           <p className="text-xs text-slate-400 truncate">{src.title}</p>
                         </div>
                         <div className="flex items-center space-x-3 shrink-0">
-                          {src.published_at && (
-                            <span className="text-[10px] font-mono text-slate-500">
-                              {formatDate(src.published_at)}
-                            </span>
-                          )}
+                          <div className="text-right">
+                            {src.published_at ? (
+                              <div className="text-[10px] font-mono text-cyan-400">
+                                <span className="text-slate-500 mr-1">{currentLang === "ja" ? "情報元:" : "Source:"}</span>
+                                {formatDate(src.published_at)}
+                              </div>
+                            ) : null}
+                            {src.harvested_at ? (
+                              <div className="text-[10px] font-mono text-slate-500">
+                                <span className="text-slate-600 mr-1">{currentLang === "ja" ? "収集日:" : "Collected:"}</span>
+                                {formatDate(src.harvested_at)}
+                              </div>
+                            ) : null}
+                          </div>
                           {src.url ? (
                             <a
                               href={src.url}
@@ -4046,7 +4055,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div key={cIdx} className="bg-slate-950/60 p-2 rounded border border-slate-800 text-xs">
                           <div className="flex items-center justify-between text-slate-500 text-[10px] font-mono mb-1">
                             <span>{c.source_name} ({c.source_type})</span>
-                            <span>{c.published_at ? formatDate(c.published_at) : formatDate(c.harvested_at)}</span>
+                            <div className="text-right flex items-center space-x-2">
+                              {c.published_at ? (
+                                <span className="text-cyan-400">
+                                  <span className="text-slate-500 mr-1">{currentLang === "ja" ? "情報元:" : "Source:"}</span>
+                                  {formatDate(c.published_at)}
+                                </span>
+                              ) : null}
+                              <span>
+                                <span className="text-slate-500 mr-1">{currentLang === "ja" ? "収集日:" : "Collected:"}</span>
+                                {formatDate(c.harvested_at)}
+                              </span>
+                            </div>
                           </div>
                           <p className="text-slate-300 font-medium">{c.title}</p>
                           {c.url && (
