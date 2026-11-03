@@ -774,6 +774,90 @@ func TestNormalizeVictimOrgAndProductEnhanced(t *testing.T) {
 	}
 }
 
+func TestNormalizeEnrichedThreatAndSeverityCaps(t *testing.T) {
+	// 1. Non-Direct item (Indirect) with Critical MUST be capped at High, actions stripped, placeholder CVE stripped
+	itemGlobal := ThreatItem{
+		Title:      "Critical Zero-day Actively Exploited in FortiWeb Appliance",
+		Summary:    "Global exploitation of CVE-2026-44551 observed in the wild.",
+		RawContent: "Attackers are actively exploiting CVE-2026-44551 in FortiWeb.",
+		URL:        "https://security-next.com/180001",
+		SourceType: SourceTypeVendorRSS,
+		SourceName: "Security NEXT",
+	}
+	enrichedGlobal := &EnrichedThreat{
+		Severity:             SeverityCritical,
+		JapanRelevance:       JapanRelevanceDirect, // Falsely marked Direct due to Japanese SummaryJa
+		Title:                "FortiWeb Zero-day Exploitation",
+		TitleJa:              "FortiWebにおけるゼロデイ脆弱性の悪用",
+		SummaryJa:            "日本国内の組織にも影響が及ぶ可能性がある。",
+		AttackType:           "Zero-day",
+		CVEs:                 []string{"CVE-2026-44551", "CVE-2026-9999"}, // CVE-2026-9999 is ungrounded
+		RecommendedActions:   []string{"Implement MFA"},
+		RecommendedActionsJa: []string{"多要素認証を導入してください"},
+	}
+	NormalizeEnrichedThreat(itemGlobal, enrichedGlobal)
+	if enrichedGlobal.JapanRelevance != JapanRelevanceIndirect {
+		t.Errorf("expected foreign product zero-day without JP victim to downgrade to Indirect, got %s", enrichedGlobal.JapanRelevance)
+	}
+	if enrichedGlobal.Severity != SeverityHigh {
+		t.Errorf("expected non-Direct Critical to cap at High, got %s", enrichedGlobal.Severity)
+	}
+	if len(enrichedGlobal.CVEs) != 1 || enrichedGlobal.CVEs[0] != "CVE-2026-44551" {
+		t.Errorf("expected hallucinated CVE-2026-9999 to be stripped, got %v", enrichedGlobal.CVEs)
+	}
+	if len(enrichedGlobal.RecommendedActions) != 0 || len(enrichedGlobal.RecommendedActionsJa) != 0 {
+		t.Errorf("expected recommended actions to be cleared")
+	}
+
+	// 2. Official JPCERT/IPA general advisory stays Japan Direct, but severity caps at Medium
+	itemJPCERT := ThreatItem{
+		Title:      "Apache Tomcat の脆弱性に関する注意喚起",
+		Summary:    "JPCERT/CCは悪用が確認された脆弱性について注意喚起を公開しました。",
+		RawContent: "悪用が確認されています。",
+		URL:        "https://www.jpcert.or.jp/at/2026/at260010.html",
+		SourceType: SourceTypeVendorRSS,
+		SourceName: "JPCERT/CC",
+	}
+	enrichedJPCERT := &EnrichedThreat{
+		Severity:       SeverityCritical,
+		JapanRelevance: JapanRelevanceDirect,
+		TitleJa:        "JPCERT/CCによるApache Tomcatの脆弱性に関する注意喚起",
+		AttackType:     "Zero-day",
+	}
+	NormalizeEnrichedThreat(itemJPCERT, enrichedJPCERT)
+	if enrichedJPCERT.JapanRelevance != JapanRelevanceDirect {
+		t.Errorf("expected official JPCERT source to remain Direct, got %s", enrichedJPCERT.JapanRelevance)
+	}
+	if enrichedJPCERT.Severity != SeverityMedium {
+		t.Errorf("expected JPCERT general advisory without specific victim breach to cap at Medium, got %s", enrichedJPCERT.Severity)
+	}
+
+	// 3. Confirmed domestic Japanese breach remains Direct + Critical
+	itemDomestic := ThreatItem{
+		Title:      "株式会社物語コーポレーション「焼肉きんぐ」アプリで会員情報漏洩",
+		Summary:    "不正アクセスにより会員情報が流出した事実を公表。",
+		RawContent: "約100万件の会員データが漏洩。",
+		URL:        "https://example.jp/breach-1",
+		SourceType: SourceTypeWebSearch,
+		SourceName: "Domestic News",
+	}
+	enrichedDomestic := &EnrichedThreat{
+		Severity:       SeverityCritical,
+		JapanRelevance: JapanRelevanceDirect,
+		TitleJa:        "物語コーポレーション「焼肉きんぐ」アプリ会員情報漏洩",
+		VictimOrgs:     []string{"株式会社物語コーポレーション"},
+		AttackType:     "Data Breach",
+	}
+	NormalizeEnrichedThreat(itemDomestic, enrichedDomestic)
+	if enrichedDomestic.JapanRelevance != JapanRelevanceDirect {
+		t.Errorf("expected domestic breach to remain Direct, got %s", enrichedDomestic.JapanRelevance)
+	}
+	if enrichedDomestic.Severity != SeverityCritical {
+		t.Errorf("expected severe domestic breach to remain Critical, got %s", enrichedDomestic.Severity)
+	}
+}
+
+
 
 
 

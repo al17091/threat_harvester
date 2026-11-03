@@ -234,7 +234,8 @@ func (m *ScraperManager) postProcessEnrichment(ctx context.Context, item models.
 
 		enriched, err := m.analyzer.Analyze(reCtx, item)
 		if err == nil && enriched != nil {
-			log.Printf("[ScraperManager] Auto re-analyzed item %s with full content. Severity: %s", item.Title, enriched.Severity)
+			models.NormalizeEnrichedThreat(item, enriched)
+			log.Printf("[ScraperManager] Auto re-analyzed item %s with full content. Severity: %s (Japan: %s)", item.Title, enriched.Severity, enriched.JapanRelevance)
 			// Re-cluster or update parent incident with enriched intelligence
 			_, _ = m.store.FindOrCreateIncident(ctx, item, enriched, 30)
 		}

@@ -109,7 +109,7 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 			"type":   "heading_2",
 			"heading_2": map[string]interface{}{
 				"rich_text": []map[string]interface{}{
-					{"type": "text", "text": map[string]string{"content": "📋 概要 (Executive Summary)"}},
+					{"type": "text", "text": map[string]string{"content": "📋 事象ファクト要約 (Factual Summary)"}},
 				},
 			},
 		},
@@ -131,7 +131,7 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 				"type":   "heading_2",
 				"heading_2": map[string]interface{}{
 					"rich_text": []map[string]interface{}{
-						{"type": "text", "text": map[string]string{"content": "🎯 日本国内への影響分析 (Impact to Japan)"}},
+						{"type": "text", "text": map[string]string{"content": "📊 確認された被害・影響範囲 (Confirmed Impact & Scope)"}},
 					},
 				},
 			},
@@ -147,26 +147,30 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 		)
 	}
 
-	if len(threat.RecommendedActionsJa) > 0 {
+	var techFacts []string
+	if len(threat.AffectedProducts) > 0 {
+		techFacts = append(techFacts, fmt.Sprintf("対象製品: %s", strings.Join(threat.AffectedProducts, ", ")))
+	}
+	if len(threat.CVEs) > 0 {
+		techFacts = append(techFacts, fmt.Sprintf("関連CVE: %s", strings.Join(threat.CVEs, ", ")))
+	}
+	if len(techFacts) > 0 {
 		children = append(children, map[string]interface{}{
 			"object": "block",
 			"type":   "heading_2",
 			"heading_2": map[string]interface{}{
 				"rich_text": []map[string]interface{}{
-					{"type": "text", "text": map[string]string{"content": "🛡️ 推奨対策 (Recommended Actions)"}},
+					{"type": "text", "text": map[string]string{"content": "🔍 技術指標・対象ファクト (Technical Facts)"}},
 				},
 			},
 		})
-		for i, act := range threat.RecommendedActionsJa {
-			if i >= 5 {
-				break
-			}
+		for _, fact := range techFacts {
 			children = append(children, map[string]interface{}{
 				"object": "block",
 				"type":   "bulleted_list_item",
 				"bulleted_list_item": map[string]interface{}{
 					"rich_text": []map[string]interface{}{
-						{"type": "text", "text": map[string]string{"content": act}},
+						{"type": "text", "text": map[string]string{"content": fact}},
 					},
 				},
 			})

@@ -257,17 +257,12 @@ def test_notify_command():
         item=item,
         severity=Severity.CRITICAL,
         japan_relevance=JapanRelevance.DIRECT,
-        title_ja="[テスト] 国内重要インフラを標的としたゼロデイ悪用注意喚起",
-        summary_ja="国内の重要通信網および製造拠点を標的とした未パッチのゼロデイ脆弱性の悪用が観測されました。直ちに該当サービスの停止またはアクセス制御を実施してください。",
-        impact_analysis_ja="国内大手通信キャリアおよび重要製造ラインへの広範な影響が懸念されます。",
+        title_ja="[テスト] 国内重要インフラにおけるゼロデイ脆弱性の悪用被害",
+        summary_ja="国内の重要通信網および製造拠点において未パッチのゼロデイ脆弱性の悪用による不正アクセスが確認されました。",
+        impact_analysis_ja="国内大手通信キャリアおよび製造拠点のサーバー計3台への侵入が確認されました。",
         victim_orgs=["国内重要インフラ事業者 (仮)", "テスト製造株式会社"],
         threat_actors=["Volt Typhoon (仮)"],
         attack_type="Zero-day",
-        recommended_actions_ja=[
-            "該当外部公開ポートの即時遮断",
-            "EDRによる不審なPowerShell/WMI実行の監査",
-            "最新パッチの緊急適用検証",
-        ],
     )
     manager = NotificationManager()
     success = manager.dispatch(enriched)
@@ -304,11 +299,6 @@ def test_notion_command():
         victim_orgs=["テスト情報システム株式会社"],
         threat_actors=["LockBit 3.0"],
         attack_type="Ransomware",
-        recommended_actions_ja=[
-            "漏洩データの同一性確認と影響範囲の特定",
-            "個人情報保護委員会への速報対応",
-            "二重恐喝への連絡遮断とフォレンジック調査の着手",
-        ],
     )
     res = reporter.create_page(enriched)
     if res:

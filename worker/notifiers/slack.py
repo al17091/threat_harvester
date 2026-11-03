@@ -43,7 +43,7 @@ class SlackNotifier:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"{mention}*概要:*\n{threat.summary_ja}",
+                    "text": f"{mention}*事象ファクト要約:*\n{threat.summary_ja}",
                 },
             },
             {
@@ -66,7 +66,7 @@ class SlackNotifier:
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*国内影響分析:*\n{threat.impact_analysis_ja}",
+                        "text": f"*確認された被害・影響範囲:*\n{threat.impact_analysis_ja}",
                     },
                 }
             )

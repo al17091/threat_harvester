@@ -33,7 +33,11 @@ func (n *GenericNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 		return true
 	}
 
-	body, err := json.Marshal(threat)
+	cleanThreat := *threat
+	cleanThreat.RecommendedActions = nil
+	cleanThreat.RecommendedActionsJa = nil
+
+	body, err := json.Marshal(&cleanThreat)
 	if err != nil {
 		return false
 	}

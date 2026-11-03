@@ -251,28 +251,12 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		impact = out.ImpactAnalysisJa
 	}
 
-	// Resolve recommended actions
-	actions := out.RecommendedActions
-	if len(actions) == 0 {
-		actions = out.RecommendedActionsEn
-	}
-	if len(actions) == 0 {
-		actions = out.RecommendedActionsJa
-	}
-
-	// Extract & merge CVEs
+	// Extract & merge CVEs, sanitizing prompt placeholders
 	cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
 	if len(out.CVEs) > 0 {
 		cves = append(cves, models.ExtractCVEs(out.CVEs...)...)
 	}
-	seenCVE := make(map[string]bool)
-	var uniqueCVEs []string
-	for _, c := range cves {
-		if !seenCVE[c] {
-			seenCVE[c] = true
-			uniqueCVEs = append(uniqueCVEs, c)
-		}
-	}
+	uniqueCVEs := models.SanitizeHallucinatedCVEs(item, cves)
 
 	// Extract & merge Affected products
 	var affectedProducts []string
@@ -308,10 +292,6 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 	impactJa := strings.TrimSpace(out.ImpactAnalysisJa)
 	if impactJa == "" {
 		impactJa = impact
-	}
-	actionsJa := out.RecommendedActionsJa
-	if len(actionsJa) == 0 {
-		actionsJa = actions
 	}
 
 	title = CleanChineseCTITerms(title, false)
@@ -349,8 +329,8 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
 		AffectedProducts:     affectedProducts,
-		RecommendedActions:   actions,
-		RecommendedActionsJa: actionsJa,
+		RecommendedActions:   nil,
+		RecommendedActionsJa: nil,
 		AnalyzedAt:           time.Now().UTC(),
 	}
 }

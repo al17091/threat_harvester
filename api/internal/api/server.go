@@ -429,46 +429,22 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 	// Try clustered incident first
 	inc, err := s.store.GetIncident(r.Context(), id)
 	if err == nil && inc != nil {
-		// If incident contains Japanese text, translate to English on the fly and cache in DB
+		// If incident contains Japanese text in English View, translate to English on the fly and cache in DB
 		title, _ := inc["title"].(string)
 		summary, _ := inc["summary"].(string)
 		impact, _ := inc["impact_analysis"].(string)
 		victimOrg, _ := inc["victim_org"].(string)
 		affProduct, _ := inc["affected_product"].(string)
-		var actions []string
-		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
-			if ra, ok := ep["recommended_actions"].([]string); ok {
-				actions = ra
-			} else if rai, ok := ep["recommended_actions"].([]interface{}); ok {
-				for _, a := range rai {
-					if as, ok := a.(string); ok && as != "" {
-						actions = append(actions, as)
-					}
-				}
-			}
-			if len(actions) == 0 {
-				if raja, ok := ep["recommended_actions_ja"].([]string); ok {
-					actions = raja
-				} else if raja, ok := ep["recommended_actions_ja"].([]interface{}); ok {
-					for _, a := range raja {
-						if as, ok := a.(string); ok && as != "" {
-							actions = append(actions, as)
-						}
-					}
-				}
-			}
-		}
 
-		if isJapaneseText(title) || isJapaneseText(summary) || isJapaneseText(impact) || isJapaneseText(victimOrg) || hasJapaneseItem(actions) {
+		if lang != "ja" && (isJapaneseText(title) || isJapaneseText(summary) || isJapaneseText(impact) || isJapaneseText(victimOrg)) {
 			if s.pipeline != nil && s.pipeline.Analyzer() != nil {
 				transOut, transErr := s.pipeline.Analyzer().TranslateIncident(r.Context(), analyzer.IncidentTranslationInput{
-					ID:                 id,
-					Title:              title,
-					Summary:            summary,
-					ImpactAnalysis:     impact,
-					VictimOrg:          victimOrg,
-					AffectedProduct:    affProduct,
-					RecommendedActions: actions,
+					ID:              id,
+					Title:           title,
+					Summary:         summary,
+					ImpactAnalysis:  impact,
+					VictimOrg:       victimOrg,
+					AffectedProduct: affProduct,
 				})
 				if transErr == nil && transOut != nil {
 					inc["title"] = transOut.Title
@@ -508,11 +484,8 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request) {
 						if transOut.AffectedProductEn != "" {
 							ep["affected_product_en"] = transOut.AffectedProductEn
 						}
-						if len(transOut.RecommendedActions) > 0 {
-							ep["recommended_actions"] = transOut.RecommendedActions
-						}
 					}
-					_ = s.store.UpdateIncidentTranslations(r.Context(), id, transOut.Title, transOut.Summary, transOut.ImpactAnalysis, transOut.VictimOrgEn, transOut.AffectedProductEn, transOut.RecommendedActions)
+					_ = s.store.UpdateIncidentTranslations(r.Context(), id, transOut.Title, transOut.Summary, transOut.ImpactAnalysis, transOut.VictimOrgEn, transOut.AffectedProductEn, nil)
 				}
 			}
 		}
@@ -769,11 +742,8 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["affected_product"] = pJa
 		}
 		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
-			if raja, ok := ep["recommended_actions_ja"].([]string); ok && len(raja) > 0 {
-				ep["recommended_actions"] = raja
-			} else if rajai, ok := ep["recommended_actions_ja"].([]interface{}); ok && len(rajai) > 0 {
-				ep["recommended_actions"] = rajai
-			}
+			delete(ep, "recommended_actions")
+			delete(ep, "recommended_actions_ja")
 			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
 				ep["title"] = tFinal
 			}
@@ -784,10 +754,14 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 				ep["impact_analysis"] = iFinal
 			}
 			if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
-				ep["victim_orgs"] = []string{vJa}
+				if existing, ok := ep["victim_orgs"].([]string); !ok || len(existing) == 0 {
+					ep["victim_orgs"] = []string{vJa}
+				}
 			}
 			if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" {
-				ep["affected_products"] = []string{pJa}
+				if existing, ok := ep["affected_products"].([]string); !ok || len(existing) == 0 {
+					ep["affected_products"] = []string{pJa}
+				}
 			}
 		}
 	} else {
@@ -874,23 +848,10 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			}
 		}
 
-		// Ensure enriched_parsed does not leak Japanese actions or descriptions in English view
+		// Ensure enriched_parsed strips any legacy recommended_actions and syncs English fields
 		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
-			var enActions []string
-			if ra, ok := ep["recommended_actions"].([]string); ok {
-				for _, a := range ra {
-					if as := strings.TrimSpace(a); as != "" && !isJapaneseText(as) {
-						enActions = append(enActions, as)
-					}
-				}
-			} else if rai, ok := ep["recommended_actions"].([]interface{}); ok {
-				for _, a := range rai {
-					if as, ok := a.(string); ok && strings.TrimSpace(as) != "" && !isJapaneseText(as) {
-						enActions = append(enActions, strings.TrimSpace(as))
-					}
-				}
-			}
-			ep["recommended_actions"] = enActions
+			delete(ep, "recommended_actions")
+			delete(ep, "recommended_actions_ja")
 
 			if tFinal, ok := inc["title"].(string); ok && tFinal != "" {
 				ep["title"] = tFinal
@@ -1408,17 +1369,19 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 	)
 
 	enriched := &models.EnrichedThreat{
-		ItemID:               item.ID,
-		Item:                 item,
-		Severity:             models.SeverityHigh,
-		JapanRelevance:       models.JapanRelevanceDirect,
-		TitleJa:              "【GUIテスト】国内重要組織を標的とした攻撃アラート",
-		SummaryJa:            "ダッシュボード管理画面からの通知疎通テストです。",
-		ImpactAnalysisJa:     "通知システムの正常稼働を確認しました。",
-		VictimOrgs:           []string{"テスト対象企業"},
-		ThreatActors:         []string{"Simulated Adversary"},
-		RecommendedActionsJa: []string{"本通知が受信できたことを確認してください。"},
-		AnalyzedAt:           time.Now().UTC(),
+		ItemID:           item.ID,
+		Item:             item,
+		Severity:         models.SeverityHigh,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		TitleJa:          "【GUIテスト】国内重要組織を標的とした攻撃アラート",
+		SummaryJa:        "ダッシュボード管理画面からの通知疎通テストです。",
+		ImpactAnalysisJa: "通知システムの正常稼働を確認しました。",
+		VictimOrgs:       []string{"テスト対象企業"},
+		ThreatActors:     []string{"Simulated Adversary"},
+		AttackType:       "Data Breach",
+		CVEs:             []string{"CVE-2026-0001"},
+		AffectedProducts: []string{"Test Appliance 1.0"},
+		AnalyzedAt:       time.Now().UTC(),
 	}
 
 	mgr := notifiers.NewNotificationManager()
@@ -1442,17 +1405,19 @@ func (s *Server) handleTestNotion(w http.ResponseWriter, r *http.Request) {
 	)
 
 	enriched := &models.EnrichedThreat{
-		ItemID:               item.ID,
-		Item:                 item,
-		Severity:             models.SeverityCritical,
-		JapanRelevance:       models.JapanRelevanceDirect,
-		TitleJa:              "【Notion連携テスト】国内組織向け脅威レポート同期",
-		SummaryJa:            "ダッシュボードからのNotion API接続確認用レコードです。",
-		ImpactAnalysisJa:     "データベースへの書き込み権限とプロパティ構成を確認中。",
-		VictimOrgs:           []string{"検証用企業"},
-		ThreatActors:         []string{"Test Actor"},
-		RecommendedActionsJa: []string{"Notionデータベースに本ページが作成されたことを確認する。"},
-		AnalyzedAt:           time.Now().UTC(),
+		ItemID:           item.ID,
+		Item:             item,
+		Severity:         models.SeverityCritical,
+		JapanRelevance:   models.JapanRelevanceDirect,
+		TitleJa:          "【Notion連携テスト】国内組織向け脅威レポート同期",
+		SummaryJa:        "ダッシュボードからのNotion API接続確認用レコードです。",
+		ImpactAnalysisJa: "データベースへの書き込み権限とプロパティ構成を確認中。",
+		VictimOrgs:       []string{"検証用企業"},
+		ThreatActors:     []string{"Test Actor"},
+		AttackType:       "Ransomware",
+		CVEs:             []string{"CVE-2026-0001"},
+		AffectedProducts: []string{"Test Appliance 1.0"},
+		AnalyzedAt:       time.Now().UTC(),
 	}
 
 	rep := reporters.NewNotionReporter()

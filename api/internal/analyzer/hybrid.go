@@ -134,12 +134,14 @@ func (h *HybridThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 	if err != nil {
 		return nil, err
 	}
+	models.NormalizeEnrichedThreat(item, enriched)
 
 	// 3. High severity / Japan threat escalation for in-depth CTI refinement
 	if h.shouldEscalateByThreat(enriched) {
 		log.Printf("[HybridAnalyzer] Threat item %s triggered escalation (Severity: %s, Japan: %s). Escalating to Gemini for deep analysis.", item.Title, enriched.Severity, enriched.JapanRelevance)
 		deepEnriched, err := h.escalation.Analyze(ctx, item)
 		if err == nil {
+			models.NormalizeEnrichedThreat(item, deepEnriched)
 			return deepEnriched, nil
 		}
 		log.Printf("[HybridAnalyzer] Gemini deep analysis failed: %v. Retaining initial analysis.", err)
@@ -185,10 +187,12 @@ func (h *HybridThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 		if res == nil {
 			continue
 		}
+		models.NormalizeEnrichedThreat(items[i], res)
 		if h.shouldEscalateByThreat(res) {
 			log.Printf("[HybridAnalyzer] Batch item %d (%s) triggered escalation. Refining with Gemini.", i, res.Item.Title)
 			refined, err := h.escalation.Analyze(ctx, items[i])
 			if err == nil {
+				models.NormalizeEnrichedThreat(items[i], refined)
 				results[i] = refined
 				continue
 			}

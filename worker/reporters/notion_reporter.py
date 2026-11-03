@@ -74,7 +74,7 @@ class NotionReporter:
             {
                 "object": "block",
                 "type": "heading_2",
-                "heading_2": {"rich_text": [{"type": "text", "text": {"content": "📋 概要 (Executive Summary)"}}]},
+                "heading_2": {"rich_text": [{"type": "text", "text": {"content": "📋 事象ファクト要約 (Factual Summary)"}}]},
             },
             {
                 "object": "block",
@@ -91,7 +91,7 @@ class NotionReporter:
                         "type": "heading_2",
                         "heading_2": {
                             "rich_text": [
-                                {"type": "text", "text": {"content": "🎯 日本国内への影響分析 (Impact to Japan)"}}
+                                {"type": "text", "text": {"content": "📊 確認された被害・影響範囲 (Confirmed Impact & Scope)"}}
                             ]
                         },
                     },
@@ -102,25 +102,6 @@ class NotionReporter:
                     },
                 ]
             )
-
-        if threat.recommended_actions_ja:
-            children.append(
-                {
-                    "object": "block",
-                    "type": "heading_2",
-                    "heading_2": {
-                        "rich_text": [{"type": "text", "text": {"content": "🛡️ 推奨対策 (Recommended Actions)"}}]
-                    },
-                }
-            )
-            for action in threat.recommended_actions_ja[:5]:
-                children.append(
-                    {
-                        "object": "block",
-                        "type": "bulleted_list_item",
-                        "bulleted_list_item": {"rich_text": [{"type": "text", "text": {"content": action}}]},
-                    }
-                )
 
         if threat.item.url:
             children.append(

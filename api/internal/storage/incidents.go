@@ -1239,9 +1239,9 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		}
 		res["child_items"] = childItems
 
-		// Propagate recommended actions and threat actor attribution reasons from child items
-		var recActions []string
-		var recActionsJa []string
+		// Propagate factual entities (affected products, specific victim orgs) and threat actor attribution reasons from child items
+		var childProducts []string
+		var childVictims []string
 		actorReasonsEn, _ := res["threat_actor_reasons"].(map[string]string)
 		if actorReasonsEn == nil {
 			actorReasonsEn = make(map[string]string)
@@ -1262,17 +1262,19 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 			cSum, _ := c["summary"].(string)
 
 			if ep, ok := c["enriched_parsed"].(map[string]interface{}); ok {
-				if ra, ok := ep["recommended_actions"].([]interface{}); ok && len(ra) > 0 {
-					for _, a := range ra {
-						if as, ok := a.(string); ok && strings.TrimSpace(as) != "" {
-							recActions = appendUniqueString(recActions, strings.TrimSpace(as))
+				delete(ep, "recommended_actions")
+				delete(ep, "recommended_actions_ja")
+				if prods, ok := ep["affected_products"].([]interface{}); ok {
+					for _, p := range prods {
+						if ps, ok := p.(string); ok && models.NormalizeProduct(ps) != "" {
+							childProducts = appendUniqueString(childProducts, strings.TrimSpace(ps))
 						}
 					}
 				}
-				if raja, ok := ep["recommended_actions_ja"].([]interface{}); ok && len(raja) > 0 {
-					for _, a := range raja {
-						if as, ok := a.(string); ok && strings.TrimSpace(as) != "" {
-							recActionsJa = appendUniqueString(recActionsJa, strings.TrimSpace(as))
+				if vorgs, ok := ep["victim_orgs"].([]interface{}); ok {
+					for _, v := range vorgs {
+						if vs, ok := v.(string); ok && strings.TrimSpace(vs) != "" && !models.IsGenericVictimOrg(vs) {
+							childVictims = appendUniqueString(childVictims, strings.TrimSpace(vs))
 						}
 					}
 				}
@@ -1312,11 +1314,27 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		res["threat_actor_reasons_ja"] = actorReasonsJa
 
 		if ep, ok := res["enriched_parsed"].(map[string]interface{}); ok {
-			if len(recActions) > 0 {
-				ep["recommended_actions"] = recActions
+			delete(ep, "recommended_actions")
+			delete(ep, "recommended_actions_ja")
+			if len(childProducts) > 0 {
+				if existing, ok := ep["affected_products"].([]string); ok {
+					for _, p := range childProducts {
+						existing = appendUniqueString(existing, p)
+					}
+					ep["affected_products"] = existing
+				} else {
+					ep["affected_products"] = childProducts
+				}
 			}
-			if len(recActionsJa) > 0 {
-				ep["recommended_actions_ja"] = recActionsJa
+			if len(childVictims) > 0 {
+				if existing, ok := ep["victim_orgs"].([]string); ok {
+					for _, v := range childVictims {
+						existing = appendUniqueString(existing, v)
+					}
+					ep["victim_orgs"] = existing
+				} else {
+					ep["victim_orgs"] = childVictims
+				}
 			}
 			ep["threat_actor_reasons"] = actorReasonsEn
 			ep["threat_actor_reasons_ja"] = actorReasonsJa
@@ -1373,8 +1391,9 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 	defer rows.Close()
 
 	type rawItemRow struct {
-		item     models.ThreatItem
-		enriched *models.EnrichedThreat
+		item            models.ThreatItem
+		enriched        *models.EnrichedThreat
+		newEnrichedJSON string
 	}
 
 	var batch []rawItemRow
@@ -1409,14 +1428,20 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 		item.ContentHash = models.ComputeContentHash(item)
 
 		var enriched *models.EnrichedThreat
+		var newEnrichedJSON string
 		if enrichedData.Valid && enrichedData.String != "" {
 			var parsed models.EnrichedThreat
 			if err := json.Unmarshal([]byte(enrichedData.String), &parsed); err == nil {
+				// Pure Go deterministic normalization (NO Gemini/LLM calls)
+				models.NormalizeEnrichedThreat(item, &parsed)
 				enriched = &parsed
+				if b, mErr := json.Marshal(enriched); mErr == nil {
+					newEnrichedJSON = string(b)
+				}
 			}
 		}
 
-		batch = append(batch, rawItemRow{item: item, enriched: enriched})
+		batch = append(batch, rawItemRow{item: item, enriched: enriched, newEnrichedJSON: newEnrichedJSON})
 	}
 
 	log.Printf("[Clustering] Loaded %d threat items to cluster.", len(batch))
@@ -1430,20 +1455,36 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 		}
 		if inc == nil {
 			// Item is non-threat, service release, or Info severity: mark as Info and clear incident_id
-			updateInfoQ := "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = ? WHERE id = ?"
-			if !s.isSQLite {
-				updateInfoQ = "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = $1 WHERE id = $2"
+			if row.enriched != nil && row.newEnrichedJSON != "" {
+				updateInfoQ := "UPDATE threat_items SET severity = 'Info', japan_relevance = ?, incident_id = NULL, content_hash = ?, enriched_data = ? WHERE id = ?"
+				if !s.isSQLite {
+					updateInfoQ = "UPDATE threat_items SET severity = 'Info', japan_relevance = $1, incident_id = NULL, content_hash = $2, enriched_data = $3 WHERE id = $4"
+				}
+				_, _ = s.db.ExecContext(ctx, updateInfoQ, string(row.enriched.JapanRelevance), row.item.ContentHash, row.newEnrichedJSON, row.item.ID)
+			} else {
+				updateInfoQ := "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = ? WHERE id = ?"
+				if !s.isSQLite {
+					updateInfoQ = "UPDATE threat_items SET severity = 'Info', incident_id = NULL, content_hash = $1 WHERE id = $2"
+				}
+				_, _ = s.db.ExecContext(ctx, updateInfoQ, row.item.ContentHash, row.item.ID)
 			}
-			_, _ = s.db.ExecContext(ctx, updateInfoQ, row.item.ContentHash, row.item.ID)
 			continue
 		}
 
-		// Update threat_items row with incident_id and content_hash
-		updateQ := "UPDATE threat_items SET incident_id = ?, content_hash = ? WHERE id = ?"
-		if !s.isSQLite {
-			updateQ = "UPDATE threat_items SET incident_id = $1, content_hash = $2 WHERE id = $3"
+		// Update threat_items row with incident_id, content_hash, and normalized severity/japan_relevance/enriched_data
+		if row.enriched != nil && row.newEnrichedJSON != "" {
+			updateQ := "UPDATE threat_items SET incident_id = ?, content_hash = ?, severity = ?, japan_relevance = ?, enriched_data = ? WHERE id = ?"
+			if !s.isSQLite {
+				updateQ = "UPDATE threat_items SET incident_id = $1, content_hash = $2, severity = $3, japan_relevance = $4, enriched_data = $5 WHERE id = $6"
+			}
+			_, _ = s.db.ExecContext(ctx, updateQ, inc.ID, row.item.ContentHash, string(row.enriched.Severity), string(row.enriched.JapanRelevance), row.newEnrichedJSON, row.item.ID)
+		} else {
+			updateQ := "UPDATE threat_items SET incident_id = ?, content_hash = ? WHERE id = ?"
+			if !s.isSQLite {
+				updateQ = "UPDATE threat_items SET incident_id = $1, content_hash = $2 WHERE id = $3"
+			}
+			_, _ = s.db.ExecContext(ctx, updateQ, inc.ID, row.item.ContentHash, row.item.ID)
 		}
-		_, _ = s.db.ExecContext(ctx, updateQ, inc.ID, row.item.ContentHash, row.item.ID)
 		clusteredCount++
 	}
 

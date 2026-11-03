@@ -69,16 +69,6 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 		impactText = threat.ImpactAnalysisJa
 	}
 
-	actions := threat.RecommendedActions
-	if isJa {
-		actions = threat.RecommendedActionsJa
-		if len(actions) == 0 {
-			actions = threat.RecommendedActions
-		}
-	} else if len(actions) == 0 {
-		actions = threat.RecommendedActionsJa
-	}
-
 	var color int
 	if threat.JapanRelevance == models.JapanRelevanceDirect || threat.Severity == models.SeverityCritical {
 		color = 0xFF0033
@@ -121,24 +111,26 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 		}
 	}
 
-	var srcLabel, relLabel, typeLabel, victimLabel, actorLabel, impactLabel, actionLabel, refLabel string
+	var srcLabel, relLabel, typeLabel, victimLabel, prodLabel, cveLabel, actorLabel, impactLabel, refLabel string
 	if isJa {
 		srcLabel = "情報ソース"
 		relLabel = "日本関連性"
-		typeLabel = "攻撃種別"
+		typeLabel = "事象種別"
 		victimLabel = "被害組織"
+		prodLabel = "対象製品"
+		cveLabel = "関連CVE"
 		actorLabel = "脅威アクター / 攻撃者"
-		impactLabel = "日本組織への影響分析"
-		actionLabel = "推奨アクション"
+		impactLabel = "確認された被害・影響範囲"
 		refLabel = "参照リンク"
 	} else {
 		srcLabel = "Source"
 		relLabel = "Japan Relevance"
-		typeLabel = "Attack Type"
+		typeLabel = "Event Type"
 		victimLabel = "Victim Organization"
+		prodLabel = "Affected Products"
+		cveLabel = "CVEs"
 		actorLabel = "Threat Actor"
-		impactLabel = "Impact Analysis"
-		actionLabel = "Recommended Actions"
+		impactLabel = "Confirmed Impact & Scope"
 		refLabel = "Reference Link"
 	}
 
@@ -151,18 +143,17 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 	if len(threat.VictimOrgs) > 0 {
 		fields = append(fields, map[string]interface{}{"name": victimLabel, "value": strings.Join(threat.VictimOrgs, ", "), "inline": true})
 	}
+	if len(threat.AffectedProducts) > 0 {
+		fields = append(fields, map[string]interface{}{"name": prodLabel, "value": strings.Join(threat.AffectedProducts, ", "), "inline": true})
+	}
+	if len(threat.CVEs) > 0 {
+		fields = append(fields, map[string]interface{}{"name": cveLabel, "value": strings.Join(threat.CVEs, ", "), "inline": true})
+	}
 	if len(threat.ThreatActors) > 0 {
 		fields = append(fields, map[string]interface{}{"name": actorLabel, "value": strings.Join(threat.ThreatActors, ", "), "inline": true})
 	}
 	if impactText != "" {
 		fields = append(fields, map[string]interface{}{"name": impactLabel, "value": truncate(impactText, 1000), "inline": false})
-	}
-	if len(actions) > 0 {
-		var acts []string
-		for _, a := range actions {
-			acts = append(acts, "• "+a)
-		}
-		fields = append(fields, map[string]interface{}{"name": actionLabel, "value": truncate(strings.Join(acts, "\n"), 1000), "inline": false})
 	}
 	if threat.Item.URL != "" {
 		linkText := "View Source"

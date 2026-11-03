@@ -176,55 +176,51 @@ func (a *OpenAICompatibleAnalyzer) Analyze(ctx context.Context, item models.Thre
 
 	metaJSON, _ := json.Marshal(item.Metadata)
 
-	systemPrompt := `You are an elite Cyber Threat Intelligence (CTI) analyst.
-Analyze the provided threat intelligence raw text carefully and produce structured analysis in professional English.
-Focus heavily on assessing relevance and potential impact on organizations, critical infrastructure, supply chains, and Japanese entities.
+	systemPrompt := `You are a Cyber Threat Intelligence (CTI) analyst specializing in objective fact extraction.
+Analyze the provided threat intelligence raw text carefully and produce structured factual analysis in professional English.
 
-# Evaluation Criteria:
+# Strict Evaluation Criteria:
 1. japan_relevance:
-   - "Direct": Targets Japanese companies, government/municipalities, domestic organizations, or Japan-specific supply chains.
-   - "Indirect": Global cyber incidents, widespread 0days in enterprise software/OS prevalent in Japan, major global cloud outages.
-   - "None": Purely local foreign incidents with no direct or indirect impact on Japanese organizations.
+   - "Direct": A specific Japanese company, Japanese government agency/municipality, or domestic organization is an actual victim, OR the report is an official advisory directly from JPCERT/CC, IPA, or JVN. (Global product vulnerabilities or foreign company breaches reported in Japanese news are "Indirect" or "None", NOT "Direct").
+   - "Indirect": Global cyber incidents or vulnerabilities in software/OS used in Japan without confirmed domestic Japanese victims.
+   - "None": Purely foreign local incidents with no relevance to Japanese organizations.
 
-2. severity:
-   - "Critical": Actively exploited zero-day, critical infrastructure shutdown, major supply chain breach, enterprise ransomware/leak with high impact.
-   - "High": Public PoC for severe vulnerabilities, corporate data leak disclosures, new ransomware DLS victim publication.
-   - "Medium": Standard security updates, informational advisories, limited impact incidents.
-   - "Low": Minor bug fixes, low-risk technical research, awareness/educational blogs.
-   - "Info": New product/feature releases, marketing announcements, non-threat events. (Note: if an update mentions a vulnerability or exploit, classify according to actual threat severity, NOT Info).
+2. severity (DO NOT INFLATE SEVERITY):
+   - STRICT RULE 1: If japan_relevance is NOT "Direct" (i.e. "Indirect" or "None"), severity MUST NEVER be "Critical" (maximum allowed is "High").
+   - STRICT RULE 2: General security advisories (including JPCERT/CC and IPA alerts), weekly roundups, FAQ bulletins, and trend reports without a specific breached victim organization MUST NOT exceed "Medium".
+   - "Critical": ONLY when japan_relevance is "Direct" AND a specific Japanese organization suffered confirmed severe damage (ransomware encryption, large-scale data breach, critical infrastructure outage, or confirmed in-the-wild zero-day compromise).
+   - "High": Confirmed domestic data leak/unauthorized access, new ransomware DLS victim listing, or severe vulnerability with confirmed active exploitation in the wild or public weaponized PoC.
+   - "Medium": General security advisories, JPCERT/IPA alerts, weekly roundups, DoS-only flaws, or limited-impact incidents.
+   - "Low": Routine vendor patch disclosures without active exploitation or PoC, minor bug fixes, technical research blogs.
+   - "Info": New product/feature releases, marketing announcements, PR notices unrelated to cyber threats.
+
+# Objective Facts Only (NO Preaching or Security Advice):
+- In 'summary' and 'impact_analysis', state ONLY verified objective facts from the source text: victim organization(s), confirmed scale/record counts, compromised data types, intrusion vector, CVEs, and affected products/version ranges.
+- DO NOT write generic security recommendations, lessons, or advice (e.g., NEVER write "organizations should implement MFA", "review IAM policies", "apply patches immediately", "train employees").
+- For 'cves': Extract ONLY CVE IDs that literally appear in the source text. If none appear in the text, return []. NEVER invent placeholder CVEs.
 
 # Threat Actor Attribution Rules:
 - "threat_actors": Array of specific, recognized threat actor names or cybercrime groups ONLY when explicitly and directly named in the source text.
-- STRICT RULE (GROUNDING): You must ONLY include a threat actor if their specific name appears directly in the provided title or raw content.
 - If no specific, named threat actor is explicitly mentioned in the source intelligence, you MUST return an empty array [].
-- ABSOLUTELY NEVER guess, speculate, extrapolate, or inject threat actor names from prior training data or general background knowledge.
-- NEVER copy or hallucinate threat actor names from prompt guidelines or examples. If unsure or if only general tactics/methods are described without a named group, return [].
-- NEVER output generic categories, speculative labels, or descriptive phrases such as:
-  "Hackers", "Cybercriminals", "Attackers", "Unknown", "Not specified", "AI-assisted attackers",
-  "AIを使用した不正アクセスの攻撃者", "AI-driven Threat Actor", "State-sponsored actors",
-  "国家支援型アクター", "中国国家支援型アクター", "Chinese APT", "Rogue OpenAI agents", etc.
-- IMPORTANT: If a specific cybercrime group or APT is explicitly named in the source article in Chinese, Russian, or another native language, preserve that exact native name AS-IS. Do NOT translate or drop explicitly named groups.
+- NEVER guess, extrapolate, or output generic labels ("Hackers", "Cybercriminals", "Attackers", "Unknown", "Not specified", "State-sponsored actors", "Chinese APT", etc.).
+- If a specific cybercrime group or APT is explicitly named in a native language, preserve that exact native name AS-IS.
 
 # Language & Output Rules:
-- STRICTLY 100% FLUENT PROFESSIONAL ENGLISH ONLY for all textual descriptions ('title', 'summary', 'impact_analysis', 'recommended_actions').
-- REGARDLESS of the language of the source intelligence (even if the input article is written in Japanese, Russian, or Chinese), your analysis and output MUST be exclusively in technical English.
-- DO NOT attempt to write or translate into Japanese, and DO NOT output any Japanese characters (Hiragana, Katakana, or Kanji).
-- ABSOLUTELY NEVER output Chinese (Simplified or Traditional) words, characters, or grammar under any circumstances. Do NOT use terms like "未知威胁", "行为者", "恶意软件", "黑客", "漏洞", "网络安全", "报道指出", etc.
-- (Exception: Specific named threat actors in 'threat_actors' should retain their exact original native name if specified in the source intelligence).
-- Return ONLY a valid JSON object matching the following structure. Do NOT include markdown code fences, greetings, or conversational filler. All textual values must be in English.
+- STRICTLY 100% FLUENT PROFESSIONAL ENGLISH ONLY for 'title', 'summary', and 'impact_analysis'.
+- DO NOT output any Japanese characters or Chinese characters (Simplified or Traditional) in textual fields.
+- Return ONLY a valid JSON object matching the following structure without markdown code fences:
 {
   "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
   "japan_relevance": "Direct" | "Indirect" | "None",
-  "title": "Concise and accurate English incident title",
-  "summary": "Technical background and victim impact summary in English (2-3 sentences)",
-  "impact_analysis": "Concrete evaluation of threat impact and risks in English",
-  "victim_orgs": ["Identified victim organization names"],
+  "title": "Concise factual English incident title",
+  "summary": "Objective factual summary in English (victim, method, affected product/versions; NO advice)",
+  "impact_analysis": "Confirmed scope of damage, leaked records, or affected version facts in English (NO recommendations)",
+  "victim_orgs": [],
   "threat_actors": [],
   "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
   "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
-  "cves": ["CVE identifiers e.g. CVE-2026-9999"],
-  "affected_products": ["Affected product/software names e.g. FortiMail, Citrix ADC"],
-  "recommended_actions": ["Recommended initial defensive and mitigation steps in English"]
+  "cves": [],
+  "affected_products": []
 }`
 
 	userPrompt := fmt.Sprintf(`Target Threat Intelligence (Analyze and summarize strictly in 100%% English):

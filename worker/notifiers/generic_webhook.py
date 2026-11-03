@@ -30,7 +30,6 @@ class GenericWebhookNotifier:
             "victim_orgs": threat.victim_orgs,
             "threat_actors": threat.threat_actors,
             "attack_type": threat.attack_type,
-            "recommended_actions": threat.recommended_actions_ja,
             "source_type": threat.item.source_type.value,
             "source_name": threat.item.source_name,
             "url": threat.item.url,
