@@ -137,11 +137,14 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 	fields := []map[string]interface{}{
 		{"name": srcLabel, "value": fmt.Sprintf("%s (%s)", threat.Item.SourceType, threat.Item.SourceName), "inline": true},
 		{"name": relLabel, "value": string(threat.JapanRelevance), "inline": true},
-		{"name": typeLabel, "value": orDefault(threat.AttackType, "Unspecified"), "inline": true},
+	}
+	if strings.TrimSpace(threat.AttackType) != "" {
+		fields = append(fields, map[string]interface{}{"name": typeLabel, "value": threat.AttackType, "inline": true})
 	}
 
-	if len(threat.VictimOrgs) > 0 {
-		fields = append(fields, map[string]interface{}{"name": victimLabel, "value": strings.Join(threat.VictimOrgs, ", "), "inline": true})
+	cleanVictims := models.CleanVictimOrgs(threat.VictimOrgs)
+	if len(cleanVictims) > 0 {
+		fields = append(fields, map[string]interface{}{"name": victimLabel, "value": strings.Join(cleanVictims, ", "), "inline": true})
 	}
 	if len(threat.AffectedProducts) > 0 {
 		fields = append(fields, map[string]interface{}{"name": prodLabel, "value": strings.Join(threat.AffectedProducts, ", "), "inline": true})
@@ -149,8 +152,9 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 	if len(threat.CVEs) > 0 {
 		fields = append(fields, map[string]interface{}{"name": cveLabel, "value": strings.Join(threat.CVEs, ", "), "inline": true})
 	}
-	if len(threat.ThreatActors) > 0 {
-		fields = append(fields, map[string]interface{}{"name": actorLabel, "value": strings.Join(threat.ThreatActors, ", "), "inline": true})
+	cleanActors := models.CleanThreatActors(threat.ThreatActors)
+	if len(cleanActors) > 0 {
+		fields = append(fields, map[string]interface{}{"name": actorLabel, "value": strings.Join(cleanActors, ", "), "inline": true})
 	}
 	if impactText != "" {
 		fields = append(fields, map[string]interface{}{"name": impactLabel, "value": truncate(impactText, 1000), "inline": false})
@@ -263,13 +267,6 @@ func (n *DiscordNotifier) NotifySummary(ctx context.Context, totalAlerts int, ma
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
-}
-
-func orDefault(val, def string) string {
-	if val == "" {
-		return def
-	}
-	return val
 }
 
 func truncate(s string, max int) string {

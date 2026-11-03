@@ -30,6 +30,28 @@ class SlackNotifier:
         elif threat.severity == Severity.CRITICAL:
             mention = "<!here> "
 
+        meta_fields = [
+            {"type": "mrkdwn", "text": f"*日本関連性:*\n{threat.japan_relevance.value}"},
+            {
+                "type": "mrkdwn",
+                "text": f"*情報源:*\n{threat.item.source_type.value} ({threat.item.source_name})",
+            },
+        ]
+        clean_victims = [
+            v.strip()
+            for v in threat.victim_orgs
+            if v and v.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし", "指定なし"}
+        ]
+        if clean_victims:
+            meta_fields.append({"type": "mrkdwn", "text": f"*被害組織:*\n{', '.join(clean_victims)}"})
+        clean_actors = [
+            a.strip()
+            for a in threat.threat_actors
+            if a and a.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし"}
+        ]
+        if clean_actors:
+            meta_fields.append({"type": "mrkdwn", "text": f"*攻撃グループ:*\n{', '.join(clean_actors)}"})
+
         blocks = [
             {
                 "type": "header",
@@ -48,15 +70,7 @@ class SlackNotifier:
             },
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*日本関連性:*\n{threat.japan_relevance.value}"},
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*情報源:*\n{threat.item.source_type.value} ({threat.item.source_name})",
-                    },
-                    {"type": "mrkdwn", "text": f"*被害組織:*\n{', '.join(threat.victim_orgs) or '未特定'}"},
-                    {"type": "mrkdwn", "text": f"*攻撃グループ:*\n{', '.join(threat.threat_actors) or '未特定'}"},
-                ],
+                "fields": meta_fields,
             },
         ]
 

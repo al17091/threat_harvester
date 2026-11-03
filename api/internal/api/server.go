@@ -735,10 +735,13 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			inc["impact_analysis"] = iJaClean
 		}
 
-		if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
+		if vJa, ok := inc["victim_org_ja"].(string); ok && !models.IsGenericVictimOrg(vJa) {
 			inc["victim_org"] = vJa
+		} else if vCur, ok := inc["victim_org"].(string); ok && models.IsGenericVictimOrg(vCur) {
+			inc["victim_org"] = ""
+			inc["victim_org_ja"] = ""
 		}
-		if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" {
+		if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" && !strings.EqualFold(pJa, "unknown") && !strings.EqualFold(pJa, "none") {
 			inc["affected_product"] = pJa
 		}
 		if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
@@ -753,12 +756,19 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			if iFinal, ok := inc["impact_analysis"].(string); ok && iFinal != "" {
 				ep["impact_analysis"] = iFinal
 			}
-			if vJa, ok := inc["victim_org_ja"].(string); ok && vJa != "" {
-				if existing, ok := ep["victim_orgs"].([]string); !ok || len(existing) == 0 {
+			if existing, ok := ep["victim_orgs"].([]string); ok {
+				cleaned := models.CleanVictimOrgs(existing)
+				if len(cleaned) > 0 {
+					ep["victim_orgs"] = cleaned
+				} else if vJa, ok := inc["victim_org_ja"].(string); ok && !models.IsGenericVictimOrg(vJa) {
 					ep["victim_orgs"] = []string{vJa}
+				} else {
+					ep["victim_orgs"] = []string{}
 				}
+			} else if vJa, ok := inc["victim_org_ja"].(string); ok && !models.IsGenericVictimOrg(vJa) {
+				ep["victim_orgs"] = []string{vJa}
 			}
-			if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" {
+			if pJa, ok := inc["affected_product_ja"].(string); ok && pJa != "" && !strings.EqualFold(pJa, "unknown") && !strings.EqualFold(pJa, "none") {
 				if existing, ok := ep["affected_products"].([]string); !ok || len(existing) == 0 {
 					ep["affected_products"] = []string{pJa}
 				}
@@ -826,14 +836,23 @@ func formatIncidentForLang(inc map[string]interface{}, lang string) {
 			}
 		}
 
-		if vEn, ok := inc["victim_org_en"].(string); ok && vEn != "" {
+		if vEn, ok := inc["victim_org_en"].(string); ok && !models.IsGenericVictimOrg(vEn) {
 			inc["victim_org"] = vEn
 			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
 				ep["victim_orgs"] = []string{vEn}
 			}
-		} else if vRaw, ok := inc["victim_org"].(string); ok && isJapaneseText(vRaw) {
-			if _, hasJa := inc["victim_org_ja"]; !hasJa || inc["victim_org_ja"] == "" {
-				inc["victim_org_ja"] = vRaw
+		} else {
+			if vRaw, ok := inc["victim_org"].(string); ok && models.IsGenericVictimOrg(vRaw) {
+				inc["victim_org"] = ""
+			} else if ok && isJapaneseText(vRaw) {
+				if _, hasJa := inc["victim_org_ja"]; !hasJa || inc["victim_org_ja"] == "" {
+					inc["victim_org_ja"] = vRaw
+				}
+			}
+			if ep, ok := inc["enriched_parsed"].(map[string]interface{}); ok {
+				if existing, ok := ep["victim_orgs"].([]string); ok {
+					ep["victim_orgs"] = models.CleanVictimOrgs(existing)
+				}
 			}
 		}
 

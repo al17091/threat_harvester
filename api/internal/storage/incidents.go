@@ -686,9 +686,9 @@ func (s *SQLStore) buildNewIncident(
 		attackType = "Vulnerability"
 	}
 
-	vOrg := rawVictim
-	if vOrg == "" {
-		vOrg = "Unknown"
+	vOrg := strings.TrimSpace(rawVictim)
+	if models.IsGenericVictimOrg(vOrg) {
+		vOrg = ""
 	}
 
 	rawContent := strings.TrimSpace(item.RawContent)
@@ -1512,35 +1512,55 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		titleJa = inc.Title
 	}
 
-	victimOrgEn := inc.VictimOrgEn
-	if victimOrgEn == "" && !isJapaneseText(inc.VictimOrg) {
-		victimOrgEn = inc.VictimOrg
+	cleanRawVictim := strings.TrimSpace(inc.VictimOrg)
+	if models.IsGenericVictimOrg(cleanRawVictim) {
+		cleanRawVictim = ""
 	}
-	victimOrgJa := inc.VictimOrgJa
-	if victimOrgJa == "" {
-		victimOrgJa = inc.VictimOrg
+	victimOrgEn := strings.TrimSpace(inc.VictimOrgEn)
+	if models.IsGenericVictimOrg(victimOrgEn) {
+		victimOrgEn = ""
+	}
+	if victimOrgEn == "" && cleanRawVictim != "" && !isJapaneseText(cleanRawVictim) {
+		victimOrgEn = cleanRawVictim
+	}
+	victimOrgJa := strings.TrimSpace(inc.VictimOrgJa)
+	if models.IsGenericVictimOrg(victimOrgJa) {
+		victimOrgJa = ""
+	}
+	if victimOrgJa == "" && cleanRawVictim != "" {
+		victimOrgJa = cleanRawVictim
 	}
 
-	productEn := inc.AffectedProductEn
-	if productEn == "" && !isJapaneseText(inc.AffectedProduct) {
-		productEn = inc.AffectedProduct
+	cleanRawProduct := strings.TrimSpace(inc.AffectedProduct)
+	if strings.EqualFold(cleanRawProduct, "unknown") || strings.EqualFold(cleanRawProduct, "none") || strings.EqualFold(cleanRawProduct, "n/a") {
+		cleanRawProduct = ""
 	}
-	productJa := inc.AffectedProductJa
-	if productJa == "" {
-		productJa = inc.AffectedProduct
+	productEn := strings.TrimSpace(inc.AffectedProductEn)
+	if strings.EqualFold(productEn, "unknown") || strings.EqualFold(productEn, "none") || strings.EqualFold(productEn, "n/a") {
+		productEn = ""
+	}
+	if productEn == "" && cleanRawProduct != "" && !isJapaneseText(cleanRawProduct) {
+		productEn = cleanRawProduct
+	}
+	productJa := strings.TrimSpace(inc.AffectedProductJa)
+	if strings.EqualFold(productJa, "unknown") || strings.EqualFold(productJa, "none") || strings.EqualFold(productJa, "n/a") {
+		productJa = ""
+	}
+	if productJa == "" && cleanRawProduct != "" {
+		productJa = cleanRawProduct
 	}
 
 	displayVictim := victimOrgEn
 	if displayVictim == "" {
-		displayVictim = inc.VictimOrg
+		displayVictim = cleanRawVictim
 	}
 	displayProduct := productEn
 	if displayProduct == "" {
-		displayProduct = inc.AffectedProduct
+		displayProduct = cleanRawProduct
 	}
 
 	var victimOrgs []string
-	if displayVictim != "" && displayVictim != "Unknown" {
+	if displayVictim != "" {
 		victimOrgs = []string{displayVictim}
 	}
 
