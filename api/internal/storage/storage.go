@@ -321,15 +321,43 @@ func (s *SQLStore) initSchema() error {
 	_, _ = s.db.Exec("DELETE FROM incidents WHERE severity = 'Info' OR attack_type = 'Service Release'")
 	_, _ = s.db.Exec("DELETE FROM incidents WHERE id NOT IN (SELECT DISTINCT incident_id FROM threat_items WHERE incident_id IS NOT NULL)")
 
-	// Sanitize legacy ungrounded threat actors from existing incidents
+	// Migrate legacy Unknown or empty severities to Informational
+	_, _ = s.db.Exec("UPDATE incidents SET severity = 'Informational' WHERE severity = 'Unknown' OR severity = '' OR severity IS NULL")
+	_, _ = s.db.Exec("UPDATE threat_items SET severity = 'Informational' WHERE severity = 'Unknown' OR severity = '' OR severity IS NULL")
+
+	// Reconcile threat actors, misclassified cyberattack groups, and ungrounded actors across existing incidents
 	s.cleanUngroundedIncidentThreatActors()
 
 	return nil
 }
 
-// cleanUngroundedIncidentThreatActors sanitizes legacy incidents with hallucinated or ungrounded threat actors.
+// cleanUngroundedIncidentThreatActors deterministically reconciles existing incidents:
+// 1. Removes hallucinated/ungrounded threat actors.
+// 2. Extracts grounded cyberattack groups from titles, summaries, sources, and misclassified victim/product fields.
+// 3. Cleans cyberattack groups and generic disclaimers out of victim_org* and affected_product* columns.
 func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
-	query := "SELECT id, title, COALESCE(raw_content, ''), COALESCE(summary, ''), COALESCE(sources_detail, ''), threat_actors FROM incidents WHERE threat_actors IS NOT NULL AND threat_actors != '[]' AND threat_actors != ''"
+	query := `
+		SELECT
+			id,
+			COALESCE(title, ''),
+			COALESCE(title_ja, ''),
+			COALESCE(raw_content, ''),
+			COALESCE(summary, ''),
+			COALESCE(summary_ja, ''),
+			COALESCE(primary_url, ''),
+			COALESCE(sources_detail, ''),
+			COALESCE(threat_actors, ''),
+			COALESCE(victim_org, ''),
+			COALESCE(victim_org_en, ''),
+			COALESCE(victim_org_ja, ''),
+			COALESCE(affected_product, ''),
+			COALESCE(affected_product_en, ''),
+			COALESCE(affected_product_ja, ''),
+			COALESCE(severity, ''),
+			COALESCE(japan_relevance, ''),
+			COALESCE(attack_type, '')
+		FROM incidents
+	`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return
@@ -337,52 +365,186 @@ func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
 	defer rows.Close()
 
 	type updateItem struct {
-		id     string
-		actors string
+		id         string
+		actors     string
+		victim     string
+		victimEn   string
+		victimJa   string
+		normVictim string
+		prod       string
+		prodEn     string
+		prodJa     string
+		severity   string
 	}
 	var updates []updateItem
 
+	stringSlicesEqual := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
 	for rows.Next() {
-		var id, title, rawContent, summary, sourcesDetail, rawActors string
-		if err := rows.Scan(&id, &title, &rawContent, &summary, &sourcesDetail, &rawActors); err != nil {
-			continue
-		}
-		rawActors = strings.TrimSpace(rawActors)
-		if !strings.HasPrefix(rawActors, "[") {
-			continue
-		}
-		var actors []string
-		if err := json.Unmarshal([]byte(rawActors), &actors); err != nil {
-			continue
-		}
-		if len(actors) == 0 {
+		var (
+			id, title, titleJa, rawContent, summary, summaryJa, primaryURL, sourcesDetail string
+			rawActors, vOrg, vOrgEn, vOrgJa, prod, prodEn, prodJa, sev, jrel, attackType  string
+		)
+		if err := rows.Scan(
+			&id, &title, &titleJa, &rawContent, &summary, &summaryJa, &primaryURL, &sourcesDetail,
+			&rawActors, &vOrg, &vOrgEn, &vOrgJa, &prod, &prodEn, &prodJa, &sev, &jrel, &attackType,
+		); err != nil {
 			continue
 		}
 
-		grounded := models.FilterGroundedThreatActors(actors, title, rawContent, summary, sourcesDetail)
-		changed := len(grounded) != len(actors)
-		if !changed {
-			for i := range actors {
-				if actors[i] != grounded[i] {
-					changed = true
-					break
-				}
+		var existingActors []string
+		trimmedActors := strings.TrimSpace(rawActors)
+		if strings.HasPrefix(trimmedActors, "[") {
+			_ = json.Unmarshal([]byte(trimmedActors), &existingActors)
+		}
+
+		extracted := models.ExtractThreatActors(
+			models.ThreatItem{
+				Title:      title,
+				Summary:    summary,
+				RawContent: rawContent,
+				URL:        primaryURL,
+			},
+			&models.EnrichedThreat{
+				Title:            title,
+				TitleJa:          titleJa,
+				Summary:          summary,
+				SummaryJa:        summaryJa,
+				ThreatActors:     existingActors,
+				VictimOrgs:       []string{vOrg, vOrgEn, vOrgJa},
+				AffectedProducts: []string{prod, prodEn, prodJa},
+			},
+			sourcesDetail,
+		)
+		if extracted == nil {
+			extracted = []string{}
+		}
+
+		newVOrg := models.SanitizeVictimOrgName(vOrg)
+		if models.IsGenericVictimOrg(newVOrg) {
+			newVOrg = ""
+		}
+		newVOrgEn := models.SanitizeVictimOrgName(vOrgEn)
+		if models.IsGenericVictimOrg(newVOrgEn) {
+			newVOrgEn = ""
+		}
+		newVOrgJa := models.SanitizeVictimOrgName(vOrgJa)
+		if models.IsGenericVictimOrg(newVOrgJa) {
+			newVOrgJa = ""
+		}
+		newNormVictim := ""
+		if newVOrg != "" {
+			newNormVictim = models.NormalizeVictimOrg(newVOrg)
+		}
+
+		newProd := strings.TrimSpace(prod)
+		if models.IsInvalidAffectedProduct(newProd) {
+			newProd = ""
+		}
+		newProdEn := strings.TrimSpace(prodEn)
+		if models.IsInvalidAffectedProduct(newProdEn) {
+			newProdEn = ""
+		}
+		newProdJa := strings.TrimSpace(prodJa)
+		if models.IsInvalidAffectedProduct(newProdJa) {
+			newProdJa = ""
+		}
+
+		newSev := string(models.NormalizeDisplaySeverity(models.Severity(sev)))
+		if vOrg != "" && newVOrg == "" && (newSev == string(models.SeverityCritical) || newSev == string(models.SeverityHigh)) {
+			// If victim_org was cleared (e.g. it was a misclassified cyberattack group), re-evaluate roundup/advisory cap
+			refined := models.RefineSeverity(
+				models.ThreatItem{Title: title, Summary: summary, RawContent: rawContent, URL: primaryURL},
+				&models.EnrichedThreat{
+					Title:          title,
+					TitleJa:        titleJa,
+					Summary:        summary,
+					SummaryJa:      summaryJa,
+					Severity:       models.Severity(newSev),
+					JapanRelevance: models.JapanRelevance(jrel),
+					AttackType:     attackType,
+					VictimOrgs:     nil,
+					ThreatActors:   extracted,
+				},
+			)
+			if refined != models.SeverityInfo {
+				newSev = string(models.NormalizeDisplaySeverity(refined))
 			}
 		}
-		if changed {
-			if grounded == nil {
-				grounded = []string{}
+
+		actorsChanged := false
+		if len(extracted) == 0 {
+			// Only rewrite empty actor arrays if previously non-empty (e.g. had hallucinated actor)
+			if trimmedActors != "" && trimmedActors != "[]" && trimmedActors != "null" {
+				actorsChanged = true
 			}
-			newBytes, _ := json.Marshal(grounded)
-			updates = append(updates, updateItem{id: id, actors: string(newBytes)})
+		} else if !stringSlicesEqual(existingActors, extracted) {
+			actorsChanged = true
+		}
+
+		fieldsChanged := newVOrg != vOrg || newVOrgEn != vOrgEn || newVOrgJa != vOrgJa ||
+			newProd != prod || newProdEn != prodEn || newProdJa != prodJa || newSev != sev
+
+		if actorsChanged || fieldsChanged {
+			newActorsJSON := trimmedActors
+			if actorsChanged || newActorsJSON == "" || newActorsJSON == "null" {
+				b, _ := json.Marshal(extracted)
+				newActorsJSON = string(b)
+			}
+			updates = append(updates, updateItem{
+				id:         id,
+				actors:     newActorsJSON,
+				victim:     newVOrg,
+				victimEn:   newVOrgEn,
+				victimJa:   newVOrgJa,
+				normVictim: newNormVictim,
+				prod:       newProd,
+				prodEn:     newProdEn,
+				prodJa:     newProdJa,
+				severity:   newSev,
+			})
 		}
 	}
 
 	for _, up := range updates {
 		if s.isSQLite {
-			_, _ = s.db.Exec("UPDATE incidents SET threat_actors = ? WHERE id = ?", up.actors, up.id)
+			_, _ = s.db.Exec(`
+				UPDATE incidents SET
+					threat_actors = ?,
+					victim_org = ?,
+					victim_org_en = ?,
+					victim_org_ja = ?,
+					normalized_victim_org = ?,
+					affected_product = ?,
+					affected_product_en = ?,
+					affected_product_ja = ?,
+					severity = ?
+				WHERE id = ?
+			`, up.actors, up.victim, up.victimEn, up.victimJa, up.normVictim, up.prod, up.prodEn, up.prodJa, up.severity, up.id)
 		} else {
-			_, _ = s.db.Exec("UPDATE incidents SET threat_actors = $1 WHERE id = $2", up.actors, up.id)
+			_, _ = s.db.Exec(`
+				UPDATE incidents SET
+					threat_actors = $1,
+					victim_org = $2,
+					victim_org_en = $3,
+					victim_org_ja = $4,
+					normalized_victim_org = $5,
+					affected_product = $6,
+					affected_product_en = $7,
+					affected_product_ja = $8,
+					severity = $9
+				WHERE id = $10
+			`, up.actors, up.victim, up.victimEn, up.victimJa, up.normVictim, up.prod, up.prodEn, up.prodJa, up.severity, up.id)
 		}
 	}
 }
@@ -762,13 +924,16 @@ func (s *SQLStore) buildHistoryConditions(f HistoryFilter) (string, []interface{
 		conditions = append(conditions, "japan_relevance = 'Direct'")
 	}
 	if f.Severity != "" {
-		if s.isSQLite {
+		if f.Severity == "Informational" || f.Severity == "Info" {
+			conditions = append(conditions, "(severity IN ('Informational', 'Info', 'Unknown', '') OR severity IS NULL)")
+		} else if s.isSQLite {
 			conditions = append(conditions, "severity = ?")
+			args = append(args, f.Severity)
 		} else {
 			conditions = append(conditions, fmt.Sprintf("severity = $%d", argIdx))
 			argIdx++
+			args = append(args, f.Severity)
 		}
-		args = append(args, f.Severity)
 	}
 	if f.SourceType != "" {
 		if s.isSQLite {
@@ -854,7 +1019,7 @@ func (s *SQLStore) GetHistory(ctx context.Context, f HistoryFilter) ([]map[strin
 			"summary":         nullStringVal(summary),
 			"raw_content":     nullStringVal(rawContent),
 			"published_at":    nullStringVal(pubAt),
-			"severity":        nullStringVal(sev),
+			"severity":        string(models.NormalizeDisplaySeverity(models.Severity(sev.String))),
 			"japan_relevance": nullStringVal(jrel),
 			"notified_at":     nullStringVal(notifAt),
 			"enriched_data":   nullStringVal(enrichedData),
@@ -914,7 +1079,7 @@ func (s *SQLStore) GetItem(ctx context.Context, itemID string) (map[string]inter
 		"summary":         nullStringVal(summary),
 		"raw_content":     nullStringVal(rawContent),
 		"published_at":    nullStringVal(pubAt),
-		"severity":        nullStringVal(sev),
+		"severity":        string(models.NormalizeDisplaySeverity(models.Severity(sev.String))),
 		"japan_relevance": nullStringVal(jrel),
 		"notified_at":     nullStringVal(notifAt),
 		"enriched_data":   nullStringVal(enrichedData),

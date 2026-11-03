@@ -565,9 +565,15 @@ func (s *SQLStore) FindOrCreateIncident(
 			}
 
 			matched.ThreatActors = models.FilterGroundedThreatActors(
-				mergeUniqueStrings(matched.ThreatActors, enriched.ThreatActors),
+				mergeUniqueStrings(matched.ThreatActors, models.ExtractThreatActors(item, enriched)),
 				matched.Title, matched.TitleJa, matched.RawContent, matched.Summary, matched.SummaryJa,
-				item.Title, item.RawContent, item.Summary,
+				item.Title, item.RawContent, item.Summary, item.URL, item.SourceName,
+			)
+		} else {
+			matched.ThreatActors = models.FilterGroundedThreatActors(
+				mergeUniqueStrings(matched.ThreatActors, models.ExtractThreatActors(item, nil)),
+				matched.Title, matched.TitleJa, matched.RawContent, matched.Summary, matched.SummaryJa,
+				item.Title, item.RawContent, item.Summary, item.URL, item.SourceName,
 			)
 		}
 
@@ -639,10 +645,10 @@ func (s *SQLStore) buildNewIncident(
 	summaryJa := item.Summary
 	impact := ""
 	impactJa := ""
-	sev := models.SeverityUnknown
+	sev := models.SeverityInformational
 	jrel := models.JapanRelevanceUnknown
 	attackType := ""
-	var threatActors []string
+	threatActors := models.ExtractThreatActors(item, enriched)
 
 	if enriched != nil {
 		if enriched.Title != "" {
@@ -673,22 +679,24 @@ func (s *SQLStore) buildNewIncident(
 		} else if enriched.ImpactAnalysis != "" {
 			impactJa = enriched.ImpactAnalysis
 		}
-		sev = enriched.Severity
+		sev = models.NormalizeDisplaySeverity(enriched.Severity)
 		jrel = enriched.JapanRelevance
 		attackType = enriched.AttackType
-		threatActors = models.FilterGroundedThreatActors(
-			enriched.ThreatActors,
-			item.Title, item.Summary, item.RawContent, item.URL,
-		)
 	}
 
-	if attackType == "" && (len(cves) > 0 || rawProduct != "") {
+	cleanProduct := strings.TrimSpace(rawProduct)
+	if models.IsInvalidAffectedProduct(cleanProduct) {
+		cleanProduct = ""
+	}
+
+	if attackType == "" && (len(cves) > 0 || cleanProduct != "") {
 		attackType = "Vulnerability"
 	}
 
-	vOrg := strings.TrimSpace(rawVictim)
+	vOrg := models.SanitizeVictimOrgName(rawVictim)
 	if models.IsGenericVictimOrg(vOrg) {
 		vOrg = ""
+		normVictim = ""
 	}
 
 	rawContent := strings.TrimSpace(item.RawContent)
@@ -719,7 +727,7 @@ func (s *SQLStore) buildNewIncident(
 		VictimOrg:           vOrg,
 		NormalizedVictimOrg: normVictim,
 		CVEs:                cves,
-		AffectedProduct:     rawProduct,
+		AffectedProduct:     cleanProduct,
 		Title:               title,
 		TitleJa:             titleJa,
 		Summary:             summary,
@@ -1071,13 +1079,16 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 		conditions = append(conditions, "japan_relevance = 'Direct'")
 	}
 	if f.Severity != "" {
-		if s.isSQLite {
+		if f.Severity == "Informational" || f.Severity == "Info" {
+			conditions = append(conditions, "severity IN ('Informational', 'Info', 'Unknown', '')")
+		} else if s.isSQLite {
 			conditions = append(conditions, "severity = ?")
+			args = append(args, f.Severity)
 		} else {
 			conditions = append(conditions, fmt.Sprintf("severity = $%d", argIdx))
 			argIdx++
+			args = append(args, f.Severity)
 		}
-		args = append(args, f.Severity)
 	}
 	if f.SourceType != "" {
 		srcPattern := fmt.Sprintf(`%%"source_type":"%s"%%`, f.SourceType)
@@ -1092,13 +1103,13 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 	if f.Search != "" {
 		pattern := "%" + f.Search + "%"
 		if s.isSQLite {
-			conditions = append(conditions, "(title LIKE ? OR victim_org LIKE ? OR summary_ja LIKE ? OR impact_analysis_ja LIKE ? OR threat_actors LIKE ? OR cves LIKE ? OR affected_product LIKE ?)")
-			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, "(title LIKE ? OR COALESCE(title_ja, '') LIKE ? OR victim_org LIKE ? OR summary_ja LIKE ? OR impact_analysis_ja LIKE ? OR threat_actors LIKE ? OR cves LIKE ? OR affected_product LIKE ?)")
+			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 		} else {
-			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR victim_org ILIKE $%d OR summary_ja ILIKE $%d OR impact_analysis_ja ILIKE $%d OR threat_actors ILIKE $%d OR cves ILIKE $%d OR affected_product ILIKE $%d)",
-				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4, argIdx+5, argIdx+6))
-			argIdx += 7
-			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+			conditions = append(conditions, fmt.Sprintf("(title ILIKE $%d OR COALESCE(title_ja, '') ILIKE $%d OR victim_org ILIKE $%d OR summary_ja ILIKE $%d OR impact_analysis_ja ILIKE $%d OR threat_actors ILIKE $%d OR cves ILIKE $%d OR affected_product ILIKE $%d)",
+				argIdx, argIdx+1, argIdx+2, argIdx+3, argIdx+4, argIdx+5, argIdx+6, argIdx+7))
+			argIdx += 8
+			args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 		}
 	}
 
@@ -1224,7 +1235,7 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 					"raw_content":     nullStringVal(rawContent),
 					"published_at":    nullStringVal(pubAt),
 					"harvested_at":    harvestedAt,
-					"severity":        nullStringVal(sev),
+					"severity":        string(models.NormalizeDisplaySeverity(models.Severity(sev.String))),
 					"japan_relevance": nullStringVal(jrel),
 					"notified_at":     nullStringVal(notifAt),
 				}
@@ -1273,8 +1284,11 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 				}
 				if vorgs, ok := ep["victim_orgs"].([]interface{}); ok {
 					for _, v := range vorgs {
-						if vs, ok := v.(string); ok && strings.TrimSpace(vs) != "" && !models.IsGenericVictimOrg(vs) {
-							childVictims = appendUniqueString(childVictims, strings.TrimSpace(vs))
+						if vs, ok := v.(string); ok {
+							sanV := models.SanitizeVictimOrgName(vs)
+							if sanV != "" && !models.IsGenericVictimOrg(sanV) {
+								childVictims = appendUniqueString(childVictims, sanV)
+							}
 						}
 					}
 				}
@@ -1512,18 +1526,18 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		titleJa = inc.Title
 	}
 
-	cleanRawVictim := strings.TrimSpace(inc.VictimOrg)
+	cleanRawVictim := models.SanitizeVictimOrgName(inc.VictimOrg)
 	if models.IsGenericVictimOrg(cleanRawVictim) {
 		cleanRawVictim = ""
 	}
-	victimOrgEn := strings.TrimSpace(inc.VictimOrgEn)
+	victimOrgEn := models.SanitizeVictimOrgName(inc.VictimOrgEn)
 	if models.IsGenericVictimOrg(victimOrgEn) {
 		victimOrgEn = ""
 	}
 	if victimOrgEn == "" && cleanRawVictim != "" && !isJapaneseText(cleanRawVictim) {
 		victimOrgEn = cleanRawVictim
 	}
-	victimOrgJa := strings.TrimSpace(inc.VictimOrgJa)
+	victimOrgJa := models.SanitizeVictimOrgName(inc.VictimOrgJa)
 	if models.IsGenericVictimOrg(victimOrgJa) {
 		victimOrgJa = ""
 	}
@@ -1532,18 +1546,18 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 	}
 
 	cleanRawProduct := strings.TrimSpace(inc.AffectedProduct)
-	if strings.EqualFold(cleanRawProduct, "unknown") || strings.EqualFold(cleanRawProduct, "none") || strings.EqualFold(cleanRawProduct, "n/a") {
+	if models.IsInvalidAffectedProduct(cleanRawProduct) {
 		cleanRawProduct = ""
 	}
 	productEn := strings.TrimSpace(inc.AffectedProductEn)
-	if strings.EqualFold(productEn, "unknown") || strings.EqualFold(productEn, "none") || strings.EqualFold(productEn, "n/a") {
+	if models.IsInvalidAffectedProduct(productEn) {
 		productEn = ""
 	}
 	if productEn == "" && cleanRawProduct != "" && !isJapaneseText(cleanRawProduct) {
 		productEn = cleanRawProduct
 	}
 	productJa := strings.TrimSpace(inc.AffectedProductJa)
-	if strings.EqualFold(productJa, "unknown") || strings.EqualFold(productJa, "none") || strings.EqualFold(productJa, "n/a") {
+	if models.IsInvalidAffectedProduct(productJa) {
 		productJa = ""
 	}
 	if productJa == "" && cleanRawProduct != "" {
@@ -1573,9 +1587,23 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 	for _, sd := range inc.SourcesDetail {
 		srcDetailTexts = append(srcDetailTexts, sd.Title, sd.Name, sd.URL)
 	}
-	cleanActors := models.FilterGroundedThreatActors(
-		inc.ThreatActors,
-		append([]string{inc.Title, inc.TitleJa, inc.Summary, inc.SummaryJa, inc.RawContent, inc.PrimaryURL, strings.Join(inc.SourceURLs, " ")}, srcDetailTexts...)...,
+	cleanActors := models.ExtractThreatActors(
+		models.ThreatItem{
+			Title:      inc.Title,
+			Summary:    inc.Summary,
+			RawContent: inc.RawContent,
+			URL:        inc.PrimaryURL,
+		},
+		&models.EnrichedThreat{
+			Title:            inc.Title,
+			TitleJa:          inc.TitleJa,
+			Summary:          inc.Summary,
+			SummaryJa:        inc.SummaryJa,
+			ThreatActors:     inc.ThreatActors,
+			VictimOrgs:       []string{inc.VictimOrg, inc.VictimOrgEn, inc.VictimOrgJa},
+			AffectedProducts: []string{inc.AffectedProduct, inc.AffectedProductEn, inc.AffectedProductJa},
+		},
+		append([]string{strings.Join(inc.SourceURLs, " ")}, srcDetailTexts...)...,
 	)
 	if cleanActors == nil {
 		cleanActors = []string{}
@@ -1616,7 +1644,7 @@ func formatIncidentMap(inc *models.Incident) map[string]interface{} {
 		"summary_ja":              sumJa,
 		"impact_analysis":         impEn,
 		"impact_analysis_ja":      impJa,
-		"severity":                string(inc.Severity),
+		"severity":                string(models.NormalizeDisplaySeverity(inc.Severity)),
 		"japan_relevance":         string(inc.JapanRelevance),
 		"attack_type":             inc.AttackType,
 		"raw_content":             inc.RawContent,
@@ -2229,11 +2257,11 @@ func (s *SQLStore) GetEntityStats(ctx context.Context, limit int, japanOnly bool
 		// Aggregate Victims
 		vDisplay := ""
 		if vJa.Valid && strings.TrimSpace(vJa.String) != "" {
-			vDisplay = strings.TrimSpace(vJa.String)
+			vDisplay = models.SanitizeVictimOrgName(vJa.String)
 		} else if vOrg.Valid && strings.TrimSpace(vOrg.String) != "" {
-			vDisplay = strings.TrimSpace(vOrg.String)
+			vDisplay = models.SanitizeVictimOrgName(vOrg.String)
 		} else if normV.Valid && strings.TrimSpace(normV.String) != "" {
-			vDisplay = strings.TrimSpace(normV.String)
+			vDisplay = models.SanitizeVictimOrgName(normV.String)
 		}
 
 		if vDisplay != "" && !models.IsGenericVictimOrg(vDisplay) {

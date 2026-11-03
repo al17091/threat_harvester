@@ -19,6 +19,7 @@ class Severity(str, Enum):
     HIGH = "High"
     MEDIUM = "Medium"
     LOW = "Low"
+    INFORMATIONAL = "Informational"
     UNKNOWN = "Unknown"
 
 
@@ -75,7 +76,7 @@ class EnrichedThreat(BaseModel):
 
     item_id: str
     item: ThreatItem
-    severity: Severity = Severity.UNKNOWN
+    severity: Severity = Severity.INFORMATIONAL
     japan_relevance: JapanRelevance = JapanRelevance.UNKNOWN
     title_ja: str
     summary_ja: str

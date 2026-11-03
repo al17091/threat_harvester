@@ -26,13 +26,25 @@ const (
 type Severity string
 
 const (
-	SeverityCritical Severity = "Critical"
-	SeverityHigh     Severity = "High"
-	SeverityMedium   Severity = "Medium"
-	SeverityLow      Severity = "Low"
-	SeverityInfo     Severity = "Info"
-	SeverityUnknown  Severity = "Unknown"
+	SeverityCritical      Severity = "Critical"
+	SeverityHigh          Severity = "High"
+	SeverityMedium        Severity = "Medium"
+	SeverityLow           Severity = "Low"
+	SeverityInformational Severity = "Informational"
+	SeverityInfo          Severity = "Info"
+	SeverityUnknown       Severity = "Unknown"
 )
+
+// NormalizeDisplaySeverity converts empty, Unknown, or legacy Info severities to Informational for display and storage.
+func NormalizeDisplaySeverity(s Severity) Severity {
+	trimmed := Severity(strings.TrimSpace(string(s)))
+	switch trimmed {
+	case SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow, SeverityInformational:
+		return trimmed
+	default:
+		return SeverityInformational
+	}
+}
 
 type JapanRelevance string
 
