@@ -997,6 +997,90 @@ func TestCyberattackGroupsExtractedAndReclassifiedAsActors(t *testing.T) {
 	}
 }
 
+func TestActorExtractionExcludesEnglishStopwordsAndDedupsSubtokens(t *testing.T) {
+	// 1. Prose sentences around "ransomware group" must not extract "The", "has", "by", "named", "Claims", "Publishes"
+	cases := []struct {
+		name     string
+		item     ThreatItem
+		existing []string
+		extra    string
+		want     []string
+	}{
+		{
+			name: "Shiba prose + ransomlook URL",
+			item: ThreatItem{
+				Title:   "Shiba Ransomware Linked to Antwerp House Dentistry in the UK",
+				Summary: "The ransomware group Shiba has been linked to a local dental clinic.",
+			},
+			existing: []string{"shiba", "The", "has"},
+			extra:    `["https://ransomlook.io/group/shiba"]`,
+			want:     []string{"Shiba"},
+		},
+		{
+			name: "Ransomware group named n0n",
+			item: ThreatItem{
+				Title:   "Ransomlook Tracker Lists Japanese Company as Ransomware Victim",
+				Summary: "A ransomware group named n0n has listed a Japanese company on its data leak site.",
+			},
+			existing: []string{"N0n", "named"},
+			want:     []string{"N0n"},
+		},
+		{
+			name: "Generic unnamed ransomware group exploited zero-day",
+			item: ThreatItem{
+				Title:   "Oracle Software Zero-Day Exploited by Ransomware Group - October 2026",
+				Summary: "A ransomware group has exploited a previously unknown zero-day vulnerability.",
+			},
+			existing: []string{"by", "has"},
+			want:     nil,
+		},
+		{
+			name: "Generic headline Ransomware Group Claims ...",
+			item: ThreatItem{
+				Title:   "Ransomware Group Claims Wellington College Bangkok as a Victim",
+				Summary: "Multiple cybersecurity monitoring platforms recorded identical extortion listings.",
+			},
+			existing: []string{"Claims"},
+			want:     nil,
+		},
+		{
+			name: "Quoted multi-word actor 'The Gentlemen'",
+			item: ThreatItem{
+				Title:   "Ransomware Group 'The Gentlemen' Leaks Data from Four Japanese Companies",
+				Summary: "A new ransomware group named 'The Gentlemen' has been identified leaking data.",
+			},
+			existing: []string{"The", "named", "new", "Leaks", "Gentlemen"},
+			want:     []string{"The Gentlemen"},
+		},
+		{
+			name: "Multi-word subtoken dedup Brain Cipher + trailing punctuation + alias prefix",
+			item: ThreatItem{
+				Title:   "Brain Cipher Ransomware Data Leak Incident (別名：BlackTech.)",
+				Summary: "The ransomware group Brain Cipher has published sensitive data alongside キリン.",
+			},
+			existing: []string{"Brain Cipher", "Brain", "The", "Cipher", "別名：BlackTech", "BlackTech.", "キリン"},
+			want:     []string{"Brain Cipher", "BlackTech", "Qilin"},
+		},
+	}
+
+	for _, tc := range cases {
+		got := ExtractThreatActors(tc.item, &EnrichedThreat{ThreatActors: tc.existing}, tc.extra)
+		if len(got) != len(tc.want) {
+			t.Fatalf("%s: expected %v, got %v", tc.name, tc.want, got)
+		}
+		gotSet := make(map[string]bool)
+		for _, g := range got {
+			gotSet[g] = true
+		}
+		for _, w := range tc.want {
+			if !gotSet[w] {
+				t.Errorf("%s: missing expected actor %q in %v", tc.name, w, got)
+			}
+		}
+	}
+}
+
+
 
 
 
