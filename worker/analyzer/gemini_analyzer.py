@@ -36,20 +36,25 @@ class GeminiThreatAnalyzer:
             )
 
         prompt = f"""
-        あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
-        以下の脅威情報を分析し、特に「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+        あなたは日本を拠点とするサイバー脅威インテリジェンス（CTI）アナリストです。
+        以下の脅威情報の原文を精読し、客観的な事実（ファクト）のみを抽出してください。
 
-        # 評価基準
+        # 評価基準（厳守）
         1. japan_relevance (日本への関連性):
-           - "Direct": 被害対象が日本企業、日本の官公庁・自治体、国内組織、または日本特有のサプライチェーン。
-           - "Indirect": 世界規模の大規模攻撃（日本でも普及している製品・OSの悪用中ゼロデイ、グローバルクラウド障害等）。
-           - "None": 日本国内への直接的・間接的な関連性がほぼ見られない事象。
+           - "Direct": 具体的な日本企業・日本の官公庁・国内組織が被害対象である事案、またはJPCERT/CC・IPA・JVNによる公式発信。
+           - "Indirect": 日本国内の特定被害組織は確認されていないが、日本でも普及しているソフトウェア・OSの脆弱性や世界規模の攻撃事象。
+           - "None": 日本国内との関連性が見られない海外ローカル事象。
 
-        2. severity (重要度):
-           - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
-           - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
-           - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
-           - "Low": 製品宣伝、マイナーなバグ修正、コラム。
+        2. severity (重要度 - 上方バイアス厳禁):
+           - 【絶対ルール1】japan_relevance が "Direct" 以外の場合、"Critical" を付与することは絶対に禁止（最大 "High" まで）。
+           - 【絶対ルール2】具体的な被害組織を伴わない一般的な注意喚起（JPCERT/IPA注意喚起を含む）、週報・まとめ記事は最大 "Medium" まで。
+           - "Critical": japan_relevance が "Direct" かつ国内特定組織における深刻な実被害（ランサムウェア感染・大規模情報漏洩・重要システム停止）が確認された事案のみ。
+           - "High": 国内組織での情報漏洩事案、ランサムウェアDLSへの新規掲載、または悪用確認済み/PoC公開済みの深刻脆弱性。
+           - "Medium": JPCERT/IPA等の注意喚起、週報、通常のセキュリティアドバイザリ、影響が限定的なインシデント。
+           - "Low": 悪用やPoCが確認されていない修正パッチ公開、マイナーなバグ修正、コラム。
+
+        # 事実記載ルール（説教・対策アドバイスの完全禁止）
+        - summary_ja および impact_analysis_ja には確認された客観的事実のみを記述し、「MFA導入」「パッチ適用」等の一般的な対策助言は一切書かないでください。
 
         # 対象インシデント情報
         ソース種別: {item.source_type.value}
@@ -63,13 +68,12 @@ class GeminiThreatAnalyzer:
         {{
             "severity": "Critical" | "High" | "Medium" | "Low",
             "japan_relevance": "Direct" | "Indirect" | "None",
-            "title_ja": "日本語での的確で簡潔なインシデント名",
-            "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
-            "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
-            "victim_orgs": ["被害組織名（判明している場合）"],
-            "threat_actors": ["関与している攻撃グループ名（判明している場合）"],
-            "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability",
-            "recommended_actions_ja": ["推奨される初動対応・防御策"]
+            "title_ja": "日本語での的確で簡潔な事実ベースのインシデント名",
+            "summary_ja": "確認された事実（被害対象・手口・対象製品等）の日本語3行以内要約",
+            "impact_analysis_ja": "確認された被害規模・漏洩件数・影響範囲の客観的事実",
+            "victim_orgs": [],
+            "threat_actors": [],
+            "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability"
         }}
         """
 
@@ -95,6 +99,8 @@ class GeminiThreatAnalyzer:
                 if data.get("japan_relevance") in [e.value for e in JapanRelevance]
                 else JapanRelevance.UNKNOWN
             )
+            if japan_rel != JapanRelevance.DIRECT and severity == Severity.CRITICAL:
+                severity = Severity.HIGH
 
             return EnrichedThreat(
                 item_id=item.id,
@@ -107,7 +113,7 @@ class GeminiThreatAnalyzer:
                 victim_orgs=data.get("victim_orgs", []),
                 threat_actors=data.get("threat_actors", []),
                 attack_type=data.get("attack_type"),
-                recommended_actions_ja=data.get("recommended_actions_ja", []),
+                recommended_actions_ja=[],
             )
 
         except Exception as e:

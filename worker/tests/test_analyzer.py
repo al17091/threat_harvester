@@ -17,8 +17,7 @@ def test_gemini_analyzer_mock(monkeypatch):
         "impact_analysis_ja": "サプライチェーン停止の恐れあり",
         "victim_orgs": ["テスト株式会社"],
         "threat_actors": ["LockBit 3.0"],
-        "attack_type": "Ransomware",
-        "recommended_actions_ja": ["端末の隔離", "Active Directoryパスワードリセット"]
+        "attack_type": "Ransomware"
     }"""
     mock_client.models.generate_content.return_value = mock_response
     analyzer.client = mock_client

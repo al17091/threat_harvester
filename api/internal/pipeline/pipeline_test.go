@@ -221,12 +221,12 @@ func TestPipeline(t *testing.T) {
 	if summary.Analyzed != 3 {
 		t.Errorf("Expected 3 analyzed, got %d", summary.Analyzed)
 	}
-	// Notified count:
+	// Notified count (default NotifyLanguage="ja"):
 	// item-1 (Direct, Critical) -> notified
 	// item-old (Direct, Critical, but > 7 days old) -> suppressed
-	// item-global (Indirect, Critical, notifyDirectOnly=false) -> notified
-	if summary.Notified != 2 {
-		t.Errorf("Expected 2 notified, got %d", summary.Notified)
+	// item-global (Indirect, capped from Critical to High) -> suppressed in ja channel
+	if summary.Notified != 1 {
+		t.Errorf("Expected 1 notified (Direct Critical only; Indirect capped at High), got %d", summary.Notified)
 	}
 
 	// Second cycle: RunAll should deduplicate existing items in store

@@ -79,10 +79,11 @@ func TestNotionReporter(t *testing.T) {
 		Severity:             models.SeverityCritical,
 		JapanRelevance:       models.JapanRelevanceDirect,
 		AttackType:           "Ransomware",
-		VictimOrgs:           []string{"Company A", "Company B", "Company C", "Company D", "Company E", "Company F"},
-		ThreatActors:         []string{"Actor A", "Actor B", "Actor C", "Actor D", "Actor E", "Actor F"},
-		ImpactAnalysisJa:     "国内組織への広範囲な影響が想定されます。",
-		RecommendedActionsJa: []string{"パッチ適用", "EIR手順の確認", "ログ調査", "アクセス制限", "バックアップ確認", "追加対策"},
+		VictimOrgs:       []string{"Company A", "Company B", "Company C", "Company D", "Company E", "Company F"},
+		ThreatActors:     []string{"Actor A", "Actor B", "Actor C", "Actor D", "Actor E", "Actor F"},
+		CVEs:             []string{"CVE-2026-12345"},
+		AffectedProducts: []string{"Example Gateway 2.1"},
+		ImpactAnalysisJa: "顧客データ5万件の漏洩が確認された。",
 	}
 
 	pageID, err := reporter.CreateIncidentPage(ctx, fullThreat)

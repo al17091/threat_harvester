@@ -147,8 +147,6 @@ interface Incident {
     affected_products?: string[];
     affected_product_en?: string;
     affected_product_ja?: string;
-    recommended_actions?: string[];
-    recommended_actions_ja?: string[];
   } | null;
 }
 
@@ -3673,12 +3671,201 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
               <div>
                 <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-1">
-                  {currentLang === "ja" ? "概要" : "Overview"}
+                  {currentLang === "ja" ? "事象ファクト要約" : "Factual Summary"}
                 </h4>
                 <p className="text-slate-300 bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
                   {getCleanDisplaySummary(selectedIncident, currentLang)}
                 </p>
               </div>
+
+              {/* STRUCTURED FACT GRID */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">
+                    {currentLang === "ja" ? "被害組織 / 対象" : "Victim Organizations"}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {(() => {
+                      const rawVictims: string[] = [];
+                      const primaryVictim =
+                        currentLang === "ja"
+                          ? selectedIncident.victim_org_ja || selectedIncident.victim_org
+                          : selectedIncident.victim_org_en || selectedIncident.victim_org;
+                      if (primaryVictim) rawVictims.push(primaryVictim);
+                      for (const v of selectedIncident.enriched_parsed?.victim_orgs || []) {
+                        if (v) rawVictims.push(v);
+                      }
+                      const genericPatterns = [
+                        "unknown",
+                        "not specified",
+                        "unspecified",
+                        "none",
+                        "n/a",
+                        "multiple organization",
+                        "various organization",
+                        "japanese enterprise",
+                        "japanese compan",
+                        "domestic organization",
+                        "未特定",
+                        "不特定",
+                        "不明",
+                      ];
+                      const seen = new Set<string>();
+                      const cleanVictims = rawVictims.filter((v) => {
+                        const trimmed = v.trim();
+                        if (!trimmed) return false;
+                        const low = trimmed.toLowerCase();
+                        if (genericPatterns.some((pat) => low === pat || low.includes(pat))) return false;
+                        if (seen.has(low)) return false;
+                        seen.add(low);
+                        return true;
+                      });
+                      if (cleanVictims.length === 0) {
+                        return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>;
+                      }
+                      return cleanVictims.map((v) => (
+                        <span key={v} className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-200 border border-slate-700 font-mono">
+                          {v}
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">
+                    {currentLang === "ja" ? "事象種別 / 侵入分類" : "Event / Attack Type"}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedIncident.attack_type || selectedIncident.enriched_parsed?.attack_type ? (
+                      <span className="px-2 py-0.5 rounded text-xs bg-cyan-950/70 text-cyan-300 border border-cyan-800/80 font-mono font-medium">
+                        {selectedIncident.attack_type || selectedIncident.enriched_parsed?.attack_type}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-600">{currentLang === "ja" ? "未分類" : "Unspecified"}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">
+                    {currentLang === "ja" ? "対象製品 / バージョン" : "Affected Products"}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {(() => {
+                      const rawProds: string[] = [];
+                      const primaryProd =
+                        currentLang === "ja"
+                          ? selectedIncident.affected_product_ja || selectedIncident.affected_product
+                          : selectedIncident.affected_product_en || selectedIncident.affected_product;
+                      if (primaryProd) rawProds.push(primaryProd);
+                      for (const p of selectedIncident.enriched_parsed?.affected_products || []) {
+                        if (p) rawProds.push(p);
+                      }
+                      const seen = new Set<string>();
+                      const cleanProds = rawProds.filter((p) => {
+                        const trimmed = p.trim();
+                        if (!trimmed || trimmed.toLowerCase() === "unknown" || trimmed.toLowerCase() === "none") return false;
+                        const low = trimmed.toLowerCase();
+                        if (seen.has(low)) return false;
+                        seen.add(low);
+                        return true;
+                      });
+                      if (cleanProds.length === 0) {
+                        return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>;
+                      }
+                      return cleanProds.map((p) => (
+                        <span key={p} className="px-2 py-0.5 rounded text-xs bg-emerald-950/70 text-emerald-300 border border-emerald-800/80 font-mono">
+                          {p}
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 sm:col-span-2">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">
+                    {currentLang === "ja" ? "悪用・関連 CVE" : "Associated CVEs"}
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(() => {
+                      const rawCVEs = selectedIncident.cves || selectedIncident.enriched_parsed?.cves || [];
+                      const cleanCVEs = Array.from(
+                        new Set(
+                          rawCVEs
+                            .map((c) => c.trim().toUpperCase())
+                            .filter((c) => c && c !== "CVE-2026-9999" && c !== "CVE-2025-9999")
+                        )
+                      );
+                      if (cleanCVEs.length === 0) {
+                        return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>;
+                      }
+                      return cleanCVEs.map((cve) => (
+                        <a
+                          key={cve}
+                          href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-xs bg-amber-950/70 hover:bg-amber-900/70 text-amber-300 border border-amber-800/80 font-mono font-medium transition-colors"
+                        >
+                          <span>{cve}</span>
+                          <ExternalLink className="w-2.5 h-2.5 opacity-75" />
+                        </a>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                  <span className="text-xs text-slate-500 font-semibold block mb-1">
+                    {currentLang === "ja" ? "脅威アクター / 攻撃グループ" : "Threat Actors / Groups"}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {(() => {
+                      const validModalActors = filterValidThreatActors(
+                        selectedIncident.enriched_parsed?.threat_actors || selectedIncident.threat_actors
+                      );
+                      if (validModalActors.length === 0) {
+                        return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None identified"}</span>;
+                      }
+                      const reasonsMap =
+                        currentLang === "ja"
+                          ? selectedIncident.threat_actor_reasons_ja ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons_ja ||
+                            selectedIncident.threat_actor_reasons ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons
+                          : selectedIncident.threat_actor_reasons ||
+                            selectedIncident.enriched_parsed?.threat_actor_reasons;
+                      return validModalActors.map((a) => (
+                        <span
+                          key={a}
+                          title={reasonsMap?.[a] || undefined}
+                          className="px-2 py-0.5 rounded text-xs bg-purple-950 text-purple-300 border border-purple-800 font-mono"
+                        >
+                          {a}
+                        </span>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {(selectedIncident.enriched_parsed?.impact_analysis || selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis_ja || selectedIncident.impact_analysis_ja) && (
+                <div>
+                  <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                    {currentLang === "ja" ? "確認された被害・影響範囲" : "Confirmed Impact & Scope"}
+                  </h4>
+                  <p className="text-slate-300 bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
+                    {currentLang === "ja"
+                      ? (selectedIncident.impact_analysis_ja || selectedIncident.enriched_parsed?.impact_analysis_ja || selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis)
+                      : (() => {
+                          const enImpact = selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis;
+                          if (enImpact && !containsJapanese(enImpact)) return enImpact;
+                          return "(Confirmed impact details translation in progress.)";
+                        })()}
+                  </p>
+                </div>
+              )}
 
               {/* RAW SOURCE ACCORDION IN MODAL */}
               {(() => {
@@ -3718,133 +3905,6 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                 );
               })()}
-
-              {(selectedIncident.enriched_parsed?.impact_analysis || selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis_ja || selectedIncident.impact_analysis_ja) && (
-                <div>
-                  <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
-                    {currentLang === "ja" ? "影響評価・対象スコープ" : "Impact Assessment & Scope"}
-                  </h4>
-                  <p className="text-slate-300 bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed">
-                    {currentLang === "ja"
-                      ? (selectedIncident.impact_analysis_ja || selectedIncident.enriched_parsed?.impact_analysis_ja || selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis)
-                      : (() => {
-                          const enImpact = selectedIncident.impact_analysis || selectedIncident.enriched_parsed?.impact_analysis;
-                          if (enImpact && !containsJapanese(enImpact)) return enImpact;
-                          return "(Impact assessment translation in progress.)";
-                        })()}
-                  </p>
-                </div>
-              )}
-
-              {(() => {
-                let actions: string[] = [];
-                if (currentLang === "ja") {
-                  actions = (selectedIncident.enriched_parsed?.recommended_actions_ja && selectedIncident.enriched_parsed.recommended_actions_ja.length > 0)
-                    ? selectedIncident.enriched_parsed.recommended_actions_ja
-                    : (selectedIncident.enriched_parsed?.recommended_actions || []);
-                } else {
-                  const enRaw = selectedIncident.enriched_parsed?.recommended_actions || [];
-                  actions = enRaw.filter((a: string) => a && !containsJapanese(a));
-                }
-                if (actions.length === 0) {
-                  return null;
-                }
-                return (
-                  <div>
-                    <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider mb-1">
-                      {currentLang === "ja" ? "推奨アクション・緩和策" : "Recommended Mitigations & Action Items"}
-                    </h4>
-                    <ul className="list-disc list-inside bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1 text-slate-300">
-                      {actions.map((action, idx) => (
-                        <li key={idx}>{action}</li>
-                      ))}
-                    </ul>
-                  </div>
-                );
-              })()}
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-500 font-semibold block mb-1">
-                    {currentLang === "ja" ? "対象組織 / 被害企業" : "Target Sectors / Victims"}
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedIncident.enriched_parsed?.victim_orgs?.map((v) => (
-                      <span key={v} className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 font-mono">
-                        {v}
-                      </span>
-                    )) ?? <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>}
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-500 font-semibold block mb-1">
-                    {currentLang === "ja" ? "脅威アクター / 攻撃グループ" : "Threat Actors / Groups"}
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {(() => {
-                      const validModalActors = filterValidThreatActors(
-                        selectedIncident.enriched_parsed?.threat_actors || selectedIncident.threat_actors
-                      );
-                      if (validModalActors.length === 0) {
-                        return <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None identified"}</span>;
-                      }
-                      const reasonsMap =
-                        currentLang === "ja"
-                          ? selectedIncident.threat_actor_reasons_ja ||
-                            selectedIncident.enriched_parsed?.threat_actor_reasons_ja ||
-                            selectedIncident.threat_actor_reasons ||
-                            selectedIncident.enriched_parsed?.threat_actor_reasons
-                          : selectedIncident.threat_actor_reasons ||
-                            selectedIncident.enriched_parsed?.threat_actor_reasons;
-                      return validModalActors.map((a) => (
-                        <span
-                          key={a}
-                          title={reasonsMap?.[a] || undefined}
-                          className="px-2 py-0.5 rounded text-xs bg-purple-950 text-purple-300 border border-purple-800 font-mono"
-                        >
-                          {a}
-                        </span>
-                      ));
-                    })()}
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-500 font-semibold block mb-1">
-                    {currentLang === "ja" ? "脆弱性 (CVE)" : "Vulnerabilities (CVE)"}
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedIncident.cves && selectedIncident.cves.length > 0 ? (
-                      selectedIncident.cves.map((cve) => (
-                        <span
-                          key={cve}
-                          className="px-2 py-0.5 rounded text-xs bg-amber-950/70 text-amber-300 border border-amber-800/80 font-mono font-medium"
-                        >
-                          {cve}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  <span className="text-xs text-slate-500 font-semibold block mb-1">
-                    {currentLang === "ja" ? "影響製品" : "Affected Product"}
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedIncident.affected_product || selectedIncident.enriched_parsed?.affected_products?.[0] ? (
-                      <span className="px-2 py-0.5 rounded text-xs bg-emerald-950/70 text-emerald-300 border border-emerald-800/80 font-mono">
-                        {selectedIncident.affected_product || selectedIncident.enriched_parsed?.affected_products?.[0]}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-600">{currentLang === "ja" ? "特定なし" : "None specified"}</span>
-                    )}
-                  </div>
-                </div>
-              </div>
 
               {/* Threat Actor Attribution Basis / Evidence */}
               {(() => {

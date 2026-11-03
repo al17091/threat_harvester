@@ -896,6 +896,66 @@ func TestBlackholeClusteringPrevention(t *testing.T) {
 	}
 }
 
+func TestBackfillIncidentsRetroactiveNormalization(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	pub := time.Now().UTC()
+
+	// Insert a legacy over-inflated threat_item (Indirect + Critical + RecommendedActions + CVE-2026-9999)
+	item := models.NewThreatItem(
+		models.SourceTypeVendorRSS,
+		"BleepingComputer",
+		"Foreign Cloud Vendor Suffers Zero-day Attack",
+		"https://bleepingcomputer.com/news/security/foreign-cloud-attack",
+		"Active zero-day exploit against foreign cloud software",
+		"Active exploitation observed in the wild",
+		&pub,
+		nil,
+	)
+	legacyEnriched := &models.EnrichedThreat{
+		ItemID:               item.ID,
+		Item:                 item,
+		Severity:             models.SeverityCritical,
+		JapanRelevance:       models.JapanRelevanceIndirect,
+		Title:                "Foreign Cloud Zero-day Attack",
+		TitleJa:              "海外クラウド製品に対するゼロデイ攻撃",
+		AttackType:           "Zero-day",
+		CVEs:                 []string{"CVE-2026-9999", "CVE-2026-77777"},
+		RecommendedActions:   []string{"Enable MFA"},
+		RecommendedActionsJa: []string{"MFAを有効化してください"},
+		AnalyzedAt:           pub,
+	}
+	if err := store.MarkSeen(ctx, item, legacyEnriched, false); err != nil {
+		t.Fatalf("MarkSeen failed: %v", err)
+	}
+
+	incCount, err := store.BackfillIncidents(ctx, 30)
+	if err != nil {
+		t.Fatalf("BackfillIncidents failed: %v", err)
+	}
+	if incCount != 1 {
+		t.Fatalf("expected 1 incident after backfill, got %d", incCount)
+	}
+
+	incs, err := store.GetIncidents(ctx, HistoryFilter{Limit: 10})
+	if err != nil || len(incs) != 1 {
+		t.Fatalf("expected 1 incident from GetIncidents, got %d (err=%v)", len(incs), err)
+	}
+	if incs[0]["severity"] != "High" {
+		t.Errorf("expected retroactive backfill to cap Indirect Critical to High, got %v", incs[0]["severity"])
+	}
+	cves, _ := incs[0]["cves"].([]string)
+	if len(cves) != 1 || cves[0] != "CVE-2026-77777" {
+		t.Errorf("expected CVE-2026-9999 to be stripped during backfill, got %v", cves)
+	}
+}
+
+
 
 
 

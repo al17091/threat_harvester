@@ -105,23 +105,40 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 		actors = strings.Join(threat.ThreatActors, ", ")
 	}
 
-	var sumLabel, relLabel, srcLabel, vicLabel, actLabel, impLabel, btnLabel string
+	var sumLabel, relLabel, srcLabel, vicLabel, actLabel, prodLabel, cveLabel, impLabel, btnLabel string
 	if isJa {
-		sumLabel = "概要 / 要約:"
+		sumLabel = "事象ファクト要約:"
 		relLabel = "日本関連性:"
 		srcLabel = "情報ソース:"
 		vicLabel = "被害組織:"
-		actLabel = "脅威アクター / 攻撃グループ:"
-		impLabel = "日本への影響分析:"
+		actLabel = "脅威アクター:"
+		prodLabel = "対象製品:"
+		cveLabel = "関連CVE:"
+		impLabel = "確認された被害・影響範囲:"
 		btnLabel = "元記事を開く"
 	} else {
-		sumLabel = "Summary:"
+		sumLabel = "Factual Summary:"
 		relLabel = "Japan Relevance:"
 		srcLabel = "Source:"
 		vicLabel = "Victims:"
 		actLabel = "Threat Actors:"
-		impLabel = "Impact Analysis:"
+		prodLabel = "Affected Products:"
+		cveLabel = "CVEs:"
+		impLabel = "Confirmed Impact & Scope:"
 		btnLabel = "View Source Link"
+	}
+
+	metaFields := []map[string]interface{}{
+		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", relLabel, threat.JapanRelevance)},
+		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s (%s)", srcLabel, threat.Item.SourceType, threat.Item.SourceName)},
+		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", vicLabel, victims)},
+		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", actLabel, actors)},
+	}
+	if len(threat.AffectedProducts) > 0 {
+		metaFields = append(metaFields, map[string]interface{}{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", prodLabel, strings.Join(threat.AffectedProducts, ", "))})
+	}
+	if len(threat.CVEs) > 0 {
+		metaFields = append(metaFields, map[string]interface{}{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", cveLabel, strings.Join(threat.CVEs, ", "))})
 	}
 
 	blocks := []map[string]interface{}{
@@ -141,13 +158,8 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 			},
 		},
 		{
-			"type": "section",
-			"fields": []map[string]interface{}{
-				{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", relLabel, threat.JapanRelevance)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s (%s)", srcLabel, threat.Item.SourceType, threat.Item.SourceName)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", vicLabel, victims)},
-				{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", actLabel, actors)},
-			},
+			"type":   "section",
+			"fields": metaFields,
 		},
 	}
 

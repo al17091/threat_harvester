@@ -149,24 +149,12 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		impact = strings.TrimSpace(out.ImpactAnalysisJa)
 	}
 
-	actions := out.RecommendedActions
-	if len(actions) == 0 {
-		actions = out.RecommendedActionsJa
-	}
-
-	// Deterministic CVE extraction merged with LLM output
+	// Deterministic CVE extraction merged with LLM output, sanitized against prompt placeholders
 	cves := models.ExtractCVEs(item.Title, item.Summary, item.RawContent, item.URL)
 	if len(out.CVEs) > 0 {
 		cves = append(cves, models.ExtractCVEs(out.CVEs...)...)
 	}
-	seenCVE := make(map[string]bool)
-	var uniqueCVEs []string
-	for _, c := range cves {
-		if !seenCVE[c] {
-			seenCVE[c] = true
-			uniqueCVEs = append(uniqueCVEs, c)
-		}
-	}
+	uniqueCVEs := models.SanitizeHallucinatedCVEs(item, cves)
 
 	// Affected products from LLM merged with heuristic detection
 	var affectedProducts []string
@@ -211,8 +199,8 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
 		AffectedProducts:     affectedProducts,
-		RecommendedActions:   actions,
-		RecommendedActionsJa: out.RecommendedActionsJa,
+		RecommendedActions:   nil,
+		RecommendedActionsJa: nil,
 		AnalyzedAt:           time.Now().UTC(),
 	}
 }
@@ -266,32 +254,31 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 
 	metaJSON, _ := json.Marshal(item.Metadata)
 	prompt := fmt.Sprintf(`
-あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
-以下の脅威情報の原文データ（記事本文やリーク情報）を精読して詳細に分析し、特に「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+あなたは日本を拠点とするサイバー脅威インテリジェンス（CTI）アナリストです。
+以下の脅威情報の原文データを精読し、客観的な事実（ファクト）のみを抽出・構造化してください。
 
-# 評価基準
+# 評価基準（厳守）
 1. japan_relevance (日本への関連性):
-   - "Direct": 被害対象が日本企業、日本の官公庁・自治体、国内組織、または日本特有のサプライチェーン。
-   - "Indirect": 世界規模の大規模攻撃（日本でも普及している製品・OSの悪用中ゼロデイ、グローバルクラウド障害等）。
-   - "None": 日本国内への直接的・間接的な関連性がほぼ見られない事象。
+   - "Direct": 具体的な日本企業・日本の官公庁・自治体・国内組織が実際の被害対象となっている事案、またはJPCERT/CC・IPA・JVNによる公式発信。（※海外製品・海外組織の事案は、日本語メディアの記事であっても "Indirect" または "None" とすること）
+   - "Indirect": 日本国内の特定被害組織は確認されていないが、日本でも利用されているソフトウェア・OSの脆弱性やグローバルな攻撃キャンペーン。
+   - "None": 日本国内との直接的・間接的な関連性が見られない海外ローカル事象。
 
-2. severity (重要度):
-   - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
-   - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
-   - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
-   - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
-   - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
+2. severity (重要度 - 上方バイアス厳禁):
+   - 【絶対ルール1】japan_relevance が "Direct" 以外（"Indirect" または "None"）の場合、"Critical" を付与することは絶対に禁止（最大でも "High" まで）。
+   - 【絶対ルール2】具体的な被害組織を伴わない一般的な注意喚起（JPCERT/CC・IPAの注意喚起を含む）、週報・まとめ記事、FAQ、動向レポートは最大でも "Medium" までとすること。
+   - "Critical": japan_relevance が "Direct" であり、かつ日本国内の特定組織における深刻な実被害（ランサムウェア感染・大規模情報漏洩・重要システム停止・ゼロデイ悪用による侵害）が確認された事案のみ。
+   - "High": 国内組織での不正アクセス・情報漏洩事案、ランサムウェアDLSへの新規掲載、または悪用確認済み（In-the-wild）/PoC公開済みの深刻な脆弱性（グローバル事象を含む）。
+   - "Medium": JPCERT/IPA等の注意喚起、週報・まとめ記事、DoSのみの脆弱性、影響が限定的なインシデント。
+   - "Low": 悪用やPoCが確認されていない定例のセキュリティパッチ公開、マイナーなバグ修正、技術調査・コラム。
+   - "Info": 脅威・脆弱性・侵害と直接関係のない新サービス・機能リリース告知、企業PR、マーケティング情報。
 
-# 判定上の重要注意事項（見落とし・情報欠落の防止）
-- 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
-- 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
-- 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
+# 事実記載ルール（説教・対策アドバイスの完全禁止）
+- summary / summary_ja および impact_analysis / impact_analysis_ja には、原文で確認された【客観的な事実のみ】（誰が被害を受けたか、確認された被害規模・漏洩件数・漏洩項目、侵入経路・攻撃手口、悪用CVE、対象製品および影響バージョン範囲）を簡潔に記述してください。
+- 「パッチを適用すべき」「多要素認証（MFA）やIAMの強化が必要」「不審なメールに注意」「従業員教育を実施すべき」といった一般的な対策アドバイス・推奨アクション・教訓・説教的な表現は【一切記述しないでください】。
+- CVE識別子（cves）は原文テキストに明記されているもののみを抽出し、記載がない場合は必ず空配列 [] としてください（例示番号の捏造厳禁）。
 - 【重要】脅威アクター（threat_actors）の厳格な抽出ルール:
-  - 対象のタイトルや原文本文データ中に、攻撃を行った具体的なグループ名・脅威アクター名（例: APTグループ名、ランサムウェア犯罪組織名など）が【直接かつ明示的に記載されている場合のみ】抽出してください。
-  - 原文に具体的なアクター名・グループ名の直接の記載がない場合は、【必ず空配列 []】にしてください。
-  - 原文に明記されていないアクター名を、文脈からの推測・連想・一般的な知識に基づいて補完・付与することは【絶対に禁止】です。
-  - 「中国系APT」「国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現やカテゴリ名は除外し、特定グループ名が明記されていない場合は空配列 [] としてください。
-  - 原文中に具体的なグループ名が固有言語（英語、中国語等）で明記されている場合は、原文表記のまま抽出してください。
+  - タイトルや原文本文中に具体的な攻撃グループ名・脅威アクター名が【直接かつ明示的に記載されている場合のみ】抽出してください。記載がない場合は必ず空配列 [] にしてください。
+  - 文脈からの推測や、「中国系APT」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の一般表現の抽出は絶対禁止です。
 
 # 対象インシデント情報
 ソース種別: %s
@@ -301,24 +288,22 @@ URL: %s
 原文本文データ: %s
 付加情報: %s
 
-# 出力形式 (必ず以下のJSONフォーマットのみを出力してください。title, summary, impact_analysis, recommended_actions は必ずプロフェッショナルな英語で記述してください)
+# 出力形式 (必ず以下のJSONフォーマットのみを出力してください。title, summary, impact_analysis はプロフェッショナルな英語で記述してください)
 {
     "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
     "japan_relevance": "Direct" | "Indirect" | "None",
-    "title": "Concise and accurate English incident title",
-    "summary": "Technical background and victim impact summary in English (2-3 sentences)",
-    "impact_analysis": "Concrete evaluation of threat impact and risks in English",
-    "recommended_actions": ["Recommended initial defensive and mitigation steps in English"],
-    "title_ja": "日本語での的確で簡潔なインシデント名",
-    "summary_ja": "技術的背景と被害状況の日本語要約",
-    "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
-    "victim_orgs": ["Identified victim organization names"],
+    "title": "Concise factual English incident title",
+    "summary": "Objective factual summary in English (victim, attack method, compromised systems/data, affected product/versions; NO security advice)",
+    "impact_analysis": "Confirmed scope of damage, affected versions, or technical exploitability facts in English (NO recommendations or preaching)",
+    "title_ja": "日本語での的確で簡潔な事実ベースのインシデント名",
+    "summary_ja": "確認された事実（被害対象・手口・対象製品/バージョン等）の日本語要約（対策助言は書かないこと）",
+    "impact_analysis_ja": "確認された被害規模・漏洩件数・影響範囲の客観的事実（推測や対策の説教は書かないこと）",
+    "victim_orgs": [],
     "threat_actors": [],
     "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
-    "cves": ["CVE identifiers e.g. CVE-2026-88771"],
-    "affected_products": ["Affected product/software names e.g. FortiMail, NetScaler ADC, WordPress"],
-    "recommended_actions_ja": ["推奨される初動対応・防御策"]
+    "cves": [],
+    "affected_products": []
 }
 `, item.SourceType, item.SourceName, item.Title, item.URL, contentToAnalyze, string(metaJSON))
 
@@ -437,56 +422,51 @@ func (a *GeminiThreatAnalyzer) AnalyzeBatch(ctx context.Context, items []models.
 		return a.fallbackSequential(ctx, items)
 	}
 
-	prompt := fmt.Sprintf(`あなたは日本を拠点とする最高峰のサイバー脅威インテリジェンス（CTI）アナリストです。
-以下の複数の脅威情報（計 %d 件）の原文データ（"content" フィールドの元記事本文・リーク詳細）を精読して個別に分析し、各インシデントについて「日本国内の組織・企業・政府・インフラへの影響」を最重要視して評価してください。
+	prompt := fmt.Sprintf(`あなたは日本を拠点とするサイバー脅威インテリジェンス（CTI）アナリストです。
+以下の複数の脅威情報（計 %d 件）の原文データ（"content" フィールド）を精読して個別に分析し、客観的な事実（ファクト）のみを抽出・構造化してください。
 
-# 評価基準
+# 評価基準（厳守）
 1. japan_relevance (日本への関連性):
-   - "Direct": 被害対象が日本企業、日本の官公庁・自治体、国内組織、または日本特有のサプライチェーン。
-   - "Indirect": 世界規模の大規模攻撃（日本でも普及している製品・OSの悪用中ゼロデイ、グローバルクラウド障害等）。
-   - "None": 日本国内への直接的・間接的な関連性がほぼ見られない事象。
+   - "Direct": 具体的な日本企業・日本の官公庁・自治体・国内組織が実際の被害対象となっている事案、またはJPCERT/CC・IPA・JVNによる公式発信。（※海外製品・海外組織の事案は、日本語メディアの記事であっても "Indirect" または "None" とすること）
+   - "Indirect": 日本国内の特定被害組織は確認されていないが、日本でも利用されているソフトウェア・OSの脆弱性やグローバルな攻撃キャンペーン。
+   - "None": 日本国内との直接的・間接的な関連性が見られない海外ローカル事象。
 
-2. severity (重要度):
-   - "Critical": 悪用確認済みのゼロデイ、国内主要インフラ停止、大規模サプライチェーン侵害、日本大手組織へのランサムウェア・データ破綻。
-   - "High": PoC公開済み深刻脆弱性、国内組織の情報漏洩発表、ランサムウェアDLSへの新規掲載。
-   - "Medium": 通常のセキュリティアップデート、注意喚起、影響が限定的なインシデント。
-   - "Low": マイナーなバグ修正、実害のない技術調査、セキュリティ啓蒙・コラム。
-   - "Info": 新サービス・新機能のリリース告知、製品発表・提供開始、企業PR、マーケティング、脅威・侵害・脆弱性と直接関係のない情報。
+2. severity (重要度 - 上方バイアス厳禁):
+   - 【絶対ルール1】japan_relevance が "Direct" 以外（"Indirect" または "None"）の場合、"Critical" を付与することは絶対に禁止（最大でも "High" まで）。
+   - 【絶対ルール2】具体的な被害組織を伴わない一般的な注意喚起（JPCERT/CC・IPAの注意喚起を含む）、週報・まとめ記事、FAQ、動向レポートは最大でも "Medium" までとすること。
+   - "Critical": japan_relevance が "Direct" であり、かつ日本国内の特定組織における深刻な実被害（ランサムウェア感染・大規模情報漏洩・重要システム停止・ゼロデイ悪用による侵害）が確認された事案のみ。
+   - "High": 国内組織での不正アクセス・情報漏洩事案、ランサムウェアDLSへの新規掲載、または悪用確認済み（In-the-wild）/PoC公開済みの深刻な脆弱性（グローバル事象を含む）。
+   - "Medium": JPCERT/IPA等の注意喚起、週報・まとめ記事、DoSのみの脆弱性、影響が限定的なインシデント。
+   - "Low": 悪用やPoCが確認されていない定例のセキュリティパッチ公開、マイナーなバグ修正、技術調査・コラム。
+   - "Info": 脅威・脆弱性・侵害と直接関係のない新サービス・機能リリース告知、企業PR、マーケティング情報。
 
-# 判定上の重要注意事項（見落とし・情報欠落の防止）
-- 「新機能」「製品アップデート」「サービス開始」「リリース」「提供開始」等の単語が含まれる記事であっても、その新機能や製品に関する脆弱性、攻撃・悪用、データ侵害、不正アクセス、セキュリティリスクに言及している場合は、決して「Info」に分類せず、脅威の実態に応じた適切な重要度（Critical / High / Medium / Low）および attack_type（Vulnerability, Zero-day, Data Breach 等）を設定してください。
-- 脅威・脆弱性・侵害・セキュリティリスクに一切触れていない単なる機能紹介・PR・マーケティング告知のみを「Info」と判定してください。
-- 原文本文データに含まれる被害組織名、攻撃グループ名、影響を受ける製品および具体的なバージョン範囲、CVE識別子、推奨対処法を漏れなく抽出してください。
-- 【重要】脅威アクター（threat_actors）の厳格な抽出ルール:
-  - 対象のタイトルや原文本文データ中に、攻撃を行った具体的なグループ名・脅威アクター名（例: APTグループ名、ランサムウェア犯罪組織名など）が【直接かつ明示的に記載されている場合のみ】抽出してください。
-  - 原文に具体的なアクター名・グループ名の直接の記載がない場合は、【必ず空配列 []】にしてください。
-  - 原文に明記されていないアクター名を、文脈からの推測・連想・一般的な知識に基づいて補完・付与することは【絶対に禁止】です。
-  - 「中国系APT」「国家支援型アクター」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の抽象的・一般的な表現やカテゴリ名は除外し、特定グループ名が明記されていない場合は空配列 [] としてください。
-  - 原文中に具体的なグループ名が固有言語（英語、中国語等）で明記されている場合は、原文表記のまま抽出してください。
+# 事実記載ルール（説教・対策アドバイスの完全禁止）
+- summary / summary_ja および impact_analysis / impact_analysis_ja には、原文で確認された【客観的な事実のみ】（被害組織、確認された被害規模・漏洩件数・漏洩項目、侵入経路・攻撃手口、悪用CVE、対象製品および影響バージョン範囲）を記述してください。
+- 「パッチを適用すべき」「MFAやIAM強化が必要」「従業員教育を実施すべき」といった一般的な対策アドバイス・推奨アクション・説教的な表現は【一切記述しないでください】。
+- CVE識別子（cves）は原文テキストに明記されているもののみを抽出し、記載がない場合は空配列 [] としてください（例示番号の捏造厳禁）。
+- 【重要】脅威アクター（threat_actors）はタイトルや原文本文中に具体的なグループ名が【直接かつ明示的に記載されている場合のみ】抽出し、記載がない場合は必ず空配列 [] としてください。推測や一般表現（「ハッカー」「Cybercriminals」「中国系APT」等）は禁止です。
 
 # 対象インシデント一覧 (JSON)
 %s
 
-# 出力形式 (必ず入力の各 "index" に対応する JSON 配列のみを出力してください。title, summary, impact_analysis, recommended_actions は必ずプロフェッショナルな英語で記述してください)
+# 出力形式 (必ず入力の各 "index" に対応する JSON 配列のみを出力してください。title, summary, impact_analysis はプロフェッショナルな英語で記述してください)
 [
   {
     "index": 0,
     "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
     "japan_relevance": "Direct" | "Indirect" | "None",
-    "title": "Concise and accurate English incident title",
-    "summary": "Technical background and victim impact summary in English (2-3 sentences)",
-    "impact_analysis": "Concrete evaluation of threat impact and risks in English",
-    "recommended_actions": ["Recommended initial defensive and mitigation steps in English"],
-    "title_ja": "日本語での的確で簡潔なインシデント名",
-    "summary_ja": "技術的背景と被害状況の日本語3行以内要約",
-    "impact_analysis_ja": "日本国内への具体的な影響・脅威評価",
-    "victim_orgs": ["被害組織名（判明している場合）"],
+    "title": "Concise factual English incident title",
+    "summary": "Objective factual summary in English (NO security advice)",
+    "impact_analysis": "Confirmed scope of damage, affected versions, or exploitability facts in English (NO recommendations)",
+    "title_ja": "日本語での的確で簡潔な事実ベースのインシデント名",
+    "summary_ja": "確認された事実の日本語3行以内要約（対策助言は書かないこと）",
+    "impact_analysis_ja": "確認された被害規模・漏洩件数・影響範囲の客観的事実（対策の説教は書かないこと）",
+    "victim_orgs": [],
     "threat_actors": [],
     "threat_actor_reasons": {"ActorName": "Direct quote from source text where this actor was named"},
     "attack_type": "Ransomware" | "Data Breach" | "Zero-day" | "Supply Chain" | "DDoS" | "Phishing" | "Vulnerability" | "Service Release" | "None",
-    "cves": ["関連するCVE識別子（例: CVE-2026-88771）"],
-    "affected_products": ["影響を受ける製品・ソフトウェア名（例: FortiMail, NetScaler ADC, WordPress）"],
-    "recommended_actions_ja": ["推奨される初動対応・防御策"]
+    "cves": [],
+    "affected_products": []
   }
 ]
 `, len(items), string(itemsJSON))
@@ -1225,12 +1205,12 @@ func (a *GeminiThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	if enriched == nil {
 		return nil
 	}
-	tTitle, tSummary, tImpact, tActions, err := a.TranslateFieldsToJapanese(
+	tTitle, tSummary, tImpact, _, err := a.TranslateFieldsToJapanese(
 		ctx,
 		enriched.Title,
 		enriched.Summary,
 		enriched.ImpactAnalysis,
-		enriched.RecommendedActions,
+		nil,
 	)
 	if err != nil {
 		return err
@@ -1238,7 +1218,8 @@ func (a *GeminiThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	enriched.TitleJa = CleanChineseCTITerms(tTitle, true)
 	enriched.SummaryJa = CleanChineseCTITerms(tSummary, true)
 	enriched.ImpactAnalysisJa = CleanChineseCTITerms(tImpact, true)
-	enriched.RecommendedActionsJa = tActions
+	enriched.RecommendedActions = nil
+	enriched.RecommendedActionsJa = nil
 	return nil
 }
 

@@ -68,15 +68,18 @@ var genericVictimWords = map[string]bool{
 	"企業": true, "病院": true, "大学": true, "自治体": true, "学校": true,
 	"multiple organizations": true, "japanese enterprises": true, "not specified": true,
 	"various organizations": true, "various companies": true, "domestic companies": true,
+	"japanese companies": true, "domestic organizations": true, "japanese entities": true,
 	"各社": true, "複数社": true, "不特定": true, "未特定": true,
 }
 
 var genericVictimSubstrings = []string{
-	"multiple organization", "multiple enterprise", "multiple compan",
+	"multiple organization", "multiple enterprise", "multiple compan", "multiple domestic",
 	"global trend report", "trend report", "annual report", "survey report", "cybersecurity survey",
 	"not specified", "unspecified", "not identified", "unknown organization", "unknown victim",
 	"various organization", "various compan", "japanese enterprise", "japanese organization",
-	"domestic enterprise", "domestic compan", "国内の企業", "国内の組織", "不特定の", "複数の企業",
+	"japanese compan", "japanese entit", "domestic enterprise", "domestic compan",
+	"domestic organization", "domestic entit", "private companies", "government/municipalities",
+	"critical infrastructure", "国内の企業", "国内の組織", "不特定の", "複数の企業",
 	"複数の組織", "各企業", "複数企業", "各組織", "複数組織", "サプライチェーン", "調査レポート",
 }
 
@@ -524,21 +527,105 @@ func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool
 	return false
 }
 
+// IsJPCERTOrIPASource checks if the item originates directly from official Japanese CERT/public security advisories (JPCERT/CC, JVN, IPA, NISC).
+func IsJPCERTOrIPASource(item ThreatItem) bool {
+	uLower := strings.ToLower(strings.TrimSpace(item.URL))
+	officialDomains := []string{
+		"jpcert.or.jp", "jvn.jp", "ipa.go.jp", "nisc.go.jp", "cyber.go.jp",
+	}
+	for _, dom := range officialDomains {
+		if strings.Contains(uLower, dom) {
+			return true
+		}
+	}
+
+	sLower := strings.ToLower(strings.TrimSpace(item.SourceName))
+	if strings.Contains(sLower, "jpcert") || strings.Contains(sLower, "jvn") || strings.Contains(sLower, "情報処理推進機構") {
+		return true
+	}
+	if sLower == "ipa" || strings.HasPrefix(sLower, "ipa ") || strings.Contains(sLower, " ipa") || strings.Contains(sLower, "ipa/") {
+		return true
+	}
+	return false
+}
+
+// HasSpecificVictimOrg returns true if at least one non-generic victim organization is named.
+func HasSpecificVictimOrg(orgs []string) bool {
+	for _, org := range orgs {
+		cleaned := strings.TrimSpace(org)
+		if cleaned != "" && !IsGenericVictimOrg(cleaned) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsGeneralAdvisoryOrRoundup detects general security advisories, JPCERT/IPA alerts, weekly reports,
+// vendor FAQ bulletins, or trend/roundup articles that do NOT report a specific breached victim organization.
+// Such advisories are capped at Medium severity.
+func IsGeneralAdvisoryOrRoundup(item ThreatItem, enriched *EnrichedThreat) bool {
+	// If a specific non-generic victim organization is named, it is a concrete victim report, not a generic advisory
+	if enriched != nil && HasSpecificVictimOrg(enriched.VictimOrgs) {
+		return false
+	}
+
+	if IsJPCERTOrIPASource(item) {
+		return true
+	}
+
+	uLower := strings.ToLower(strings.TrimSpace(item.URL))
+	advisoryURLPatterns := []string{
+		"/tag/", "/search/label/", "/topic/", "/support/faq/", "/wr/",
+		"/known-exploited-vulnerabilities",
+	}
+	for _, pat := range advisoryURLPatterns {
+		if strings.Contains(uLower, pat) {
+			return true
+		}
+	}
+
+	titles := item.Title
+	if enriched != nil {
+		titles += " " + enriched.Title + " " + enriched.TitleJa
+	}
+	tLower := strings.ToLower(titles)
+
+	advisoryTitleMarkers := []string{
+		"注意喚起", "週報", "weekly report", "security advisory", "security advisories",
+		"security bulletin", "patch tuesday", "セキュリティアップデート", "アップデート公開",
+		"脆弱性対策情報", "月例セキュリティ", "動向調査", "脅威動向", "まとめ", "白書",
+		"を取り巻く現状", "振り返り", "調査レポート", "アクセスランキング",
+		"cisa adds", "kev catalog", "cisa kev",
+	}
+	for _, m := range advisoryTitleMarkers {
+		if strings.Contains(tLower, m) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // IsPureVulnerabilityAdvisory determines if an item is merely a security patch announcement,
 // routine vendor advisory, or general vulnerability disclosure without active exploitation,
 // weaponized PoC, or verified breach incident.
 func IsPureVulnerabilityAdvisory(item ThreatItem, enriched *EnrichedThreat) bool {
-	// If it's a confirmed incident type, it's not a pure advisory
+	// If it's a confirmed incident type with a specific victim or active zero-day, check carefully
 	if enriched != nil {
 		switch strings.ToLower(enriched.AttackType) {
-		case "ransomware", "data breach", "zero-day", "supply chain", "ddos", "phishing":
+		case "ransomware", "data breach", "zero-day", "ddos", "phishing":
 			return false
+		case "supply chain":
+			if HasSpecificVictimOrg(enriched.VictimOrgs) {
+				return false
+			}
 		}
 	}
 
+	// Only inspect factual source content and titles (exclude speculative ImpactAnalysis text)
 	combined := item.Title + " " + item.Summary + " " + item.RawContent
 	if enriched != nil {
-		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa + " " + enriched.ImpactAnalysis + " " + enriched.ImpactAnalysisJa
+		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa
 	}
 	lower := strings.ToLower(combined)
 
@@ -549,7 +636,6 @@ func IsPureVulnerabilityAdvisory(item ThreatItem, enriched *EnrichedThreat) bool
 		"weaponized", "proof of concept", "poc available", "exploit code released", "poc demonstrates",
 		"pocコード", "実証コード", "悪用コード",
 		"compromised", "breached", "data breach", "data leak", "stolen data", "ransomware",
-		"threat actor", "apt", "cybercrime", "unauthorized access",
 		"情報漏洩", "データ漏洩", "情報流出", "不正アクセスにより", "身代金", "ランサムウェア",
 		"被害が発生", "被害を受けた", "侵害された",
 	}
@@ -590,13 +676,17 @@ func IsPureVulnerabilityAdvisory(item ThreatItem, enriched *EnrichedThreat) bool
 
 // RefineJapanRelevance enforces strict guardrails on JapanRelevanceDirect.
 // A threat is ONLY Direct if:
-// 1. A recognized Japanese victim organization is explicitly identified, OR
-// 2. The title/summary explicitly mentions domestic Japanese impact (e.g. "国内組織", "日本企業", "国内").
-// General global enterprise product vulnerabilities (Fortinet, Cisco, etc.) without specific Japanese victims
+// 1. It originates directly from official JPCERT/CC, JVN, IPA, or NISC sources, OR
+// 2. A specific (non-generic) Japanese victim organization is explicitly identified, OR
+// 3. The source/incident title explicitly describes an attack or breach against domestic Japanese organizations.
+// General global enterprise product vulnerabilities (Fortinet, Cisco, PAN-OS, etc.) without specific Japanese victims
 // are downgraded to Indirect.
 func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanRelevance {
 	if enriched == nil {
 		return JapanRelevanceNone
+	}
+	if IsJPCERTOrIPASource(item) && enriched.JapanRelevance == JapanRelevanceDirect {
+		return JapanRelevanceDirect
 	}
 	if enriched.JapanRelevance != JapanRelevanceDirect {
 		return enriched.JapanRelevance
@@ -629,18 +719,19 @@ func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanReleva
 		return JapanRelevanceDirect
 	}
 
-	// Check if title or summary explicitly mentions domestic Japanese victim/target context
-	combined := item.Title + " " + item.Summary
-	if enriched != nil {
-		combined += " " + enriched.Title + " " + enriched.Summary + " " + enriched.TitleJa + " " + enriched.SummaryJa
-	}
+	// Check ONLY raw source title/summary and incident titles (exclude LLM-generated ImpactAnalysis/SummaryJa
+	// where generic phrases like "日本国内にも影響" on global CVEs previously caused false Direct classification).
+	combined := item.Title + " " + item.Summary + " " + enriched.Title + " " + enriched.TitleJa
 	lower := strings.ToLower(combined)
 
 	domesticIndicators := []string{
 		"国内組織", "国内企業", "日本企業", "日本組織", "国内自治体", "国内大学", "国内病院",
-		"日本の組織", "日本の企業", "日本国内", "targeting japanese", "targeting japan",
+		"国内大手", "国内メーカー", "日本の組織", "日本の企業", "日本の主要", "日本通信",
+		"日本国内で", "国内で被害", "国内で情報", "targeting japanese", "targeting japan",
+		"against japanese", "japan firms", "japanese firm", "japanese telecom",
+		"japanese manufacturer", "japanese bank", "japanese hospital", "japanese university",
 		"japanese entities", "japanese organizations", "japanese companies",
-		"jpcert", "ipa", "警察庁", "デジタル庁", "内閣サイバー", "nisc",
+		"警察庁", "デジタル庁", "内閣官房", "内閣サイバー", "個人情報保護委員会",
 	}
 	for _, di := range domesticIndicators {
 		if strings.Contains(lower, di) {
@@ -650,6 +741,101 @@ func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanReleva
 
 	// If victim is Unknown or foreign vendor, downgrade to Indirect
 	return JapanRelevanceIndirect
+}
+
+// RefineSeverity enforces deterministic severity caps aligned with Japan CTI priorities:
+// 1. Non-threat / service release items -> Info.
+// 2. Non-Direct items (Indirect / None / Unknown) -> NEVER Critical (capped at High).
+// 3. General advisories, JPCERT/IPA alerts, weekly roundups, and FAQ/tag pages without a specific victim breach -> capped at Medium.
+// 4. DoS-only vulnerabilities without RCE/breach -> capped at Medium.
+// 5. Routine patch announcements without active exploitation or PoC -> capped at Low.
+func RefineSeverity(item ThreatItem, enriched *EnrichedThreat) Severity {
+	if enriched == nil {
+		return SeverityUnknown
+	}
+	if IsServiceReleaseOrNonThreat(item, enriched) {
+		return SeverityInfo
+	}
+
+	sev := enriched.Severity
+
+	// Core invariant: non-Direct items must never be Critical
+	if enriched.JapanRelevance != JapanRelevanceDirect && sev == SeverityCritical {
+		sev = SeverityHigh
+	}
+
+	// General advisories / JPCERT-IPA alerts / roundups without a specific breached victim are capped at Medium
+	if IsGeneralAdvisoryOrRoundup(item, enriched) {
+		if sev == SeverityCritical || sev == SeverityHigh {
+			sev = SeverityMedium
+		}
+	}
+
+	// DoS-only vulnerability advisories without specific breached victims are capped at Medium
+	if !HasSpecificVictimOrg(enriched.VictimOrgs) && (sev == SeverityCritical || sev == SeverityHigh) {
+		tLower := strings.ToLower(item.Title + " " + enriched.Title + " " + enriched.TitleJa)
+		isDoS := strings.Contains(tLower, "dos脆弱性") || strings.Contains(tLower, "dos vulnerability") ||
+			strings.Contains(tLower, "denial of service") || strings.Contains(tLower, "denial-of-service") ||
+			strings.Contains(tLower, "サービス拒否") || strings.Contains(tLower, "crash ssl vpn")
+		hasRCE := strings.Contains(tLower, "rce") || strings.Contains(tLower, "remote code") ||
+			strings.Contains(tLower, "コード実行") || strings.Contains(tLower, "認証回避") ||
+			strings.Contains(tLower, "authentication bypass")
+		if isDoS && !hasRCE {
+			sev = SeverityMedium
+		}
+	}
+
+	// Pure routine vulnerability patch disclosures without active exploit/PoC/breach -> Low
+	if IsPureVulnerabilityAdvisory(item, enriched) {
+		if sev == SeverityCritical || sev == SeverityHigh {
+			sev = SeverityLow
+		}
+	}
+
+	return sev
+}
+
+var hallucinatedPlaceholderCVEs = map[string]bool{
+	"CVE-2026-9999": true,
+	"CVE-2025-9999": true,
+	"CVE-2024-9999": true,
+	"CVE-2026-0000": true,
+	"CVE-2024-0000": true,
+}
+
+// SanitizeHallucinatedCVEs strips known LLM prompt-placeholder CVEs unless they literally appear in the raw source item.
+func SanitizeHallucinatedCVEs(item ThreatItem, cves []string) []string {
+	if len(cves) == 0 {
+		return nil
+	}
+	rawUpper := strings.ToUpper(item.Title + " " + item.Summary + " " + item.RawContent + " " + item.URL)
+	seen := make(map[string]bool)
+	var clean []string
+	for _, c := range cves {
+		norm := strings.ToUpper(strings.TrimSpace(c))
+		if norm == "" || seen[norm] {
+			continue
+		}
+		if hallucinatedPlaceholderCVEs[norm] && !strings.Contains(rawUpper, norm) {
+			continue
+		}
+		seen[norm] = true
+		clean = append(clean, norm)
+	}
+	return clean
+}
+
+// NormalizeEnrichedThreat deterministically enforces CVE sanitization, removes preachy recommended actions,
+// and applies JapanRelevance and Severity guardrails without any LLM calls.
+func NormalizeEnrichedThreat(item ThreatItem, enriched *EnrichedThreat) {
+	if enriched == nil {
+		return
+	}
+	enriched.CVEs = SanitizeHallucinatedCVEs(item, enriched.CVEs)
+	enriched.RecommendedActions = nil
+	enriched.RecommendedActionsJa = nil
+	enriched.JapanRelevance = RefineJapanRelevance(item, enriched)
+	enriched.Severity = RefineSeverity(item, enriched)
 }
 
 // HigherSeverity returns the higher of two severities.

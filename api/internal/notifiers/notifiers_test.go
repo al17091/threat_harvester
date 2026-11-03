@@ -29,11 +29,12 @@ func sampleThreat(severity models.Severity, relevance models.JapanRelevance) *mo
 		SummaryJa:          "検知されたテスト脅威です。",
 		Severity:           severity,
 		JapanRelevance:     relevance,
-		VictimOrgs:         []string{"Target Corp Japan"},
-		ThreatActors:       []string{"APT99"},
-		ImpactAnalysis:     "Critical impact on production systems.",
-		RecommendedActions: []string{"Isolate affected network immediately."},
-		AnalyzedAt:         time.Now(),
+		VictimOrgs:       []string{"Target Corp Japan"},
+		ThreatActors:     []string{"APT99"},
+		CVEs:             []string{"CVE-2026-12345"},
+		AffectedProducts: []string{"Example Gateway 2.1"},
+		ImpactAnalysis:   "Confirmed exfiltration of 50,000 customer records.",
+		AnalyzedAt:       time.Now(),
 	}
 }
 

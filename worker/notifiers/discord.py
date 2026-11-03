@@ -59,11 +59,7 @@ class DiscordNotifier:
             fields.append({"name": "脅威グループ", "value": ", ".join(threat.threat_actors), "inline": True})
 
         if threat.impact_analysis_ja:
-            fields.append({"name": "日本への影響分析", "value": threat.impact_analysis_ja[:1000], "inline": False})
-
-        if threat.recommended_actions_ja:
-            actions = "\n".join([f"• {a}" for a in threat.recommended_actions_ja[:5]])
-            fields.append({"name": "推奨対策", "value": actions[:1000], "inline": False})
+            fields.append({"name": "確認された被害・影響範囲", "value": threat.impact_analysis_ja[:1000], "inline": False})
 
         if threat.item.url:
             fields.append({"name": "参照元リンク", "value": f"[詳細を見る]({threat.item.url})", "inline": False})

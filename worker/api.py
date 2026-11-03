@@ -292,7 +292,6 @@ async def trigger_test_notification():
         impact_analysis_ja="通知システムの正常稼働を確認しました。",
         victim_orgs=["テスト対象企業"],
         threat_actors=["Simulated Adversary"],
-        recommended_actions_ja=["本通知が受信できたことを確認してください。"],
     )
 
     notifier = NotificationManager()
@@ -320,7 +319,6 @@ async def trigger_test_notion():
         impact_analysis_ja="データベースへの書き込み権限とプロパティ構成を確認中。",
         victim_orgs=["検証用企業"],
         threat_actors=["Test Actor"],
-        recommended_actions_ja=["Notionデータベースに本ページが作成されたことを確認する。"],
     )
 
     reporter = NotionReporter()

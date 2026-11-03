@@ -55,7 +55,6 @@ def test_notion_reporter_mock(monkeypatch):
         victim_orgs=["被害企業A"],
         threat_actors=["LockBit 3.0"],
         attack_type="Ransomware",
-        recommended_actions_ja=["ネットワーク隔離"],
     )
 
     result = reporter.create_page(enriched)
