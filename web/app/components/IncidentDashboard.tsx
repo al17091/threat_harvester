@@ -329,23 +329,68 @@ const INVALID_ACTOR_SUBSTRINGS = [
   "darknet army", "darknetarmy",
 ];
 
+export function normalizeDisplaySeverity(sev?: string | null): string {
+  const s = (sev || "").trim();
+  if (s === "Critical" || s === "High" || s === "Medium" || s === "Low" || s === "Informational") {
+    return s;
+  }
+  return "Informational";
+}
+
+const KNOWN_CYBERATTACK_GROUPS = new Set([
+  "qilin", "n0n", "akira", "safepay", "mirrorface", "blacktech", "lockbit", "lockbit3", "lockbit 3.0",
+  "cl0p", "clop", "vexy", "inc ransom", "the gentlemen", "thegentlemen", "netrunner", "settra",
+  "silent ransom group", "silentransomgroup", "deadlock", "gunra", "killsec", "aur0ra", "ailock",
+  "stormous", "ransomexx", "ransomhub", "ransomhouse", "ragnar locker", "ragnarlocker", "shinyhunters",
+  "scattered spider", "black basta", "blackbasta", "blackcat", "alphv", "blacksuit", "blackmatter",
+  "bianlian", "dragonforce", "hunters international", "medusa", "everest", "8base", "interlock",
+  "rhysida", "hellcat", "funksec", "brain cipher", "sarcoma", "citrus", "panzer", "lazarus",
+  "lazarus group", "kimsuky", "andariel", "bluenoroff", "scarcruft", "turla", "sandworm", "gamaredon",
+  "muddywater", "oilrig", "menupass", "volt typhoon", "salt typhoon", "flax typhoon", "silk typhoon",
+  "earth kasha", "earth hundun", "mustang panda", "stone panda", "noname057(16)", "killnet",
+]);
+
 const INVALID_ACTOR_EXACT = new Set([
   "unknown", "unspecified", "unidentified", "unnamed", "none", "n/a",
   "hackers", "hacker", "cybercriminals", "cybercriminal", "attackers", "attacker", "adversary", "adversaries",
   "automated attack tools", "unauthorized access perpetrators",
   "third-party external server provider", "microsoft (for publishing updates)",
-  "chaotic eclipse", "nightmare eclipse", "black kite", "darknet army", "darknetarmy",
+  "chaotic eclipse", "nightmare eclipse", "chaotic-eclipse", "nightmare-eclipse",
+  "black kite", "darknet army", "darknetarmy",
   "ghostwire",
   "world leaks", "leakeddata", "contagious interview",
   "外部攻撃者", "攻撃者", "サイバー犯罪者", "サイバー攻撃者", "ハッカー", "侵入者", "悪意のある第三者", "第三者",
   "dprk threat actors", "chinese apt", "china-nexus threat actor", "north korean state-sponsored actors",
   "北朝鮮it労働者", "dprk it workers", "none identified", "none specified", "not available",
   "黑客", "犯罪集团", "未特定", "未確認", "不明", "未知威胁行为者",
+  "geovision", "cisco", "fortinet", "ivanti", "palo alto", "citrix", "vmware", "jetbrains",
+  "tp-link", "wazuh", "malwarebytes", "semperis", "jpcert", "ipa", "nisc", "cisa", "fbi", "nsa",
 ]);
+
+function stripActorQualifiers(raw: string): string {
+  let s = raw.replace(/^[\[\]"'「」『』【】\s]+|[\[\]"'「」『』【】\s]+$/g, "");
+  const prefixes = ["apt group ", "cyber threat group ", "cyber attack group ", "threat group ", "ransomware group ", "ransomware gang ", "サイバー攻撃グループ", "aptグループ", "攻撃グループ", "ランサムウェアグループ", "ランサムウェア"];
+  const suffixes = [" ransomware leak site", " ransomware group", " ransomware gang", " ransomware", " apt group", " threat group", " threat actor", " supply chain products", "ランサムウェアグループ", "ランサムウェア", "サイバー攻撃グループ", "攻撃グループ"];
+  const low = s.toLowerCase();
+  for (const p of prefixes) {
+    if (low.startsWith(p) && s.length > p.length + 1) {
+      s = s.slice(p.length).trim();
+      break;
+    }
+  }
+  const low2 = s.toLowerCase();
+  for (const suf of suffixes) {
+    if (low2.endsWith(suf) && s.length > suf.length + 1) {
+      s = s.slice(0, s.length - suf.length).trim();
+      break;
+    }
+  }
+  return s;
+}
 
 export function isValidThreatActor(actor: string | undefined | null): boolean {
   if (!actor) return false;
-  const s = actor.trim();
+  const s = stripActorQualifiers(actor);
   if (s.length < 2 || s.length > 40) return false;
   const low = s.toLowerCase();
   if (INVALID_ACTOR_EXACT.has(low) || low.startsWith("not ") || low.startsWith("unknown")) {
@@ -362,11 +407,12 @@ export function filterValidThreatActors(actors: string[] | undefined | null): st
   const valid: string[] = [];
   const seen = new Set<string>();
   for (const a of actors) {
-    if (isValidThreatActor(a)) {
-      const low = a.trim().toLowerCase();
+    const cleaned = stripActorQualifiers(a);
+    if (isValidThreatActor(cleaned)) {
+      const low = cleaned.toLowerCase();
       if (!seen.has(low)) {
         seen.add(low);
-        valid.push(a.trim());
+        valid.push(cleaned);
       }
     }
   }
@@ -385,6 +431,7 @@ const INVALID_VICTIM_EXACT = new Set([
   "multiple organizations", "japanese enterprises", "not specified",
   "various organizations", "various companies", "domestic companies",
   "japanese companies", "domestic organizations", "japanese entities",
+  "breachforums", "darknet army",
 ]);
 
 const INVALID_VICTIM_SUBSTRINGS = [
@@ -400,14 +447,34 @@ const INVALID_VICTIM_SUBSTRINGS = [
   "複数の組織", "各企業", "複数企業", "各組織", "複数組織", "調査レポート",
   "未具体", "未指定", "未提及", "未特定", "未公開企業", "特定なし", "指定なし",
   "導入企業", "導入組織", "利用する日本の組織", "利用する日本の企業", "利用する組織", "利用する企業", "利用組織", "利用企業",
+  "ransomware group", "ransomware gang", "ransomware leak", "leak site", "ransomware victims",
+  "apt group", "threat group", "threat actor",
 ];
+
+function sanitizeVictimOrgDisplay(org: string): string {
+  let s = org.replace(/^[\[\]"'\s]+|[\[\]"'\s]+$/g, "");
+  for (const sep of [" - ", " – ", " — "]) {
+    const idx = s.lastIndexOf(sep);
+    if (idx > 0) {
+      const tail = s.slice(idx + sep.length).trim().toLowerCase();
+      if (tail === "ransomware.live" || tail === "ransomlook" || KNOWN_CYBERATTACK_GROUPS.has(tail)) {
+        s = s.slice(0, idx).trim();
+      }
+    }
+  }
+  return s;
+}
 
 export function isValidVictimOrg(org: string | undefined | null): boolean {
   if (!org) return false;
-  const s = org.replace(/^[\[\]"'\s]+|[\[\]"'\s]+$/g, "");
+  const s = sanitizeVictimOrgDisplay(org);
   if (s.length < 2) return false;
   const low = s.toLowerCase();
   if (
+    low.includes("***") ||
+    low.includes("...") ||
+    KNOWN_CYBERATTACK_GROUPS.has(low) ||
+    KNOWN_CYBERATTACK_GROUPS.has(stripActorQualifiers(s).toLowerCase()) ||
     INVALID_VICTIM_EXACT.has(low) ||
     low.startsWith("multiple ") ||
     low.startsWith("various ") ||
@@ -415,6 +482,7 @@ export function isValidVictimOrg(org: string | undefined | null): boolean {
     low.startsWith("unknown") ||
     low.startsWith("unspecified") ||
     low.startsWith("no specific") ||
+    low.startsWith("approximately ") ||
     low.endsWith(" users") ||
     low.endsWith(" customers") ||
     low.includes(" users (") ||
@@ -434,7 +502,7 @@ export function filterValidVictimOrgs(orgs: (string | undefined | null)[] | unde
   const seen = new Set<string>();
   for (const o of orgs) {
     if (!o) continue;
-    const cleaned = o.replace(/^[\[\]"'\s]+|[\[\]"'\s]+$/g, "");
+    const cleaned = sanitizeVictimOrgDisplay(o);
     if (isValidVictimOrg(cleaned)) {
       const low = cleaned.toLowerCase();
       if (!seen.has(low)) {
@@ -444,6 +512,41 @@ export function filterValidVictimOrgs(orgs: (string | undefined | null)[] | unde
     }
   }
   return valid;
+}
+
+export function isValidAffectedProduct(prod: string | undefined | null): boolean {
+  if (!prod) return false;
+  const s = prod.trim();
+  if (s.length < 2) return false;
+  const low = s.toLowerCase();
+  if (
+    low === "unknown" ||
+    low === "unspecified" ||
+    low === "not specified" ||
+    low === "none" ||
+    low === "n/a" ||
+    low === "未特定" ||
+    low === "不明" ||
+    low === "特定なし" ||
+    low.startsWith("not specified") ||
+    low.startsWith("unspecified") ||
+    low.startsWith("unknown") ||
+    low.startsWith("various ") ||
+    low.startsWith("multiple ") ||
+    low.startsWith("affected products") ||
+    low.startsWith("enterprise software and systems") ||
+    low.startsWith("open-source ransomware") ||
+    low.startsWith("ransomware ") ||
+    low.endsWith(" ransomware") ||
+    low.endsWith(" ransomware group") ||
+    low.endsWith(" apt group") ||
+    low.endsWith(" supply chain products") ||
+    KNOWN_CYBERATTACK_GROUPS.has(low) ||
+    KNOWN_CYBERATTACK_GROUPS.has(stripActorQualifiers(s).toLowerCase())
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export interface IncidentDashboardProps {
@@ -640,7 +743,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
     const actors = target.threat_actors || target.enriched_parsed?.threat_actors || [];
     setEditActors([...actors]);
-    setEditSeverity(target.severity || "Unknown");
+    setEditSeverity(normalizeDisplaySeverity(target.severity));
     setEditJapanRel(target.japan_relevance || "Unknown");
     setEditAttackType(target.attack_type || target.enriched_parsed?.attack_type || "");
     const rawEditVictim = target.victim_org || target.normalized_victim_org || "";
@@ -1956,7 +2059,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   <option value="High">High</option>
                   <option value="Medium">Medium</option>
                   <option value="Low">Low</option>
-                  <option value="Info">Info</option>
+                  <option value="Informational">Informational</option>
                 </select>
 
                 <select
@@ -2083,20 +2186,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       {/* Severity Badge */}
                       <span
                         className={`px-2 py-0.5 rounded text-xs font-semibold font-mono ${
-                          item.severity === "Critical"
+                          normalizeDisplaySeverity(item.severity) === "Critical"
                             ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                            : item.severity === "High"
+                            : normalizeDisplaySeverity(item.severity) === "High"
                             ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                            : item.severity === "Medium"
+                            : normalizeDisplaySeverity(item.severity) === "Medium"
                             ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
-                            : item.severity === "Low"
+                            : normalizeDisplaySeverity(item.severity) === "Low"
                             ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                            : item.severity === "Info"
-                            ? "bg-slate-800 text-slate-300 border border-slate-700"
-                            : "bg-slate-800 text-slate-400"
+                            : "bg-slate-800 text-slate-300 border border-slate-700"
                         }`}
                       >
-                        {item.severity || "Unknown"}
+                        {normalizeDisplaySeverity(item.severity)}
                       </span>
 
                       {/* Japan Relevancy Badge */}
@@ -2191,12 +2292,20 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="flex items-center space-x-1 ml-2">
                           <span className="text-slate-500">{currentLang === "ja" ? "アクター:" : "Actor:"}</span>
                           {validActors.map((actor) => (
-                            <span
+                            <button
+                              type="button"
                               key={actor}
-                              className="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800 font-mono"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedActorFilter(actor);
+                                setSelectedVictimFilter("");
+                                setSearch(actor);
+                              }}
+                              title={currentLang === "ja" ? `アクター「${actor}」で絞り込む` : `Filter by actor ${actor}`}
+                              className="px-1.5 py-0.5 rounded bg-purple-950/60 hover:bg-purple-900/70 text-purple-300 border border-purple-800 hover:border-purple-600 font-mono transition"
                             >
                               {actor}
-                            </span>
+                            </button>
                           ))}
                         </div>
                       );
@@ -2212,10 +2321,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                           : item.affected_product || item.enriched_parsed?.affected_products?.[0];
                       const cleanP = rawP?.trim() || "";
                       if (
-                        !cleanP ||
-                        cleanP.toLowerCase() === "unknown" ||
-                        cleanP.toLowerCase() === "none" ||
-                        cleanP.toLowerCase() === "n/a" ||
+                        !isValidAffectedProduct(cleanP) ||
                         (currentLang === "en" && containsJapanese(cleanP))
                       ) {
                         return null;
@@ -3514,20 +3620,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 <div className="flex items-center space-x-2 mb-2">
                   <span
                     className={`px-2 py-0.5 rounded text-xs font-semibold font-mono ${
-                      selectedIncident.severity === "Critical"
+                      normalizeDisplaySeverity(selectedIncident.severity) === "Critical"
                         ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                        : selectedIncident.severity === "High"
+                        : normalizeDisplaySeverity(selectedIncident.severity) === "High"
                         ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                        : selectedIncident.severity === "Medium"
+                        : normalizeDisplaySeverity(selectedIncident.severity) === "Medium"
                         ? "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30"
-                        : selectedIncident.severity === "Low"
+                        : normalizeDisplaySeverity(selectedIncident.severity) === "Low"
                         ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                        : selectedIncident.severity === "Info"
-                        ? "bg-slate-800 text-slate-300 border border-slate-700"
-                        : "bg-slate-800 text-slate-400"
+                        : "bg-slate-800 text-slate-300 border border-slate-700"
                     }`}
                   >
-                    {selectedIncident.severity || "Unknown"}
+                    {normalizeDisplaySeverity(selectedIncident.severity)}
                   </span>
                   {selectedIncident.japan_relevance === "Direct" && (
                     <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -3610,8 +3714,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <option value="High">High</option>
                         <option value="Medium">Medium</option>
                         <option value="Low">Low</option>
-                        <option value="Info">Info</option>
-                        <option value="Unknown">Unknown</option>
+                        <option value="Informational">Informational</option>
                       </select>
                     </div>
 
@@ -3803,8 +3906,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 const prodSeen = new Set<string>();
                 const cleanProds = rawProds.filter((p) => {
                   const trimmed = p.trim();
+                  if (!isValidAffectedProduct(trimmed)) return false;
                   const low = trimmed.toLowerCase();
-                  if (!trimmed || low === "unknown" || low === "none" || low === "n/a") return false;
                   if (prodSeen.has(low)) return false;
                   prodSeen.add(low);
                   return true;

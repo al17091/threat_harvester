@@ -25,7 +25,7 @@ class GeminiThreatAnalyzer:
             return EnrichedThreat(
                 item_id=item.id,
                 item=item,
-                severity=Severity.UNKNOWN,
+                severity=Severity.INFORMATIONAL,
                 japan_relevance=JapanRelevance.UNKNOWN,
                 title_ja=item.title,
                 summary_ja=item.summary[:200],
@@ -52,9 +52,11 @@ class GeminiThreatAnalyzer:
            - "High": 国内組織での情報漏洩事案、ランサムウェアDLSへの新規掲載、または悪用確認済み/PoC公開済みの深刻脆弱性。
            - "Medium": JPCERT/IPA等の注意喚起、週報、通常のセキュリティアドバイザリ、影響が限定的なインシデント。
            - "Low": 悪用やPoCが確認されていない修正パッチ公開、マイナーなバグ修正、コラム。
+           - "Informational": 脅威アクタープロファイルや一般的な参考情報。
 
         # 事実記載ルール（説教・対策アドバイスの完全禁止）
         - summary_ja および impact_analysis_ja には確認された客観的事実のみを記述し、「MFA導入」「パッチ適用」等の一般的な対策助言は一切書かないでください。
+        - サイバー攻撃グループ・APTグループ・ランサムウェア集団の名称が明記されている場合は必ず threat_actors に抽出し、victim_orgs には入れないでください。
 
         # 対象インシデント情報
         ソース種別: {item.source_type.value}
@@ -66,7 +68,7 @@ class GeminiThreatAnalyzer:
 
         # 出力形式 (必ず以下のJSONフォーマットのみを出力してください)
         {{
-            "severity": "Critical" | "High" | "Medium" | "Low",
+            "severity": "Critical" | "High" | "Medium" | "Low" | "Informational",
             "japan_relevance": "Direct" | "Indirect" | "None",
             "title_ja": "日本語での的確で簡潔な事実ベースのインシデント名",
             "summary_ja": "確認された事実（被害対象・手口・対象製品等）の日本語3行以内要約",
@@ -88,11 +90,12 @@ class GeminiThreatAnalyzer:
 
             data = json.loads(response.text)
 
-            # Map enums safely
+            # Map enums safely (never return Unknown severity)
+            raw_sev = data.get("severity")
             severity = (
-                Severity(data.get("severity", Severity.UNKNOWN.value))
-                if data.get("severity") in [e.value for e in Severity]
-                else Severity.UNKNOWN
+                Severity(raw_sev)
+                if raw_sev in [Severity.CRITICAL.value, Severity.HIGH.value, Severity.MEDIUM.value, Severity.LOW.value, Severity.INFORMATIONAL.value]
+                else Severity.INFORMATIONAL
             )
             japan_rel = (
                 JapanRelevance(data.get("japan_relevance", JapanRelevance.UNKNOWN.value))

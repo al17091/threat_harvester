@@ -196,7 +196,7 @@ func ParseActionsFlexible(raw json.RawMessage) []string {
 func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *models.EnrichedThreat {
 	severity := models.Severity(out.Severity)
 	switch severity {
-	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow, models.SeverityInfo:
+	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow, models.SeverityInformational, models.SeverityInfo:
 	default:
 		severity = models.SeverityUnknown
 	}
@@ -208,6 +208,8 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 			if attackType == "" {
 				attackType = "Service Release"
 			}
+		} else {
+			severity = models.SeverityInformational
 		}
 	}
 
@@ -302,14 +304,16 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 	impactJa = CleanChineseCTITerms(impactJa, true)
 
 	metaBytes, _ := json.Marshal(item.Metadata)
-	groundedActors := models.FilterGroundedThreatActors(
-		out.ThreatActors,
-		item.Title,
-		item.Summary,
-		item.RawContent,
-		item.URL,
-		string(metaBytes),
-	)
+	prelim := &models.EnrichedThreat{
+		Title:            title,
+		TitleJa:          titleJa,
+		Summary:          summary,
+		SummaryJa:        summaryJa,
+		VictimOrgs:       out.VictimOrgs,
+		ThreatActors:     out.ThreatActors,
+		AffectedProducts: out.AffectedProducts,
+	}
+	groundedActors := models.ExtractThreatActors(item, prelim, string(metaBytes))
 	actorReasons := ResolveThreatActorReasons(item, groundedActors, out.ThreatActorReasons)
 
 	return &models.EnrichedThreat{
@@ -323,12 +327,12 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		SummaryJa:            summaryJa,
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     impactJa,
-		VictimOrgs:           out.VictimOrgs,
+		VictimOrgs:           models.CleanVictimOrgs(out.VictimOrgs),
 		ThreatActors:         groundedActors,
 		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
-		AffectedProducts:     affectedProducts,
+		AffectedProducts:     models.CleanAffectedProducts(affectedProducts),
 		RecommendedActions:   nil,
 		RecommendedActionsJa: nil,
 		AnalyzedAt:           time.Now().UTC(),

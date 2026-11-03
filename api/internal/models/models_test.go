@@ -907,6 +907,97 @@ func TestCleanVictimOrgs(t *testing.T) {
 	}
 }
 
+func TestInformationalSeverityNormalization(t *testing.T) {
+	if got := NormalizeDisplaySeverity(""); got != SeverityInformational {
+		t.Errorf("expected empty severity -> Informational, got %s", got)
+	}
+	if got := NormalizeDisplaySeverity(SeverityUnknown); got != SeverityInformational {
+		t.Errorf("expected Unknown severity -> Informational, got %s", got)
+	}
+	if got := NormalizeDisplaySeverity(SeverityInfo); got != SeverityInformational {
+		t.Errorf("expected Info severity -> Informational for display, got %s", got)
+	}
+	if got := RefineSeverity(ThreatItem{Title: "MirrorFace Threat Actor Profile"}, nil); got != SeverityInformational {
+		t.Errorf("expected nil enriched -> Informational, got %s", got)
+	}
+	// Ensure PR / Service Release still returns internal SeverityInfo so it gets dropped from incidents
+	prItem := ThreatItem{Title: "新サービス提供開始のお知らせ"}
+	prEnriched := &EnrichedThreat{Severity: SeverityInfo}
+	if got := RefineSeverity(prItem, prEnriched); got != SeverityInfo {
+		t.Errorf("expected service release to retain SeverityInfo for dismissal, got %s", got)
+	}
+}
+
+func TestCyberattackGroupsExtractedAndReclassifiedAsActors(t *testing.T) {
+	// 1. Japanese quoted APT group in title with empty LLM threat_actors
+	itemUAT := ThreatItem{
+		Title:   "【セキュリティ】APTグループ「UAT-11473」がCisco SD-WAN制御基盤を侵害",
+		Summary: "Cisco Talosは高度なサイバー攻撃グループUAT-11473の活動を公表した。",
+	}
+	actorsUAT := ExtractThreatActors(itemUAT, nil)
+	if len(actorsUAT) != 1 || actorsUAT[0] != "UAT-11473" {
+		t.Fatalf("expected [UAT-11473], got %v", actorsUAT)
+	}
+
+	// 2. Ransomware group misclassified into VictimOrgs & AffectedProducts, plus vendor in ThreatActors
+	itemRoundup := ThreatItem{
+		Title:      "Monthly Ransomware Monitor: Multiple Japanese Organizations Targeted",
+		Summary:    "Qilin and RansomEXX targeted domestic companies while DeadLock ransomware expanded.",
+		SourceName: "Ransomlook Tracker (deadlock)",
+	}
+	enrichedMisclassified := &EnrichedThreat{
+		Severity:         SeverityCritical,
+		JapanRelevance:   JapanRelevanceDirect,
+		VictimOrgs:       []string{"Qilin", "RansomEXX", "Ca***ka - Ransomware.live"},
+		ThreatActors:     []string{"GeoVision", "Nightmare-Eclipse"},
+		AffectedProducts: []string{"DeadLock ransomware", "Not specified"},
+	}
+	NormalizeEnrichedThreat(itemRoundup, enrichedMisclassified)
+
+	if len(enrichedMisclassified.VictimOrgs) != 0 {
+		t.Errorf("expected misclassified ransomware groups and masked victims stripped from VictimOrgs, got %v", enrichedMisclassified.VictimOrgs)
+	}
+	if len(enrichedMisclassified.AffectedProducts) != 0 {
+		t.Errorf("expected ransomware family and 'Not specified' stripped from AffectedProducts, got %v", enrichedMisclassified.AffectedProducts)
+	}
+	actorSet := make(map[string]bool)
+	for _, a := range enrichedMisclassified.ThreatActors {
+		actorSet[a] = true
+	}
+	for _, want := range []string{"Qilin", "RansomEXX", "DeadLock"} {
+		if !actorSet[want] {
+			t.Errorf("expected %s in ThreatActors, got %v", want, enrichedMisclassified.ThreatActors)
+		}
+	}
+	if actorSet["GeoVision"] || actorSet["Nightmare-Eclipse"] {
+		t.Errorf("expected vendor/researcher excluded from ThreatActors, got %v", enrichedMisclassified.ThreatActors)
+	}
+	if enrichedMisclassified.Severity != SeverityMedium {
+		t.Errorf("expected monthly roundup without concrete victim capped at Medium, got %s", enrichedMisclassified.Severity)
+	}
+
+	// 3. Parenthetical alias ("BlackTech（Earth Hundun）") and MirrorFace advisory
+	itemBT := ThreatItem{
+		Title:   "中国を背景とするサイバー攻撃グループ「BlackTech」によるサイバー攻撃に関する注意喚起",
+		Summary: "BlackTech（Earth Hundun）の活動に関する共同注意喚起の概要",
+	}
+	actorsBT := ExtractThreatActors(itemBT, nil)
+	btSet := make(map[string]bool)
+	for _, a := range actorsBT {
+		btSet[a] = true
+	}
+	if !btSet["BlackTech"] || !btSet["Earth Hundun"] {
+		t.Errorf("expected BlackTech and Earth Hundun extracted as actors, got %v", actorsBT)
+	}
+
+	// 4. Legitimate security product ("Cisco Secure Firewall Adaptive Security Appliance", "Malwarebytes") preserved
+	cleanProds := CleanAffectedProducts([]string{"Cisco Secure Firewall Adaptive Security Appliance", "Malwarebytes", "BlackTech supply chain products"})
+	if len(cleanProds) != 2 {
+		t.Errorf("expected 2 legitimate products preserved, got %v", cleanProds)
+	}
+}
+
+
 
 
 

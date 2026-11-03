@@ -231,7 +231,9 @@ def show_command(item_id: str, db: str | None):
     click.echo(f"Source:          {data['source_type']} ({data['source_name']})")
     click.echo(f"Title:           {data['title']}")
     click.echo(f"URL:             {data.get('url') or 'N/A'}")
-    click.echo(f"Severity:        {data.get('severity') or 'Unknown'}")
+    raw_sev = data.get("severity")
+    display_sev = "Informational" if not raw_sev or raw_sev in ("Unknown", "Info") else raw_sev
+    click.echo(f"Severity:        {display_sev}")
     click.echo(f"Japan Relevance: {data.get('japan_relevance') or 'Unknown'}")
     click.echo(f"Harvested At:    {data['harvested_at']}")
     click.echo(f"Notified:        {data.get('notified_at') or 'No'}")

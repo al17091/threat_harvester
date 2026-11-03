@@ -90,12 +90,41 @@ var genericVictimSubstrings = []string{
 	"複数の組織", "各企業", "複数企業", "各組織", "複数組織", "サプライチェーン", "調査レポート",
 	"未具体", "未指定", "未提及", "未特定", "未公開企業", "特定なし", "指定なし",
 	"導入企業", "導入組織", "利用する日本の組織", "利用する日本の企業", "利用する組織", "利用する企業", "利用組織", "利用企業",
+	"ransomware group", "ransomware gang", "ransomware leak", "leak site", "ransomware victims",
+	"apt group", "threat group", "threat actor", "cybercrime group", "extortion group",
 }
 
-// IsGenericVictimOrg checks if a victim organization name is generic, unknown, or unspecified.
+// SanitizeVictimOrgName strips scraper title suffixes (e.g. "- Ransomware.live", "– SilentRansomGroup") from victim names.
+func SanitizeVictimOrgName(name string) string {
+	s := strings.Trim(strings.TrimSpace(name), "[]\"' ")
+	if s == "" {
+		return ""
+	}
+	for _, sep := range []string{" - ", " – ", " — "} {
+		if idx := strings.LastIndex(s, sep); idx > 0 {
+			tail := strings.TrimSpace(s[idx+len(sep):])
+			tailLow := strings.ToLower(tail)
+			if tailLow == "ransomware.live" || tailLow == "ransomlook" || tailLow == "ransomlook.io" || IsKnownThreatActor(tail) {
+				s = strings.TrimSpace(s[:idx])
+			}
+		}
+	}
+	return s
+}
+
+// IsGenericVictimOrg checks if a victim organization name is generic, unknown, masked, or actually a threat actor.
 func IsGenericVictimOrg(name string) bool {
-	cleaned := strings.ToLower(strings.Trim(strings.TrimSpace(name), "[]\"' "))
+	sanitized := SanitizeVictimOrgName(name)
+	cleaned := strings.ToLower(strings.Trim(strings.TrimSpace(sanitized), "[]\"' "))
 	if cleaned == "" || len([]rune(cleaned)) < 2 {
+		return true
+	}
+	// Reject redacted/masked victim placeholders such as "Ca***ka" or "A... F..."
+	if strings.Contains(cleaned, "***") || strings.Contains(cleaned, "...") {
+		return true
+	}
+	// Cyberattack groups and dark web forums are threat actors/sources, never victim organizations
+	if IsKnownThreatActor(cleaned) || cleaned == "breachforums" || cleaned == "darknet army" {
 		return true
 	}
 	if genericVictimWords[cleaned] {
@@ -106,7 +135,8 @@ func IsGenericVictimOrg(name string) bool {
 		strings.HasPrefix(cleaned, "not ") ||
 		strings.HasPrefix(cleaned, "unknown") ||
 		strings.HasPrefix(cleaned, "unspecified") ||
-		strings.HasPrefix(cleaned, "no specific") {
+		strings.HasPrefix(cleaned, "no specific") ||
+		strings.HasPrefix(cleaned, "approximately ") {
 		return true
 	}
 	if strings.HasSuffix(cleaned, " users") ||
@@ -123,12 +153,12 @@ func IsGenericVictimOrg(name string) bool {
 	return false
 }
 
-// CleanVictimOrgs strips empty, "Unknown", or generic placeholder organization names.
+// CleanVictimOrgs strips empty, "Unknown", generic placeholder, or misclassified threat actor names.
 func CleanVictimOrgs(orgs []string) []string {
 	var valid []string
 	seen := make(map[string]bool)
 	for _, o := range orgs {
-		trimmed := strings.Trim(strings.TrimSpace(o), "[]\"' ")
+		trimmed := SanitizeVictimOrgName(o)
 		if IsGenericVictimOrg(trimmed) {
 			continue
 		}
@@ -169,6 +199,7 @@ var invalidActorExact = map[string]bool{
 	"third-party external server provider": true, "microsoft (for publishing updates)": true,
 	"openai（エージェントの不正動作）": true, "chaotic eclipse (researcher)": true,
 	"nightmare eclipse (研究者)": true, "chaotic eclipse": true, "nightmare eclipse": true,
+	"chaotic-eclipse": true, "nightmare-eclipse": true,
 	"black kite": true, "darknet army": true, "darknetarmy": true,
 	"ghostwire": true,
 	"world leaks": true, "leakeddata": true, "contagious interview": true,
@@ -183,11 +214,234 @@ var invalidActorExact = map[string]bool{
 	"north korean state-sponsored actors": true,
 	"北朝鮮it労働者": true, "dprk it workers": true, "dprk it workers (北朝鮮it労働者)": true,
 	"北朝鮮it労働者 (north korean it workers)": true,
+	// Legitimate vendors, defenders, and government agencies (never threat actors)
+	"geovision": true, "cisco": true, "fortinet": true, "fortios": true, "fortimail": true,
+	"ivanti": true, "palo alto": true, "palo alto networks": true, "citrix": true, "netscaler": true,
+	"vmware": true, "jetbrains": true, "tp-link": true, "wazuh": true, "malwarebytes": true,
+	"semperis": true, "microsoft": true, "apple": true, "google": true, "oracle": true,
+	"jpcert": true, "jpcert/cc": true, "ipa": true, "nisc": true, "cisa": true, "fbi": true,
+	"nsa": true, "europol": true, "cisco talos": true, "talos": true, "mandiant": true,
+	"crowdstrike": true, "trend micro": true, "kaspersky": true, "eset": true, "cyfirma": true,
+	"ransomware": true, "apt": true, "malware": true, "botnet": true, "ransomlook": true, "ransomware.live": true,
+}
+
+// canonicalActorNames maps lowercase normalized cyberattack group names to their canonical Actor label.
+var canonicalActorNames = map[string]string{
+	"qilin":                 "Qilin",
+	"n0n":                   "N0n",
+	"akira":                 "Akira",
+	"safepay":               "SafePay",
+	"mirrorface":            "MirrorFace",
+	"blacktech":             "BlackTech",
+	"lockbit":               "LockBit",
+	"lockbit3":              "LockBit",
+	"lockbit 3.0":           "LockBit 3.0",
+	"cl0p":                  "Cl0p",
+	"clop":                  "Cl0p",
+	"vexy":                  "Vexy",
+	"inc ransom":            "INC Ransom",
+	"inc":                   "INC Ransom",
+	"the gentlemen":         "The Gentlemen",
+	"thegentlemen":          "The Gentlemen",
+	"netrunner":             "NetRunner",
+	"settra":                "Settra",
+	"silent ransom group":   "Silent Ransom Group",
+	"silentransomgroup":     "Silent Ransom Group",
+	"deadlock":              "DeadLock",
+	"gunra":                 "Gunra",
+	"killsec":               "KillSec",
+	"aur0ra":                "Aur0ra",
+	"ailock":                "AiLock",
+	"stormous":              "Stormous",
+	"ransomexx":             "RansomEXX",
+	"ransomhub":             "RansomHub",
+	"ransomhouse":           "RansomHouse",
+	"ragnar locker":         "Ragnar Locker",
+	"ragnarlocker":          "Ragnar Locker",
+	"shinyhunters":          "ShinyHunters",
+	"scattered spider":      "Scattered Spider",
+	"black basta":           "Black Basta",
+	"blackbasta":            "Black Basta",
+	"blackcat":              "BlackCat",
+	"alphv":                 "ALPHV",
+	"blacksuit":             "BlackSuit",
+	"blackmatter":           "BlackMatter",
+	"blackbyte":             "BlackByte",
+	"bianlian":              "BianLian",
+	"dragonforce":           "DragonForce",
+	"hunters international": "Hunters International",
+	"medusa":                "Medusa",
+	"everest":               "Everest",
+	"8base":                 "8Base",
+	"interlock":             "Interlock",
+	"rhysida":               "Rhysida",
+	"hellcat":               "Hellcat",
+	"funksec":               "FunkSec",
+	"brain cipher":          "Brain Cipher",
+	"sarcoma":               "Sarcoma",
+	"citrus":                "Citrus",
+	"panzer":                "Panzer",
+	"conti":                 "Conti",
+	"revil":                 "REvil",
+	"sodinokibi":            "Sodinokibi",
+	"darkside":              "DarkSide",
+	"babuk":                 "Babuk",
+	"phobos":                "Phobos",
+	"mallox":                "Mallox",
+	"makop":                 "Makop",
+	"snatch":                "Snatch",
+	"lazarus":               "Lazarus",
+	"lazarus group":         "Lazarus Group",
+	"kimsuky":               "Kimsuky",
+	"andariel":              "Andariel",
+	"bluenoroff":            "BlueNoroff",
+	"scarcruft":             "ScarCruft",
+	"turla":                 "Turla",
+	"sandworm":              "Sandworm",
+	"gamaredon":             "Gamaredon",
+	"muddywater":            "MuddyWater",
+	"oilrig":                "OilRig",
+	"menupass":              "menuPass",
+	"volt typhoon":          "Volt Typhoon",
+	"salt typhoon":          "Salt Typhoon",
+	"flax typhoon":          "Flax Typhoon",
+	"silk typhoon":          "Silk Typhoon",
+	"earth kasha":           "Earth Kasha",
+	"earth hundun":          "Earth Hundun",
+	"mustang panda":         "Mustang Panda",
+	"stone panda":           "Stone Panda",
+	"noname057(16)":         "NoName057(16)",
+	"killnet":               "Killnet",
+}
+
+// actorAliasGroundings maps canonical actor names to alternative spellings that ground them in source text.
+var actorAliasGroundings = map[string][]string{
+	"cl0p":                {"cl0p", "clop"},
+	"inc ransom":          {"inc ransom", "inc"},
+	"the gentlemen":       {"the gentlemen", "thegentlemen"},
+	"silent ransom group": {"silent ransom group", "silentransomgroup"},
+	"black basta":         {"black basta", "blackbasta"},
+	"ragnar locker":       {"ragnar locker", "ragnarlocker"},
+	"lockbit":             {"lockbit", "lockbit3"},
+}
+
+var (
+	actorCodeIDRegex      = regexp.MustCompile(`(?i)\b(APT-?\d{1,3}|UNC\d{4}|UAT-\d{4,5}|UTA\d{4}|FIN\d{1,2}|Storm-\d{4})\b`)
+	actorNamedFamilyRegex = regexp.MustCompile(`\b(Earth\s+[A-Z][a-z]{2,15}|(?:Volt|Salt|Flax|Silk|Brass|Granite)\s+Typhoon|(?:Charming|Static|Imperial)\s+Kitten|(?:Mustang|Stone|Emissary|Aquatic)\s+Panda|(?:Cozy|Fancy|Venomous)\s+Bear)\b`)
+	actorJaQuotedRegex    = regexp.MustCompile(`(?:サイバー攻撃グループ|APTグループ|攻撃グループ|脅威グループ|ハッカー集団|ランサムウェアグループ|ランサムウェア集団|ランサムウェア)\s*[「『【"']([^」』】"'\n]{2,32})[」』】"']`)
+	actorJaBareRegex      = regexp.MustCompile(`(?:サイバー攻撃グループ|APTグループ|ランサムウェアグループ)\s*([A-Za-z0-9][A-Za-z0-9._-]{1,26})`)
+	actorJaSuffixRegex    = regexp.MustCompile(`([A-Za-z0-9][A-Za-z0-9._-]{1,24})(?:ランサムウェアグループ|ランサムウェア集団|ランサムウェアによる|APTグループ)`)
+	actorEnPrefixRegex    = regexp.MustCompile(`(?i)\b(?:APT\s+Group|Cyber\s+Threat\s+Group|Cyber\s+Attack\s+Group|Threat\s+Group|Ransomware\s+Group|Ransomware\s+Gang)\s+['"“]?([A-Za-z0-9][A-Za-z0-9._-]{1,26})['"”]?`)
+	actorEnSuffixRegex    = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9._-]{1,24})\s+(?:APT\s+Group|Ransomware\s+Group|Ransomware\s+Gang|Ransomware\s+DLS|Extortion\s+Group|Threat\s+Actor)\b`)
+	actorEnHeadlineRegex  = regexp.MustCompile(`(?i)^\[?([A-Za-z0-9][A-Za-z0-9._-]{1,22})\s+Ransomware(?:\s*:|\s+Targets\b|\s+Hits\b|\s+Claims\b|\s+Dominates\b)`)
+	ransomlookSrcRegex    = regexp.MustCompile(`(?i)Ransomlook Tracker\s*\(([^)]+)\)`)
+	ransomlookURLRegex    = regexp.MustCompile(`(?i)ransomlook\.io/group/([a-z0-9._%-]+)`)
+	malpediaActorURLRegex = regexp.MustCompile(`(?i)malpedia\.caad\.fkie\.fraunhofer\.de/actor/([a-z0-9._%-]+)`)
+)
+
+// stripActorGroupQualifiers removes generic group/ransomware prefixes and suffixes around an actor's name.
+func stripActorGroupQualifiers(raw string) string {
+	s := strings.Trim(strings.TrimSpace(raw), "[]\"'「」『』【】“” ")
+	if s == "" {
+		return ""
+	}
+	prefixes := []string{
+		"cyber threat group ", "cyber attack group ", "ransomware group ", "ransomware gang ",
+		"extortion group ", "threat group ", "apt group ",
+		"サイバー攻撃グループ", "ランサムウェアグループ", "ランサムウェア集団", "攻撃グループ", "脅威グループ", "aptグループ",
+	}
+	suffixes := []string{
+		" ransomware leak site", " ransomware group", " ransomware gang", " ransomware dls", " ransomware",
+		" cyber threat group", " cyber attack group", " cybercrime group", " extortion group",
+		" threat group", " threat actor", " apt group", " supply chain products",
+		"ランサムウェアグループ", "ランサムウェア集団", "ランサムウェア", "サイバー攻撃グループ", "攻撃グループ", "脅威アクター",
+	}
+	changed := true
+	for changed {
+		changed = false
+		low := strings.ToLower(s)
+		for _, p := range prefixes {
+			if strings.HasPrefix(low, p) && len(s) > len(p)+1 {
+				s = strings.Trim(strings.TrimSpace(s[len(p):]), "[]\"'「」『』【】“” :")
+				changed = true
+				break
+			}
+		}
+		low = strings.ToLower(s)
+		for _, suf := range suffixes {
+			if strings.HasSuffix(low, suf) && len(s) > len(suf)+1 {
+				s = strings.Trim(strings.TrimSpace(s[:len(s)-len(suf)]), "[]\"'「」『』【】“” :")
+				changed = true
+				break
+			}
+		}
+	}
+	if canon, ok := canonicalActorNames[strings.ToLower(s)]; ok {
+		return canon
+	}
+	if actorCodeIDRegex.MatchString(s) && len(strings.Fields(s)) == 1 {
+		return strings.ToUpper(s)
+	}
+	return s
+}
+
+// NormalizeActorCandidates splits parenthetical aliases (e.g. "MirrorFace (Earth Kasha)") and strips group qualifiers.
+func NormalizeActorCandidates(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	normalizedParens := strings.NewReplacer("（", "(", "）", ")").Replace(trimmed)
+	var parts []string
+	if openIdx := strings.Index(normalizedParens, "("); openIdx > 0 && strings.HasSuffix(normalizedParens, ")") {
+		mainPart := strings.TrimSpace(normalizedParens[:openIdx])
+		innerPart := strings.TrimSpace(normalizedParens[openIdx+1 : len(normalizedParens)-1])
+		hasLetter := false
+		for _, r := range innerPart {
+			if unicode.IsLetter(r) {
+				hasLetter = true
+				break
+			}
+		}
+		if hasLetter {
+			parts = append(parts, mainPart, innerPart)
+		} else {
+			parts = append(parts, trimmed)
+		}
+	} else {
+		parts = append(parts, trimmed)
+	}
+
+	var out []string
+	for _, p := range parts {
+		cleaned := stripActorGroupQualifiers(p)
+		if cleaned != "" {
+			out = append(out, cleaned)
+		}
+	}
+	return out
+}
+
+// IsKnownThreatActor returns true if the input resolves to a known cyberattack group or tracking ID.
+func IsKnownThreatActor(s string) bool {
+	for _, cand := range NormalizeActorCandidates(s) {
+		low := strings.ToLower(cand)
+		if canonicalActorNames[low] != "" {
+			return true
+		}
+		if actorCodeIDRegex.MatchString(cand) && len(strings.Fields(cand)) == 1 {
+			return true
+		}
+		if actorNamedFamilyRegex.MatchString(cand) && len(strings.Fields(cand)) == 2 {
+			return true
+		}
+	}
+	return false
 }
 
 // IsValidThreatActor determines if a threat actor name is a legitimate specific entity rather than a generic or unknown disclaimer.
 func IsValidThreatActor(actor string) bool {
-	s := strings.Trim(strings.TrimSpace(actor), "[]\"' ")
+	s := stripActorGroupQualifiers(actor)
 	if s == "" || len([]rune(s)) < 2 || len(s) > 40 {
 		return false
 	}
@@ -203,42 +457,80 @@ func IsValidThreatActor(actor string) bool {
 	return true
 }
 
-// CleanThreatActors filters out generic, speculative, or 'unknown' threat actor strings.
+// CleanThreatActors normalizes cyberattack group names and filters out generic, speculative, or vendor strings.
 func CleanThreatActors(actors []string) []string {
 	var valid []string
 	seen := make(map[string]bool)
 	for _, a := range actors {
-		trimmed := strings.Trim(strings.TrimSpace(a), "[]\"' ")
-		if !IsValidThreatActor(trimmed) {
-			continue
-		}
-		low := strings.ToLower(trimmed)
-		if !seen[low] {
-			seen[low] = true
-			valid = append(valid, trimmed)
+		for _, cand := range NormalizeActorCandidates(a) {
+			if !IsValidThreatActor(cand) {
+				continue
+			}
+			low := strings.ToLower(cand)
+			if !seen[low] {
+				seen[low] = true
+				valid = append(valid, cand)
+			}
 		}
 	}
 	return valid
 }
 
-// IsActorGrounded checks whether an actor name is explicitly mentioned in any of the provided source texts.
+// IsActorGrounded checks whether an actor name (or its known spelling alias) is explicitly mentioned in source texts.
 func IsActorGrounded(actor string, texts ...string) bool {
-	cleaned := strings.Trim(strings.TrimSpace(actor), "[]\"' ")
+	cleaned := stripActorGroupQualifiers(actor)
 	if cleaned == "" || len([]rune(cleaned)) < 2 {
 		return false
 	}
 	lowActor := strings.ToLower(cleaned)
+	searchTerms := []string{lowActor}
+	if aliases, ok := actorAliasGroundings[lowActor]; ok {
+		searchTerms = aliases
+	}
 
 	for _, text := range texts {
 		t := strings.TrimSpace(text)
 		if t == "" {
 			continue
 		}
-		if strings.Contains(strings.ToLower(t), lowActor) {
-			return true
+		lowText := strings.ToLower(t)
+		for _, term := range searchTerms {
+			if len(term) <= 3 {
+				// Short actor names (e.g. "n0n", "inc") require word-boundary check to avoid matching inside normal words
+				if containsWordCaseInsensitive(lowText, term) {
+					return true
+				}
+			} else if strings.Contains(lowText, term) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+func containsWordCaseInsensitive(lowText, lowWord string) bool {
+	if lowWord == "" {
+		return false
+	}
+	start := 0
+	for {
+		idx := strings.Index(lowText[start:], lowWord)
+		if idx == -1 {
+			return false
+		}
+		pos := start + idx
+		end := pos + len(lowWord)
+		leftOK := pos == 0 || !isASCIIAlphaNum(lowText[pos-1])
+		rightOK := end == len(lowText) || !isASCIIAlphaNum(lowText[end])
+		if leftOK && rightOK {
+			return true
+		}
+		start = pos + 1
+	}
+}
+
+func isASCIIAlphaNum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 // FilterGroundedThreatActors filters out any threat actors that are not explicitly grounded in the source texts.
@@ -255,6 +547,121 @@ func FilterGroundedThreatActors(actors []string, texts ...string) []string {
 		}
 	}
 	return grounded
+}
+
+// Unambiguous cyberattack group names safe for deterministic extraction from titles and summaries.
+var unambiguousGazetteerActors = []string{
+	"mirrorface", "blacktech", "qilin", "lockbit", "safepay", "ransomhub", "ransomhouse",
+	"black basta", "blackbasta", "blackcat", "alphv", "blacksuit", "blackmatter",
+	"cl0p", "bianlian", "inc ransom", "hunters international", "dragonforce",
+	"killsec", "deadlock", "gunra", "ragnar locker", "ragnarlocker", "shinyhunters",
+	"scattered spider", "lazarus", "kimsuky", "andariel", "bluenoroff", "scarcruft",
+	"turla", "sandworm", "gamaredon", "muddywater", "oilrig", "menupass",
+	"silentransomgroup", "silent ransom group", "ransomexx", "noname057(16)", "killnet",
+	"funksec", "brain cipher", "rhysida", "8base", "ailock", "n0n", "stormous", "vexy", "aur0ra",
+}
+
+// ExtractThreatActors deterministically extracts and normalizes cyberattack groups from LLM output,
+// misclassified victim/product fields, harvester metadata, URLs, and explicit text patterns.
+func ExtractThreatActors(item ThreatItem, enriched *EnrichedThreat, extraTexts ...string) []string {
+	var candidates []string
+
+	if enriched != nil {
+		candidates = append(candidates, enriched.ThreatActors...)
+		// Rescue cyberattack groups misclassified into VictimOrgs or AffectedProducts
+		for _, v := range enriched.VictimOrgs {
+			trimmed := strings.TrimSpace(v)
+			low := strings.ToLower(trimmed)
+			if IsKnownThreatActor(trimmed) ||
+				strings.Contains(low, "ransomware group") ||
+				strings.Contains(low, "ransomware gang") ||
+				strings.Contains(low, "ransomware leak") ||
+				strings.Contains(low, "apt group") ||
+				strings.Contains(low, "threat group") {
+				candidates = append(candidates, trimmed)
+			}
+			for _, sep := range []string{" - ", " – ", " — "} {
+				if idx := strings.LastIndex(trimmed, sep); idx > 0 {
+					tail := strings.TrimSpace(trimmed[idx+len(sep):])
+					if IsKnownThreatActor(tail) {
+						candidates = append(candidates, tail)
+					}
+				}
+			}
+		}
+		for _, p := range enriched.AffectedProducts {
+			trimmed := strings.TrimSpace(p)
+			low := strings.ToLower(trimmed)
+			if IsKnownThreatActor(trimmed) ||
+				(strings.HasSuffix(low, " ransomware") && !strings.Contains(low, "various") && !strings.Contains(low, "open-source")) ||
+				strings.HasSuffix(low, " supply chain products") {
+				candidates = append(candidates, trimmed)
+			}
+		}
+	}
+
+	if item.Metadata != nil {
+		if g, ok := item.Metadata["group"].(string); ok && g != "" && !strings.EqualFold(g, "Unknown Group") {
+			candidates = append(candidates, g)
+		}
+	}
+
+	if m := ransomlookSrcRegex.FindStringSubmatch(item.SourceName); len(m) > 1 {
+		candidates = append(candidates, m[1])
+	}
+	if m := ransomlookURLRegex.FindStringSubmatch(item.URL); len(m) > 1 {
+		candidates = append(candidates, strings.ReplaceAll(m[1], "%20", " "))
+	}
+	if m := malpediaActorURLRegex.FindStringSubmatch(item.URL); len(m) > 1 {
+		candidates = append(candidates, strings.ReplaceAll(m[1], "_", " "))
+	}
+
+	scanTexts := []string{item.Title, item.Summary}
+	if enriched != nil {
+		scanTexts = append(scanTexts, enriched.Title, enriched.TitleJa, enriched.Summary, enriched.SummaryJa)
+	}
+	scanTexts = append(scanTexts, extraTexts...)
+
+	for _, txt := range scanTexts {
+		if strings.TrimSpace(txt) == "" {
+			continue
+		}
+		for _, m := range actorCodeIDRegex.FindAllString(txt, -1) {
+			candidates = append(candidates, strings.ToUpper(m))
+		}
+		for _, m := range actorNamedFamilyRegex.FindAllString(txt, -1) {
+			candidates = append(candidates, m)
+		}
+		for _, re := range []*regexp.Regexp{
+			actorJaQuotedRegex, actorJaBareRegex, actorJaSuffixRegex,
+			actorEnPrefixRegex, actorEnSuffixRegex, actorEnHeadlineRegex,
+		} {
+			for _, sub := range re.FindAllStringSubmatch(txt, -1) {
+				if len(sub) > 1 {
+					candidates = append(candidates, sub[1])
+				}
+			}
+		}
+		lowTxt := strings.ToLower(txt)
+		for _, gaz := range unambiguousGazetteerActors {
+			if containsWordCaseInsensitive(lowTxt, gaz) {
+				candidates = append(candidates, gaz)
+			}
+		}
+	}
+
+	groundTexts := []string{item.Title, item.Summary, item.RawContent, item.URL, item.SourceName}
+	if enriched != nil {
+		groundTexts = append(groundTexts, enriched.Title, enriched.TitleJa, enriched.Summary, enriched.SummaryJa)
+	}
+	if item.Metadata != nil {
+		if g, ok := item.Metadata["group"].(string); ok && g != "" {
+			groundTexts = append(groundTexts, g)
+		}
+	}
+	groundTexts = append(groundTexts, extraTexts...)
+
+	return FilterGroundedThreatActors(candidates, groundTexts...)
 }
 
 // NormalizeVictimOrg normalizes an organization name for clustering.
@@ -373,7 +780,7 @@ func SeverityScore(s Severity) int {
 		return 3
 	case SeverityLow:
 		return 2
-	case SeverityInfo:
+	case SeverityInformational, SeverityInfo:
 		return 1
 	default:
 		return 0
@@ -632,7 +1039,8 @@ func IsGeneralAdvisoryOrRoundup(item ThreatItem, enriched *EnrichedThreat) bool 
 	tLower := strings.ToLower(titles)
 
 	advisoryTitleMarkers := []string{
-		"注意喚起", "週報", "weekly report", "security advisory", "security advisories",
+		"注意喚起", "週報", "weekly report", "monthly report", "monthly monitor", "monthly ransomware",
+		"月刊ランサムウェア", "security advisory", "security advisories",
 		"security bulletin", "patch tuesday", "セキュリティアップデート", "アップデート公開",
 		"脆弱性対策情報", "月例セキュリティ", "動向調査", "脅威動向", "まとめ", "白書",
 		"を取り巻く現状", "振り返り", "調査レポート", "アクセスランキング",
@@ -792,13 +1200,16 @@ func RefineJapanRelevance(item ThreatItem, enriched *EnrichedThreat) JapanReleva
 // 5. Routine patch announcements without active exploitation or PoC -> capped at Low.
 func RefineSeverity(item ThreatItem, enriched *EnrichedThreat) Severity {
 	if enriched == nil {
-		return SeverityUnknown
+		return SeverityInformational
 	}
 	if IsServiceReleaseOrNonThreat(item, enriched) {
 		return SeverityInfo
 	}
 
 	sev := enriched.Severity
+	if sev == "" || sev == SeverityUnknown {
+		sev = SeverityInformational
+	}
 
 	// Core invariant: non-Direct items must never be Critical
 	if enriched.JapanRelevance != JapanRelevanceDirect && sev == SeverityCritical {
@@ -866,13 +1277,17 @@ func SanitizeHallucinatedCVEs(item ThreatItem, cves []string) []string {
 	return clean
 }
 
-// NormalizeEnrichedThreat deterministically enforces CVE sanitization, removes preachy recommended actions,
+// NormalizeEnrichedThreat deterministically extracts/reclassifies cyberattack groups as ThreatActors,
+// cleans VictimOrgs and AffectedProducts, sanitizes CVEs, strips recommended actions,
 // and applies JapanRelevance and Severity guardrails without any LLM calls.
 func NormalizeEnrichedThreat(item ThreatItem, enriched *EnrichedThreat) {
 	if enriched == nil {
 		return
 	}
+	// First rescue any cyberattack groups from ThreatActors, VictimOrgs, AffectedProducts, and text
+	enriched.ThreatActors = ExtractThreatActors(item, enriched)
 	enriched.VictimOrgs = CleanVictimOrgs(enriched.VictimOrgs)
+	enriched.AffectedProducts = CleanAffectedProducts(enriched.AffectedProducts)
 	enriched.CVEs = SanitizeHallucinatedCVEs(item, enriched.CVEs)
 	enriched.RecommendedActions = nil
 	enriched.RecommendedActionsJa = nil
@@ -933,10 +1348,65 @@ func ExtractCVEs(texts ...string) []string {
 	return result
 }
 
+// IsInvalidAffectedProduct checks if a product string is generic ("Not specified", "Various ...")
+// or actually a cyberattack group / ransomware family rather than legitimate software/hardware.
+func IsInvalidAffectedProduct(prod string) bool {
+	s := strings.Trim(strings.TrimSpace(prod), "[]\"' ")
+	if s == "" || len([]rune(s)) < 2 {
+		return true
+	}
+	low := strings.ToLower(s)
+	switch low {
+	case "unknown", "unspecified", "not specified", "none", "n/a", "未特定", "不明", "特定なし", "指定なし", "なし":
+		return true
+	}
+	if strings.HasPrefix(low, "not specified") ||
+		strings.HasPrefix(low, "unspecified") ||
+		strings.HasPrefix(low, "unknown") ||
+		strings.HasPrefix(low, "various ") ||
+		strings.HasPrefix(low, "multiple ") ||
+		strings.HasPrefix(low, "affected products") ||
+		strings.HasPrefix(low, "enterprise software and systems") ||
+		strings.HasPrefix(low, "open-source ransomware") ||
+		strings.HasPrefix(low, "ransomware ") {
+		return true
+	}
+	if IsKnownThreatActor(s) {
+		return true
+	}
+	if strings.HasSuffix(low, " ransomware") ||
+		strings.HasSuffix(low, " ransomware group") ||
+		strings.HasSuffix(low, " apt group") ||
+		strings.HasSuffix(low, " supply chain products") ||
+		strings.HasSuffix(low, "ランサムウェア") ||
+		strings.HasSuffix(low, "攻撃グループ") {
+		return true
+	}
+	return false
+}
+
+// CleanAffectedProducts strips generic disclaimers and misclassified cyberattack groups/ransomware names.
+func CleanAffectedProducts(products []string) []string {
+	var valid []string
+	seen := make(map[string]bool)
+	for _, p := range products {
+		trimmed := strings.TrimSpace(p)
+		if IsInvalidAffectedProduct(trimmed) {
+			continue
+		}
+		low := strings.ToLower(trimmed)
+		if !seen[low] {
+			seen[low] = true
+			valid = append(valid, trimmed)
+		}
+	}
+	return valid
+}
+
 // NormalizeProduct normalizes software and product names for vulnerability clustering.
 func NormalizeProduct(prod string) string {
 	trimmed := strings.TrimSpace(prod)
-	if trimmed == "" {
+	if trimmed == "" || IsInvalidAffectedProduct(trimmed) {
 		return ""
 	}
 

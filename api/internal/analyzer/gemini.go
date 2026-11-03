@@ -95,7 +95,7 @@ func cleanJSONFences(raw string) string {
 func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.EnrichedThreat {
 	severity := models.Severity(out.Severity)
 	switch severity {
-	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow, models.SeverityInfo:
+	case models.SeverityCritical, models.SeverityHigh, models.SeverityMedium, models.SeverityLow, models.SeverityInformational, models.SeverityInfo:
 	default:
 		severity = models.SeverityUnknown
 	}
@@ -108,6 +108,8 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 			if attackType == "" {
 				attackType = "Service Release"
 			}
+		} else {
+			severity = models.SeverityInformational
 		}
 	}
 
@@ -172,14 +174,16 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 	}
 
 	metaBytes, _ := json.Marshal(item.Metadata)
-	groundedActors := models.FilterGroundedThreatActors(
-		out.ThreatActors,
-		item.Title,
-		item.Summary,
-		item.RawContent,
-		item.URL,
-		string(metaBytes),
-	)
+	prelim := &models.EnrichedThreat{
+		Title:            title,
+		TitleJa:          titleJa,
+		Summary:          summary,
+		SummaryJa:        summaryJa,
+		VictimOrgs:       out.VictimOrgs,
+		ThreatActors:     out.ThreatActors,
+		AffectedProducts: out.AffectedProducts,
+	}
+	groundedActors := models.ExtractThreatActors(item, prelim, string(metaBytes))
 	actorReasons := ResolveThreatActorReasons(item, groundedActors, out.ThreatActorReasons)
 
 	return &models.EnrichedThreat{
@@ -193,12 +197,12 @@ func buildEnrichedThreat(item models.ThreatItem, out analysisOutput) *models.Enr
 		SummaryJa:            summaryJa,
 		ImpactAnalysis:       impact,
 		ImpactAnalysisJa:     out.ImpactAnalysisJa,
-		VictimOrgs:           out.VictimOrgs,
+		VictimOrgs:           models.CleanVictimOrgs(out.VictimOrgs),
 		ThreatActors:         groundedActors,
 		ThreatActorReasons:   actorReasons,
 		AttackType:           attackType,
 		CVEs:                 uniqueCVEs,
-		AffectedProducts:     affectedProducts,
+		AffectedProducts:     models.CleanAffectedProducts(affectedProducts),
 		RecommendedActions:   nil,
 		RecommendedActionsJa: nil,
 		AnalyzedAt:           time.Now().UTC(),
@@ -222,7 +226,7 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 		if rawProd != "" {
 			prods = append(prods, rawProd)
 		}
-		sev := models.SeverityUnknown
+		sev := models.SeverityInformational
 		attackType := ""
 		if models.IsServiceReleaseOrNonThreat(item, nil) {
 			sev = models.SeverityInfo
@@ -237,10 +241,10 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 			SummaryJa:            summaryJa,
 			ImpactAnalysisJa:     "Gemini APIキーが未設定のため未分析です。",
 			VictimOrgs:           nil,
-			ThreatActors:         nil,
+			ThreatActors:         models.ExtractThreatActors(item, nil),
 			AttackType:           attackType,
 			CVEs:                 cves,
-			AffectedProducts:     prods,
+			AffectedProducts:     models.CleanAffectedProducts(prods),
 			RecommendedActionsJa: nil,
 			AnalyzedAt:           time.Now().UTC(),
 		}, nil
@@ -277,7 +281,7 @@ func (a *GeminiThreatAnalyzer) Analyze(ctx context.Context, item models.ThreatIt
 - 「パッチを適用すべき」「多要素認証（MFA）やIAMの強化が必要」「不審なメールに注意」「従業員教育を実施すべき」といった一般的な対策アドバイス・推奨アクション・教訓・説教的な表現は【一切記述しないでください】。
 - CVE識別子（cves）は原文テキストに明記されているもののみを抽出し、記載がない場合は必ず空配列 [] としてください（例示番号の捏造厳禁）。
 - 【重要】脅威アクター（threat_actors）の厳格な抽出ルール:
-  - タイトルや原文本文中に具体的な攻撃グループ名・脅威アクター名が【直接かつ明示的に記載されている場合のみ】抽出してください。記載がない場合は必ず空配列 [] にしてください。
+  - タイトルや原文本文中に具体的なサイバー攻撃グループ・APTグループ・ランサムウェア集団の名称が【直接かつ明示的に記載されている場合】は、必ず threat_actors（例: "Qilin", "MirrorFace", "BlackTech", "APT10", "UAT-11473"）として抽出し、victim_orgs や affected_products には絶対に入れないでください。記載がない場合は空配列 [] にしてください。
   - 文脈からの推測や、「中国系APT」「ハッカー」「Cybercriminals」「Attackers」「未確認」等の一般表現の抽出は絶対禁止です。
 
 # 対象インシデント情報

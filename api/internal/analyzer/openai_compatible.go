@@ -200,7 +200,8 @@ Analyze the provided threat intelligence raw text carefully and produce structur
 - For 'cves': Extract ONLY CVE IDs that literally appear in the source text. If none appear in the text, return []. NEVER invent placeholder CVEs.
 
 # Threat Actor Attribution Rules:
-- "threat_actors": Array of specific, recognized threat actor names or cybercrime groups ONLY when explicitly and directly named in the source text.
+- "threat_actors": Array of specific, recognized cyberattack groups, APT groups, ransomware gangs, or cybercrime groups ONLY when explicitly and directly named in the source text (output canonical group names such as "Qilin", "MirrorFace", "BlackTech", "APT10", "UAT-11473").
+- Cyberattack groups and ransomware families MUST ALWAYS be placed in "threat_actors" and NEVER in "victim_orgs" or "affected_products".
 - If no specific, named threat actor is explicitly mentioned in the source intelligence, you MUST return an empty array [].
 - NEVER guess, extrapolate, or output generic labels ("Hackers", "Cybercriminals", "Attackers", "Unknown", "Not specified", "State-sponsored actors", "Chinese APT", etc.).
 - If a specific cybercrime group or APT is explicitly named in a native language, preserve that exact native name AS-IS.
