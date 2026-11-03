@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -856,6 +857,34 @@ func TestNormalizeEnrichedThreatAndSeverityCaps(t *testing.T) {
 		t.Errorf("expected severe domestic breach to remain Critical, got %s", enrichedDomestic.Severity)
 	}
 }
+
+func TestUnmarshalPythonEnrichedThreatJSON(t *testing.T) {
+	pythonJSON := `{"item_id": "451e2e80", "item": {"id": "451e2e80", "source_type": "vendor_rss", "source_name": "Security Next", "title": "ファンケルとアテニア、eコマースサイトの会員情報が流出", "url": "https://www.security-next.com/191600", "summary": "会員の個人情報が流出した。", "raw_content": null, "published_at": "2026-10-19 06:56:04+00:00", "harvested_at": "2026-10-19 08:02:54.149142+00:00", "metadata": {"category": "jp_news"}}, "severity": "High", "japan_relevance": "Direct", "title_ja": "ファンケルおよびアテニアのeコマースサイトで会員情報流出が発生", "summary_ja": "顧客の個人情報が流出したインシデント。", "victim_orgs": ["株式会社ファンケル"], "threat_actors": [], "attack_type": "Data Breach", "recommended_actions_ja": ["パスワード変更の要請"], "analyzed_at": "2026-10-19 08:10:04.281141+00:00"}`
+
+	var parsed EnrichedThreat
+	if err := json.Unmarshal([]byte(pythonJSON), &parsed); err != nil {
+		t.Fatalf("expected Python space-separated timestamp JSON to unmarshal cleanly, got error: %v", err)
+	}
+	if parsed.Severity != SeverityHigh || parsed.JapanRelevance != JapanRelevanceDirect {
+		t.Errorf("unexpected severity/relevance: %s / %s", parsed.Severity, parsed.JapanRelevance)
+	}
+	if parsed.Item.PublishedAt == nil || parsed.Item.PublishedAt.Year() != 2026 {
+		t.Errorf("expected PublishedAt to parse 2026, got %v", parsed.Item.PublishedAt)
+	}
+	if parsed.AnalyzedAt.Year() != 2026 {
+		t.Errorf("expected AnalyzedAt to parse 2026, got %v", parsed.AnalyzedAt)
+	}
+
+	NormalizeEnrichedThreat(parsed.Item, &parsed)
+	out, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatalf("failed to marshal normalized threat: %v", err)
+	}
+	if strings.Contains(string(out), "recommended_actions") {
+		t.Errorf("expected recommended_actions_ja to be stripped after NormalizeEnrichedThreat, got %s", string(out))
+	}
+}
+
 
 
 
