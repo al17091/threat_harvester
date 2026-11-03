@@ -345,6 +345,7 @@ func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
 			COALESCE(summary, ''),
 			COALESCE(summary_ja, ''),
 			COALESCE(primary_url, ''),
+			COALESCE(source_urls, ''),
 			COALESCE(sources_detail, ''),
 			COALESCE(threat_actors, ''),
 			COALESCE(victim_org, ''),
@@ -392,11 +393,11 @@ func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
 
 	for rows.Next() {
 		var (
-			id, title, titleJa, rawContent, summary, summaryJa, primaryURL, sourcesDetail string
-			rawActors, vOrg, vOrgEn, vOrgJa, prod, prodEn, prodJa, sev, jrel, attackType  string
+			id, title, titleJa, rawContent, summary, summaryJa, primaryURL, sourceURLs, sourcesDetail string
+			rawActors, vOrg, vOrgEn, vOrgJa, prod, prodEn, prodJa, sev, jrel, attackType              string
 		)
 		if err := rows.Scan(
-			&id, &title, &titleJa, &rawContent, &summary, &summaryJa, &primaryURL, &sourcesDetail,
+			&id, &title, &titleJa, &rawContent, &summary, &summaryJa, &primaryURL, &sourceURLs, &sourcesDetail,
 			&rawActors, &vOrg, &vOrgEn, &vOrgJa, &prod, &prodEn, &prodJa, &sev, &jrel, &attackType,
 		); err != nil {
 			continue
@@ -424,6 +425,7 @@ func (s *SQLStore) cleanUngroundedIncidentThreatActors() {
 				VictimOrgs:       []string{vOrg, vOrgEn, vOrgJa},
 				AffectedProducts: []string{prod, prodEn, prodJa},
 			},
+			sourceURLs,
 			sourcesDetail,
 		)
 		if extracted == nil {

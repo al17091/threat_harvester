@@ -61,6 +61,21 @@ func (m *mockAnalyzer) AnalyzeBatch(ctx context.Context, items []models.ThreatIt
 	if m.err != nil {
 		return nil, m.err
 	}
+	byID := make(map[string]*models.EnrichedThreat, len(m.enriched))
+	for _, e := range m.enriched {
+		if e != nil && e.ItemID != "" {
+			byID[e.ItemID] = e
+		}
+	}
+	if len(byID) == len(items) {
+		out := make([]*models.EnrichedThreat, len(items))
+		for i, it := range items {
+			if e, ok := byID[it.ID]; ok {
+				out[i] = e
+			}
+		}
+		return out, nil
+	}
 	return m.enriched, nil
 }
 
