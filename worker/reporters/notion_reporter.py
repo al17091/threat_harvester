@@ -43,14 +43,24 @@ class NotionReporter:
         if threat.attack_type:
             properties["Attack Type"] = {"select": {"name": threat.attack_type[:100]}}
 
-        if threat.victim_orgs:
+        clean_victims = [
+            v.strip()
+            for v in threat.victim_orgs
+            if v and v.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし", "指定なし"}
+        ]
+        if clean_victims:
             properties["Victims"] = {
-                "multi_select": [{"name": v[:100].replace(",", "")} for v in threat.victim_orgs[:5]]
+                "multi_select": [{"name": v[:100].replace(",", "")} for v in clean_victims[:5]]
             }
 
-        if threat.threat_actors:
+        clean_actors = [
+            a.strip()
+            for a in threat.threat_actors
+            if a and a.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし"}
+        ]
+        if clean_actors:
             properties["Threat Actors"] = {
-                "multi_select": [{"name": a[:100].replace(",", "")} for a in threat.threat_actors[:5]]
+                "multi_select": [{"name": a[:100].replace(",", "")} for a in clean_actors[:5]]
             }
 
         if threat.item.source_name:

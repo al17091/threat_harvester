@@ -49,14 +49,25 @@ class DiscordNotifier:
         fields = [
             {"name": "情報源", "value": f"{threat.item.source_type.value} ({threat.item.source_name})", "inline": True},
             {"name": "日本への関連性", "value": threat.japan_relevance.value, "inline": True},
-            {"name": "攻撃分類", "value": threat.attack_type or "未特定", "inline": True},
         ]
+        if threat.attack_type and threat.attack_type.strip().lower() not in {"unknown", "unspecified", "未特定"}:
+            fields.append({"name": "攻撃分類", "value": threat.attack_type, "inline": True})
 
-        if threat.victim_orgs:
-            fields.append({"name": "被害組織", "value": ", ".join(threat.victim_orgs), "inline": True})
+        clean_victims = [
+            v.strip()
+            for v in threat.victim_orgs
+            if v and v.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし", "指定なし"}
+        ]
+        if clean_victims:
+            fields.append({"name": "被害組織", "value": ", ".join(clean_victims), "inline": True})
 
-        if threat.threat_actors:
-            fields.append({"name": "脅威グループ", "value": ", ".join(threat.threat_actors), "inline": True})
+        clean_actors = [
+            a.strip()
+            for a in threat.threat_actors
+            if a and a.strip().lower() not in {"unknown", "none", "n/a", "unspecified", "未特定", "不明", "特定なし"}
+        ]
+        if clean_actors:
+            fields.append({"name": "脅威グループ", "value": ", ".join(clean_actors), "inline": True})
 
         if threat.impact_analysis_ja:
             fields.append({"name": "確認された被害・影響範囲", "value": threat.impact_analysis_ja[:1000], "inline": False})

@@ -61,35 +61,58 @@ func NewSTIXIncidentID() string {
 }
 
 var genericVictimWords = map[string]bool{
+	"[]": true, "[ ]": true, "null": true, "nil": true, "undefined": true, "{}": true,
 	"japan": true, "japanese": true, "日本": true, "日本企業": true, "日本組織": true,
 	"国内企業": true, "国内組織": true, "政府機関": true, "各企業": true, "複数企業": true,
 	"multiple": true, "unknown": true, "n/a": true, "none": true, "various": true,
-	"victim": true, "target": true, "organization": true, "company": true,
+	"unspecified": true, "unidentified": true, "undisclosed": true, "unnamed": true,
+	"victim": true, "victims": true, "target": true, "targets": true, "organization": true, "company": true,
 	"企業": true, "病院": true, "大学": true, "自治体": true, "学校": true,
 	"multiple organizations": true, "japanese enterprises": true, "not specified": true,
 	"various organizations": true, "various companies": true, "domestic companies": true,
 	"japanese companies": true, "domestic organizations": true, "japanese entities": true,
-	"各社": true, "複数社": true, "不特定": true, "未特定": true,
+	"healthcare institutions": true, "general internet users": true,
+	"各社": true, "複数社": true, "不特定": true, "未特定": true, "不明": true,
+	"未確認": true, "未詳": true, "未指定": true, "未具体提及": true, "未提及": true,
+	"未公表": true, "未公開": true, "特定なし": true, "指定なし": true, "該当なし": true, "対象なし": true, "なし": true,
 }
 
 var genericVictimSubstrings = []string{
 	"multiple organization", "multiple enterprise", "multiple compan", "multiple domestic",
 	"global trend report", "trend report", "annual report", "survey report", "cybersecurity survey",
-	"not specified", "unspecified", "not identified", "unknown organization", "unknown victim",
+	"not specified", "unspecified", "not identified", "not explicitly", "not provided",
+	"not named", "not disclosed", "not mentioned", "none specified", "none identified",
+	"unknown organization", "unknown victim", "undisclosed ",
 	"various organization", "various compan", "japanese enterprise", "japanese organization",
 	"japanese compan", "japanese entit", "domestic enterprise", "domestic compan",
 	"domestic organization", "domestic entit", "private companies", "government/municipalities",
-	"critical infrastructure", "国内の企業", "国内の組織", "不特定の", "複数の企業",
+	"critical infrastructure", "国内の企業", "国内の組織", "国内組織全般", "不特定の", "複数の企業",
 	"複数の組織", "各企業", "複数企業", "各組織", "複数組織", "サプライチェーン", "調査レポート",
+	"未具体", "未指定", "未提及", "未特定", "未公開企業", "特定なし", "指定なし",
+	"導入企業", "導入組織", "利用する日本の組織", "利用する日本の企業", "利用する組織", "利用する企業", "利用組織", "利用企業",
 }
 
-// IsGenericVictimOrg checks if a victim organization name is too generic to cluster on safely.
+// IsGenericVictimOrg checks if a victim organization name is generic, unknown, or unspecified.
 func IsGenericVictimOrg(name string) bool {
-	cleaned := strings.ToLower(strings.TrimSpace(name))
+	cleaned := strings.ToLower(strings.Trim(strings.TrimSpace(name), "[]\"' "))
 	if cleaned == "" || len([]rune(cleaned)) < 2 {
 		return true
 	}
 	if genericVictimWords[cleaned] {
+		return true
+	}
+	if strings.HasPrefix(cleaned, "multiple ") ||
+		strings.HasPrefix(cleaned, "various ") ||
+		strings.HasPrefix(cleaned, "not ") ||
+		strings.HasPrefix(cleaned, "unknown") ||
+		strings.HasPrefix(cleaned, "unspecified") ||
+		strings.HasPrefix(cleaned, "no specific") {
+		return true
+	}
+	if strings.HasSuffix(cleaned, " users") ||
+		strings.HasSuffix(cleaned, " customers") ||
+		strings.Contains(cleaned, " users (") ||
+		strings.Contains(cleaned, " customers (") {
 		return true
 	}
 	for _, sub := range genericVictimSubstrings {
@@ -98,6 +121,24 @@ func IsGenericVictimOrg(name string) bool {
 		}
 	}
 	return false
+}
+
+// CleanVictimOrgs strips empty, "Unknown", or generic placeholder organization names.
+func CleanVictimOrgs(orgs []string) []string {
+	var valid []string
+	seen := make(map[string]bool)
+	for _, o := range orgs {
+		trimmed := strings.Trim(strings.TrimSpace(o), "[]\"' ")
+		if IsGenericVictimOrg(trimmed) {
+			continue
+		}
+		low := strings.ToLower(trimmed)
+		if !seen[low] {
+			seen[low] = true
+			valid = append(valid, trimmed)
+		}
+	}
+	return valid
 }
 
 var invalidActorSubstrings = []string{
@@ -831,6 +872,7 @@ func NormalizeEnrichedThreat(item ThreatItem, enriched *EnrichedThreat) {
 	if enriched == nil {
 		return
 	}
+	enriched.VictimOrgs = CleanVictimOrgs(enriched.VictimOrgs)
 	enriched.CVEs = SanitizeHallucinatedCVEs(item, enriched.CVEs)
 	enriched.RecommendedActions = nil
 	enriched.RecommendedActionsJa = nil

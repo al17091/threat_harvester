@@ -62,9 +62,10 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 		}
 	}
 
-	if len(threat.VictimOrgs) > 0 {
+	cleanVictims := models.CleanVictimOrgs(threat.VictimOrgs)
+	if len(cleanVictims) > 0 {
 		var victims []map[string]string
-		for i, v := range threat.VictimOrgs {
+		for i, v := range cleanVictims {
 			if i >= 5 {
 				break
 			}
@@ -73,9 +74,10 @@ func (r *NotionReporter) CreateIncidentPage(ctx context.Context, threat *models.
 		properties["Victims"] = map[string]interface{}{"multi_select": victims}
 	}
 
-	if len(threat.ThreatActors) > 0 {
+	cleanActors := models.CleanThreatActors(threat.ThreatActors)
+	if len(cleanActors) > 0 {
 		var actors []map[string]string
-		for i, a := range threat.ThreatActors {
+		for i, a := range cleanActors {
 			if i >= 5 {
 				break
 			}

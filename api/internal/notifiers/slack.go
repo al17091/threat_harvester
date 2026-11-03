@@ -90,20 +90,8 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 		mention = "<!here> "
 	}
 
-	victims := "Unspecified"
-	if isJa {
-		victims = "指定なし"
-	}
-	if len(threat.VictimOrgs) > 0 {
-		victims = strings.Join(threat.VictimOrgs, ", ")
-	}
-	actors := "Unspecified"
-	if isJa {
-		actors = "特定なし"
-	}
-	if len(threat.ThreatActors) > 0 {
-		actors = strings.Join(threat.ThreatActors, ", ")
-	}
+	cleanVictims := models.CleanVictimOrgs(threat.VictimOrgs)
+	cleanActors := models.CleanThreatActors(threat.ThreatActors)
 
 	var sumLabel, relLabel, srcLabel, vicLabel, actLabel, prodLabel, cveLabel, impLabel, btnLabel string
 	if isJa {
@@ -131,8 +119,12 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 	metaFields := []map[string]interface{}{
 		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", relLabel, threat.JapanRelevance)},
 		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s (%s)", srcLabel, threat.Item.SourceType, threat.Item.SourceName)},
-		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", vicLabel, victims)},
-		{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", actLabel, actors)},
+	}
+	if len(cleanVictims) > 0 {
+		metaFields = append(metaFields, map[string]interface{}{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", vicLabel, strings.Join(cleanVictims, ", "))})
+	}
+	if len(cleanActors) > 0 {
+		metaFields = append(metaFields, map[string]interface{}{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", actLabel, strings.Join(cleanActors, ", "))})
 	}
 	if len(threat.AffectedProducts) > 0 {
 		metaFields = append(metaFields, map[string]interface{}{"type": "mrkdwn", "text": fmt.Sprintf("*%s*\n%s", prodLabel, strings.Join(threat.AffectedProducts, ", "))})

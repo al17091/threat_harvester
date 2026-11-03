@@ -885,6 +885,29 @@ func TestUnmarshalPythonEnrichedThreatJSON(t *testing.T) {
 	}
 }
 
+func TestCleanVictimOrgs(t *testing.T) {
+	input := []string{
+		"Unknown",
+		"不明",
+		"未具体提及",
+		"未指定",
+		"特定なし",
+		"Multiple Japanese Corporations",
+		"Various corporate entities",
+		"Not explicitly named",
+		"Fortinet customers",
+		"Microsoft Windows users",
+		"日本国内のPAN-OS導入企業",
+		"株式会社ファンケル",
+		"GMOインターネットグループ",
+	}
+	cleaned := CleanVictimOrgs(input)
+	if len(cleaned) != 2 || cleaned[0] != "株式会社ファンケル" || cleaned[1] != "GMOインターネットグループ" {
+		t.Fatalf("expected only specific named victim orgs, got %v", cleaned)
+	}
+}
+
+
 
 
 

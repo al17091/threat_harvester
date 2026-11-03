@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/al17091/threat_harvester/api/internal/config"
+	"github.com/al17091/threat_harvester/api/internal/models"
 	"github.com/al17091/threat_harvester/api/internal/storage"
 )
 
@@ -170,7 +171,10 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 			if displayVictim == "" {
 				displayVictim = victimOrgEn
 			}
-			if displayVictim != "" && displayVictim != "Unknown" {
+			if models.IsGenericVictimOrg(displayVictim) {
+				displayVictim = ""
+			}
+			if displayVictim != "" {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s: %s", sev, jrel, displayVictim, itemTitleText)
 			} else {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
@@ -209,7 +213,10 @@ func (s *Server) handleRSSFeed(w http.ResponseWriter, r *http.Request) {
 			if displayVictim == "" {
 				displayVictim = victimOrgJa
 			}
-			if displayVictim != "" && displayVictim != "Unknown" {
+			if models.IsGenericVictimOrg(displayVictim) {
+				displayVictim = ""
+			}
+			if displayVictim != "" {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s: %s", sev, jrel, displayVictim, itemTitleText)
 			} else {
 				itemTitle = fmt.Sprintf("[%s] [%s] %s", sev, jrel, itemTitleText)
