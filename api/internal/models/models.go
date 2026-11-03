@@ -3,6 +3,7 @@ package models
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"path"
@@ -266,4 +267,83 @@ type EnrichedThreat struct {
 	RecommendedActions   []string          `json:"recommended_actions,omitempty"`
 	RecommendedActionsJa []string          `json:"recommended_actions_ja,omitempty"`
 	AnalyzedAt           time.Time         `json:"analyzed_at"`
+}
+
+var flexibleTimeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05.999999999Z07:00",
+	"2006-01-02 15:04:05Z07:00",
+	"2006-01-02 15:04:05.999999999-0700",
+	"2006-01-02 15:04:05-0700",
+	"2006-01-02T15:04:05.999999999",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02 15:04:05",
+}
+
+// ParseFlexibleTime parses RFC3339 as well as Python str(datetime) space-separated timestamps.
+func ParseFlexibleTime(raw string) (time.Time, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" || s == "null" {
+		return time.Time{}, false
+	}
+	for _, layout := range flexibleTimeLayouts {
+		if parsed, err := time.Parse(layout, s); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+// UnmarshalJSON supports both RFC3339 and Python space-separated timestamps in ThreatItem JSON.
+func (t *ThreatItem) UnmarshalJSON(data []byte) error {
+	type Alias ThreatItem
+	aux := &struct {
+		FetchedAt   *string `json:"fetched_at"`
+		PublishedAt *string `json:"published_at"`
+		HarvestedAt string  `json:"harvested_at"`
+		*Alias
+	}{
+		Alias: (*Alias)(t),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.FetchedAt != nil {
+		if parsed, ok := ParseFlexibleTime(*aux.FetchedAt); ok {
+			t.FetchedAt = &parsed
+		} else {
+			t.FetchedAt = nil
+		}
+	}
+	if aux.PublishedAt != nil {
+		if parsed, ok := ParseFlexibleTime(*aux.PublishedAt); ok {
+			t.PublishedAt = &parsed
+		} else {
+			t.PublishedAt = nil
+		}
+	}
+	if parsed, ok := ParseFlexibleTime(aux.HarvestedAt); ok {
+		t.HarvestedAt = parsed
+	}
+	return nil
+}
+
+// UnmarshalJSON supports both RFC3339 and Python space-separated timestamps in EnrichedThreat JSON.
+func (e *EnrichedThreat) UnmarshalJSON(data []byte) error {
+	type Alias EnrichedThreat
+	aux := &struct {
+		AnalyzedAt string `json:"analyzed_at"`
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if parsed, ok := ParseFlexibleTime(aux.AnalyzedAt); ok {
+		e.AnalyzedAt = parsed
+	}
+	return nil
 }

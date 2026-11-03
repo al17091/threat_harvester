@@ -1408,11 +1408,11 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 
 		var pubTime *time.Time
 		if pubAt.Valid && pubAt.String != "" {
-			if t, err := time.Parse(time.RFC3339, pubAt.String); err == nil {
+			if t, ok := models.ParseFlexibleTime(pubAt.String); ok {
 				pubTime = &t
 			}
 		}
-		harvTime, _ := time.Parse(time.RFC3339, harvestedAt)
+		harvTime, _ := models.ParseFlexibleTime(harvestedAt)
 
 		item := models.ThreatItem{
 			ID:          id,
@@ -1438,6 +1438,8 @@ func (s *SQLStore) BackfillIncidents(ctx context.Context, windowDays int) (int, 
 				if b, mErr := json.Marshal(enriched); mErr == nil {
 					newEnrichedJSON = string(b)
 				}
+			} else {
+				log.Printf("[Clustering] Warning: failed to unmarshal enriched_data for item %s: %v", id, err)
 			}
 		}
 

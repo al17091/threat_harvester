@@ -125,7 +125,7 @@ class ThreatCache:
         severity_val = enriched.severity.value if enriched else None
         japan_rel_val = enriched.japan_relevance.value if enriched else None
         notified_val = now_str if notified else None
-        enriched_json = json.dumps(enriched.model_dump(), default=str, ensure_ascii=False) if enriched else None
+        enriched_json = json.dumps(enriched.model_dump(mode="json"), default=str, ensure_ascii=False) if enriched else None
 
         values = {
             "id": item.id,
