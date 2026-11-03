@@ -218,16 +218,67 @@ var invalidActorExact = map[string]bool{
 	"geovision": true, "cisco": true, "fortinet": true, "fortios": true, "fortimail": true,
 	"ivanti": true, "palo alto": true, "palo alto networks": true, "citrix": true, "netscaler": true,
 	"vmware": true, "jetbrains": true, "tp-link": true, "wazuh": true, "malwarebytes": true,
-	"semperis": true, "microsoft": true, "apple": true, "google": true, "oracle": true,
+	"semperis": true, "microsoft": true, "apple": true, "google": true, "oracle": true, "barracuda": true,
 	"jpcert": true, "jpcert/cc": true, "ipa": true, "nisc": true, "cisa": true, "fbi": true,
 	"nsa": true, "europol": true, "cisco talos": true, "talos": true, "mandiant": true,
 	"crowdstrike": true, "trend micro": true, "kaspersky": true, "eset": true, "cyfirma": true,
 	"ransomware": true, "apt": true, "malware": true, "botnet": true, "ransomlook": true, "ransomware.live": true,
+	// Non-actor tools, victims, generic security terms, and Japanese tags
+	"asahi": true, "claude code": true, "chinese chopper": true, "earthworm": true, "cogui": true,
+	"fortibleed": true, "heartbreaker macos": true, "murdoc botnet": true, "shadowv2": true, "yam store": true,
+	"byod": true, "raas": true, "wiki": true, "sig": true, "data": true, "data-extortion": true,
+	"extortion": true, "ransom": true, "payload": true, "spear-fishing": true, "spear-phishing": true,
+	"phishing": true, "cyber": true, "activity": true, "tactics": true, "evolution": true, "intelligence": true,
+	"二重脅迫・三重脅迫": true, "緊急共有": true, "apt groups": true,
+	"international hacker group": true, "global secret group": true, "pro-russia hacktivists": true,
+	// English grammar stopwords, headline verbs, adjectives, nationalities, and standalone partial tokens
+	"the": true, "a": true, "an": true, "has": true, "have": true, "had": true, "is": true, "are": true,
+	"was": true, "were": true, "be": true, "been": true, "being": true, "may": true, "might": true,
+	"can": true, "could": true, "will": true, "would": true, "should": true, "do": true, "does": true, "did": true,
+	"by": true, "and": true, "or": true, "nor": true, "but": true, "so": true, "on": true, "in": true,
+	"of": true, "to": true, "for": true, "with": true, "via": true, "from": true, "after": true, "before": true,
+	"under": true, "over": true, "behind": true, "inside": true, "into": true, "against": true, "between": true,
+	"through": true, "during": true, "without": true, "within": true, "that": true, "this": true, "these": true,
+	"those": true, "their": true, "its": true, "our": true, "we": true, "they": true, "he": true, "she": true,
+	"it": true, "who": true, "which": true, "what": true, "also": true, "as": true, "at": true, "every": true,
+	"each": true, "another": true, "other": true, "others": true, "both": true, "all": true, "any": true,
+	"some": true, "such": true, "no": true, "not": true, "only": true, "same": true, "than": true, "too": true, "very": true,
+	"claims": true, "claimed": true, "claiming": true, "targets": true, "targeted": true, "targeting": true,
+	"publishes": true, "published": true, "publishing": true, "leaks": true, "leaked": true, "leaking": true, "leak": true,
+	"lists": true, "listed": true, "listing": true, "adds": true, "added": true, "adding": true,
+	"uses": true, "used": true, "using": true, "hits": true, "hit": true, "hitting": true,
+	"exploits": true, "exploited": true, "exploiting": true, "exposes": true, "exposed": true, "exposing": true,
+	"expands": true, "expanded": true, "expanding": true, "leverages": true, "leveraged": true, "leveraging": true,
+	"compromises": true, "compromised": true, "compromising": true, "conducts": true, "conducted": true, "conducting": true,
+	"discloses": true, "disclosed": true, "disclosing": true, "disclosures": true, "emerged": true, "emerges": true, "emerging": true,
+	"named": true, "called": true, "known": true, "linked": true, "led": true, "allegedly": true, "suspected": true, "attributed": true,
+	"breaches": true, "breached": true, "breaching": true, "attacks": true, "attacked": true, "attacking": true,
+	"hacks": true, "hacked": true, "hacking": true, "steals": true, "stole": true, "stolen": true,
+	"demands": true, "demanded": true, "threatens": true, "threatened": true, "strikes": true, "struck": true,
+	"launches": true, "launched": true, "launching": true, "deploys": true, "deployed": true, "deploying": true,
+	"operates": true, "operated": true, "operating": true, "admits": true, "announcing": true, "announces": true, "announced": true,
+	"associated": true, "based": true, "carried": true, "extensively": true, "extort": true, "extorting": true,
+	"highlighting": true, "implements": true, "implicated": true, "involving": true, "lets": true,
+	"maintaining": true, "observed": true, "primarily": true, "profiles": true, "profiling": true,
+	"responsible": true, "resulted": true, "reveal": true, "reveals": true, "revealed": true,
+	"says": true, "said": true, "sets": true, "suffers": true, "suffered": true, "track": true, "tracked": true, "tracking": true,
+	"new": true, "active": true, "specific": true, "international": true, "largest": true, "average": true,
+	"global": true, "major": true, "recent": true, "latest": true, "last": true, "multiple": true,
+	"various": true, "several": true, "foreign": true, "persistent": true, "potential": true,
+	"automated": true, "digital": true, "searchable": true, "right": true, "inner": true,
+	"maritime": true, "hospital": true, "agencies": true, "networks": true, "member": true, "project": true, "team": true,
+	"russian": true, "pro-russian": true, "hacktivists": true, "chinese": true, "chinese-speaking": true,
+	"china-linked": true, "china-aligned": true, "state-aligned": true, "state-backed": true, "nation-state": true,
+	"korean": true, "iranian": true,
+	"earth": true, "storm": true, "bears": true, "cartel": true, "ogre": true, "sins": true,
+	"basta": true, "cipher": true, "brain": true, "moth": true, "black": true, "silent": true,
+	"alpha": true, "falcon": true, "eclipse": true, "phantom": true, "helix": true,
 }
 
 // canonicalActorNames maps lowercase normalized cyberattack group names to their canonical Actor label.
 var canonicalActorNames = map[string]string{
 	"qilin":                 "Qilin",
+	"キリン":                   "Qilin",
 	"n0n":                   "N0n",
 	"akira":                 "Akira",
 	"safepay":               "SafePay",
@@ -236,6 +287,8 @@ var canonicalActorNames = map[string]string{
 	"lockbit":               "LockBit",
 	"lockbit3":              "LockBit",
 	"lockbit 3.0":           "LockBit 3.0",
+	"lockbit5":              "LockBit 5.0",
+	"lockbit5.0":            "LockBit 5.0",
 	"cl0p":                  "Cl0p",
 	"clop":                  "Cl0p",
 	"vexy":                  "Vexy",
@@ -243,6 +296,7 @@ var canonicalActorNames = map[string]string{
 	"inc":                   "INC Ransom",
 	"the gentlemen":         "The Gentlemen",
 	"thegentlemen":          "The Gentlemen",
+	"gentlemen":             "The Gentlemen",
 	"netrunner":             "NetRunner",
 	"settra":                "Settra",
 	"silent ransom group":   "Silent Ransom Group",
@@ -250,7 +304,9 @@ var canonicalActorNames = map[string]string{
 	"deadlock":              "DeadLock",
 	"gunra":                 "Gunra",
 	"killsec":               "KillSec",
+	"killsecurity":          "KillSecurity",
 	"aur0ra":                "Aur0ra",
+	"aurora":                "Aurora",
 	"ailock":                "AiLock",
 	"stormous":              "Stormous",
 	"ransomexx":             "RansomEXX",
@@ -267,6 +323,7 @@ var canonicalActorNames = map[string]string{
 	"blacksuit":             "BlackSuit",
 	"blackmatter":           "BlackMatter",
 	"blackbyte":             "BlackByte",
+	"blackfield":            "Blackfield",
 	"bianlian":              "BianLian",
 	"dragonforce":           "DragonForce",
 	"hunters international": "Hunters International",
@@ -290,6 +347,79 @@ var canonicalActorNames = map[string]string{
 	"mallox":                "Mallox",
 	"makop":                 "Makop",
 	"snatch":                "Snatch",
+	"shiba":                 "Shiba",
+	"fulcrumsec":            "FULCRUMSEC",
+	"direwolf":              "Direwolf",
+	"nightspire":            "NightSpire",
+	"anubis":                "Anubis",
+	"embargo":               "Embargo",
+	"play":                  "Play",
+	"lynx":                  "Lynx",
+	"chaos":                 "Chaos",
+	"cloak":                 "Cloak",
+	"nitrogen":              "Nitrogen",
+	"orova":                 "Orova",
+	"pear":                  "Pear",
+	"redact":                "Redact",
+	"scarlettgroup":         "ScarlettGroup",
+	"exitium":               "Exitium",
+	"genesis":               "Genesis",
+	"metaencryptor":         "MetaEncryptor",
+	"mimori":                "Mimori",
+	"emperador":             "Emperador",
+	"space bears":           "Space Bears",
+	"lapsus$":               "Lapsus$",
+	"netwalker":             "NetWalker",
+	"maze":                  "Maze",
+	"ransomed.vc":           "Ransomed.vc",
+	"bronze butler":         "BRONZE BUTLER",
+	"bronze sandcastle":     "Bronze Sandcastle",
+	"gold ogre":             "GOLD OGRE",
+	"silent lynx":           "Silent Lynx",
+	"luna moth":             "Luna Moth",
+	"bling libra":           "Bling Libra",
+	"warp panda":            "Warp Panda",
+	"earth tengshe":         "Earth Tengshe",
+	"earth sirrush":         "Earth Sirrush",
+	"dark storm team":       "Dark Storm Team",
+	"tradertraitor":         "TraderTraitor",
+	"dragonok":              "DragonOK",
+	"agent serpens":         "Agent Serpens",
+	"seven deadly sins":     "Seven Deadly Sins",
+	"coinbase cartel":       "Coinbase Cartel",
+	"c3rb3r":                "C3RB3R",
+	"0apt":                  "0APT",
+	"bashe":                 "BASHE",
+	"noname":                "NoName",
+	"longnosedgoblin":       "LongNosedGoblin",
+	"teampcp":               "TeamPCP",
+	"bravox":                "BravoX",
+	"everstake":             "Everstake",
+	"k0t":                   "K0t",
+	"majinahanashi":         "Majinahanashi",
+	"auditteam":             "AuditTeam",
+	"audit team":            "AuditTeam",
+	"booba team":            "Booba Team",
+	"dark project":          "Dark Project",
+	"doommageddon":          "Doommageddon",
+	"hyflock":               "Hyflock",
+	"iah647":                "iah647",
+	"krybit":                "Krybit",
+	"lamashtu":              "Lamashtu",
+	"leaknet":               "LeakNet",
+	"payoutsking":           "PayoutsKing",
+	"securotrop":            "Securotrop",
+	"sovcali":               "Sovcali",
+	"wallstreet":            "WallStreet",
+	"whitearmor":            "WhiteArmor",
+	"siriusim":              "Siriusim",
+	"swallowtail":           "Swallowtail",
+	"aisuru":                "Aisuru",
+	"kimwolf":               "Kimwolf",
+	"majin":                 "MAJIN",
+	"qtfy":                  "QTFY",
+	"tengu":                 "Tengu",
+	"grandoreiro":           "Grandoreiro",
 	"lazarus":               "Lazarus",
 	"lazarus group":         "Lazarus Group",
 	"kimsuky":               "Kimsuky",
@@ -316,24 +446,29 @@ var canonicalActorNames = map[string]string{
 
 // actorAliasGroundings maps canonical actor names to alternative spellings that ground them in source text.
 var actorAliasGroundings = map[string][]string{
+	"qilin":               {"qilin", "キリン"},
 	"cl0p":                {"cl0p", "clop"},
 	"inc ransom":          {"inc ransom", "inc"},
-	"the gentlemen":       {"the gentlemen", "thegentlemen"},
+	"the gentlemen":       {"the gentlemen", "thegentlemen", "gentlemen"},
 	"silent ransom group": {"silent ransom group", "silentransomgroup"},
 	"black basta":         {"black basta", "blackbasta"},
 	"ragnar locker":       {"ragnar locker", "ragnarlocker"},
 	"lockbit":             {"lockbit", "lockbit3"},
+	"lockbit 5.0":         {"lockbit 5.0", "lockbit5.0", "lockbit5"},
+	"auditteam":           {"auditteam", "audit team"},
 }
 
 var (
-	actorCodeIDRegex      = regexp.MustCompile(`(?i)\b(APT-?\d{1,3}|UNC\d{4}|UAT-\d{4,5}|UTA\d{4}|FIN\d{1,2}|Storm-\d{4})\b`)
-	actorNamedFamilyRegex = regexp.MustCompile(`\b(Earth\s+[A-Z][a-z]{2,15}|(?:Volt|Salt|Flax|Silk|Brass|Granite)\s+Typhoon|(?:Charming|Static|Imperial)\s+Kitten|(?:Mustang|Stone|Emissary|Aquatic)\s+Panda|(?:Cozy|Fancy|Venomous)\s+Bear)\b`)
-	actorJaQuotedRegex    = regexp.MustCompile(`(?:サイバー攻撃グループ|APTグループ|攻撃グループ|脅威グループ|ハッカー集団|ランサムウェアグループ|ランサムウェア集団|ランサムウェア)\s*[「『【"']([^」』】"'\n]{2,32})[」』】"']`)
+	actorCodeIDRegex      = regexp.MustCompile(`(?i)\b(APT-?(?:C-)?\d{1,3}|UNC\d{4}|UAT-\d{4,5}|UTA\d{4}|FIN\d{1,2}|Storm-\d{4}|CL-STA-\d{4}|TA-SC-\d{2,3})\b`)
+	actorNamedFamilyRegex = regexp.MustCompile(`\b(Earth\s+[A-Z][a-z]{2,15}|(?:Volt|Salt|Flax|Silk|Brass|Granite)\s+Typhoon|(?:Charming|Static|Imperial)\s+Kitten|(?:Mustang|Stone|Emissary|Aquatic|Warp)\s+Panda|(?:Cozy|Fancy|Venomous)\s+Bear|BRONZE\s+[A-Z]{3,15}|GOLD\s+[A-Z]{3,15}|Silent\s+Lynx|Luna\s+Moth|Seven\s+Deadly\s+Sins)\b`)
+	actorJaQuotedRegex    = regexp.MustCompile(`(?:サイバー攻撃グループ|APTグループ|攻撃グループ|脅威グループ|ハッカー集団|ランサムウェアグループ|ランサムウェア集団)\s*[「『【"']([^」』】"'\n]{2,32})[」』】"']`)
 	actorJaBareRegex      = regexp.MustCompile(`(?:サイバー攻撃グループ|APTグループ|ランサムウェアグループ)\s*([A-Za-z0-9][A-Za-z0-9._-]{1,26})`)
 	actorJaSuffixRegex    = regexp.MustCompile(`([A-Za-z0-9][A-Za-z0-9._-]{1,24})(?:ランサムウェアグループ|ランサムウェア集団|ランサムウェアによる|APTグループ)`)
-	actorEnPrefixRegex    = regexp.MustCompile(`(?i)\b(?:APT\s+Group|Cyber\s+Threat\s+Group|Cyber\s+Attack\s+Group|Threat\s+Group|Ransomware\s+Group|Ransomware\s+Gang)\s+['"“]?([A-Za-z0-9][A-Za-z0-9._-]{1,26})['"”]?`)
-	actorEnSuffixRegex    = regexp.MustCompile(`(?i)\b([A-Za-z0-9][A-Za-z0-9._-]{1,24})\s+(?:APT\s+Group|Ransomware\s+Group|Ransomware\s+Gang|Ransomware\s+DLS|Extortion\s+Group|Threat\s+Actor)\b`)
-	actorEnHeadlineRegex  = regexp.MustCompile(`(?i)^\[?([A-Za-z0-9][A-Za-z0-9._-]{1,22})\s+Ransomware(?:\s*:|\s+Targets\b|\s+Hits\b|\s+Claims\b|\s+Dominates\b)`)
+	actorEnQuotedRegex    = regexp.MustCompile(`(?i)\b(?:APT\s+Group|Cyber\s+Threat\s+Group|Cyber\s+Attack\s+Group|Threat\s+Group|Ransomware\s+Group|Ransomware\s+Gang|Threat\s+Actor)(?:\s+(?:named|called|known\s+as|tracked\s+as|dubbed))?\s+['"“]([^'"”\n]{2,32})['"”]`)
+	actorEnNamedAsRegex   = regexp.MustCompile(`(?i)\b(?:APT\s+Group|Cyber\s+Threat\s+Group|Cyber\s+Attack\s+Group|Threat\s+Group|Ransomware\s+Group|Ransomware\s+Gang|Threat\s+Actor)\s+(?:named|called|tracked\s+as|dubbed)\s+['"“]?([A-Za-z0-9][A-Za-z0-9._$-]{1,24})['"”]?`)
+	actorEnProsePrefixRx  = regexp.MustCompile(`\b(?:apt|cyber\s+threat|cyber\s+attack|threat|ransomware)\s+(?:group|gang)\s+([A-Z0-9][A-Za-z0-9._$-]{1,24})\b`)
+	actorEnSuffixRegex    = regexp.MustCompile(`\b([A-Z0-9][A-Za-z0-9._$-]{1,22})\s+(?:APT\s+[Gg]roup|Ransomware\s+[Gg]roup|Ransomware\s+[Gg]ang|Ransomware\s+DLS|Extortion\s+[Gg]roup)\b`)
+	actorEnHeadlineRegex  = regexp.MustCompile(`^\[?([A-Z0-9][A-Za-z0-9._$-]{1,22})\s+Ransomware(?:\s*:|\s+(?:Targets|Hits|Claims|Dominates|Publishes|Lists|Listed|Linked|Leaks)\b)`)
 	ransomlookSrcRegex    = regexp.MustCompile(`(?i)Ransomlook Tracker\s*\(([^)]+)\)`)
 	ransomlookURLRegex    = regexp.MustCompile(`(?i)ransomlook\.io/group/([a-z0-9._%-]+)`)
 	malpediaActorURLRegex = regexp.MustCompile(`(?i)malpedia\.caad\.fkie\.fraunhofer\.de/actor/([a-z0-9._%-]+)`)
@@ -341,13 +476,13 @@ var (
 
 // stripActorGroupQualifiers removes generic group/ransomware prefixes and suffixes around an actor's name.
 func stripActorGroupQualifiers(raw string) string {
-	s := strings.Trim(strings.TrimSpace(raw), "[]\"'「」『』【】“” ")
+	s := strings.Trim(strings.TrimSpace(raw), "[]\"'「」『』【】“” .,;:")
 	if s == "" {
 		return ""
 	}
 	prefixes := []string{
 		"cyber threat group ", "cyber attack group ", "ransomware group ", "ransomware gang ",
-		"extortion group ", "threat group ", "apt group ",
+		"extortion group ", "threat group ", "apt group ", "aka ", "a.k.a. ", "別名：", "別名:",
 		"サイバー攻撃グループ", "ランサムウェアグループ", "ランサムウェア集団", "攻撃グループ", "脅威グループ", "aptグループ",
 	}
 	suffixes := []string{
@@ -362,7 +497,7 @@ func stripActorGroupQualifiers(raw string) string {
 		low := strings.ToLower(s)
 		for _, p := range prefixes {
 			if strings.HasPrefix(low, p) && len(s) > len(p)+1 {
-				s = strings.Trim(strings.TrimSpace(s[len(p):]), "[]\"'「」『』【】“” :")
+				s = strings.Trim(strings.TrimSpace(s[len(p):]), "[]\"'「」『』【】“” .,;:")
 				changed = true
 				break
 			}
@@ -370,7 +505,7 @@ func stripActorGroupQualifiers(raw string) string {
 		low = strings.ToLower(s)
 		for _, suf := range suffixes {
 			if strings.HasSuffix(low, suf) && len(s) > len(suf)+1 {
-				s = strings.Trim(strings.TrimSpace(s[:len(s)-len(suf)]), "[]\"'「」『』【】“” :")
+				s = strings.Trim(strings.TrimSpace(s[:len(s)-len(suf)]), "[]\"'「」『』【】“” .,;:")
 				changed = true
 				break
 			}
@@ -457,7 +592,8 @@ func IsValidThreatActor(actor string) bool {
 	return true
 }
 
-// CleanThreatActors normalizes cyberattack group names and filters out generic, speculative, or vendor strings.
+// CleanThreatActors normalizes cyberattack group names, filters out generic/stopword/vendor strings,
+// and drops standalone component tokens when a multi-word actor containing that token is already present.
 func CleanThreatActors(actors []string) []string {
 	var valid []string
 	seen := make(map[string]bool)
@@ -473,7 +609,30 @@ func CleanThreatActors(actors []string) []string {
 			}
 		}
 	}
-	return valid
+	if len(valid) <= 1 {
+		return valid
+	}
+	multiWordTokens := make(map[string]bool)
+	for _, v := range valid {
+		fields := strings.Fields(strings.ToLower(v))
+		if len(fields) > 1 {
+			for _, f := range fields {
+				multiWordTokens[f] = true
+			}
+		}
+	}
+	if len(multiWordTokens) == 0 {
+		return valid
+	}
+	var deduped []string
+	for _, v := range valid {
+		low := strings.ToLower(v)
+		if !strings.Contains(low, " ") && multiWordTokens[low] {
+			continue
+		}
+		deduped = append(deduped, v)
+	}
+	return deduped
 }
 
 // IsActorGrounded checks whether an actor name (or its known spelling alias) is explicitly mentioned in source texts.
@@ -559,6 +718,9 @@ var unambiguousGazetteerActors = []string{
 	"turla", "sandworm", "gamaredon", "muddywater", "oilrig", "menupass",
 	"silentransomgroup", "silent ransom group", "ransomexx", "noname057(16)", "killnet",
 	"funksec", "brain cipher", "rhysida", "8base", "ailock", "n0n", "stormous", "vexy", "aur0ra",
+	"the gentlemen", "thegentlemen", "direwolf", "nightspire", "fulcrumsec", "lapsus$",
+	"netwalker", "tradertraitor", "longnosedgoblin", "dragonok", "c3rb3r", "0apt", "bashe",
+	"scarlettgroup", "metaencryptor", "doommageddon", "payoutsking", "securotrop",
 }
 
 // ExtractThreatActors deterministically extracts and normalizes cyberattack groups from LLM output,
@@ -606,14 +768,26 @@ func ExtractThreatActors(item ThreatItem, enriched *EnrichedThreat, extraTexts .
 		}
 	}
 
-	if m := ransomlookSrcRegex.FindStringSubmatch(item.SourceName); len(m) > 1 {
-		candidates = append(candidates, m[1])
-	}
-	if m := ransomlookURLRegex.FindStringSubmatch(item.URL); len(m) > 1 {
-		candidates = append(candidates, strings.ReplaceAll(m[1], "%20", " "))
-	}
-	if m := malpediaActorURLRegex.FindStringSubmatch(item.URL); len(m) > 1 {
-		candidates = append(candidates, strings.ReplaceAll(m[1], "_", " "))
+	sourceMetaTexts := append([]string{item.SourceName, item.URL}, extraTexts...)
+	for _, metaTxt := range sourceMetaTexts {
+		if strings.TrimSpace(metaTxt) == "" {
+			continue
+		}
+		for _, m := range ransomlookSrcRegex.FindAllStringSubmatch(metaTxt, -1) {
+			if len(m) > 1 {
+				candidates = append(candidates, m[1])
+			}
+		}
+		for _, m := range ransomlookURLRegex.FindAllStringSubmatch(metaTxt, -1) {
+			if len(m) > 1 {
+				candidates = append(candidates, strings.ReplaceAll(m[1], "%20", " "))
+			}
+		}
+		for _, m := range malpediaActorURLRegex.FindAllStringSubmatch(metaTxt, -1) {
+			if len(m) > 1 {
+				candidates = append(candidates, strings.ReplaceAll(m[1], "_", " "))
+			}
+		}
 	}
 
 	scanTexts := []string{item.Title, item.Summary}
@@ -634,7 +808,8 @@ func ExtractThreatActors(item ThreatItem, enriched *EnrichedThreat, extraTexts .
 		}
 		for _, re := range []*regexp.Regexp{
 			actorJaQuotedRegex, actorJaBareRegex, actorJaSuffixRegex,
-			actorEnPrefixRegex, actorEnSuffixRegex, actorEnHeadlineRegex,
+			actorEnQuotedRegex, actorEnNamedAsRegex, actorEnProsePrefixRx,
+			actorEnSuffixRegex, actorEnHeadlineRegex,
 		} {
 			for _, sub := range re.FindAllStringSubmatch(txt, -1) {
 				if len(sub) > 1 {
