@@ -278,6 +278,14 @@ sources:
       directive: "国内外のオンラインサービス、ゲーム、Webプラットフォームにおけるサプライチェーン攻撃、スクリプト改ざん、不正プログラム（マルウェア）配信、アカウント侵害、ランチャー脆弱性の最新被害"
       query: "(サプライチェーン攻撃 OR 改ざん OR マルウェア配信 OR 不正プログラム) (ゲーム OR アプリ OR サービス OR ランチャー) (被害 OR 調査 OR 判明)"
       enabled: true
+    - name: "SearXNG Web: PCランチャー改ざん・クライアント不正プログラム配信"
+      url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
+      type: "searxng"
+      categories: "general,news"
+      time_range: "day"
+      directive: "『勝利の女神: NIKKE』をはじめとするPCゲーム・クライアントソフトウェアのランチャー改ざん、不正スクリプト混入、不正プログラム配信インシデント"
+      query: "(勝利の女神 OR NIKKE OR ランチャー) (改ざん OR 不正プログラム OR 不正アクセス OR 侵害)"
+      enabled: true
     - name: "SearXNG Web: 日本標的APT攻撃・サプライチェーン侵害"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"

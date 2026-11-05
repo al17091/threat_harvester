@@ -573,4 +573,45 @@ func TestHarvesterTestConnections(t *testing.T) {
 	}
 }
 
+func TestQuerySearXNGAPIWithFallback(t *testing.T) {
+	ctx := context.Background()
+
+	primaryURL := "https://searxng-primary.test/search"
+	fallbackURL := "https://searxng-fallback.test/search"
+
+	// 1. Primary returns 0 results -> should fall back to secondary
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.String(), "searxng-primary") {
+				// Empty results
+				resp := `{"results": []}`
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(resp)),
+					Header:     make(http.Header),
+				}, nil
+			}
+			// Fallback returns 1 result
+			resp := `{"results": [{"title": "Fallback Result", "url": "https://example.com/alert"}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(resp)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	results, err := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, "test query", "", "", "day")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result from fallback, got %d", len(results))
+	}
+	if results[0].Title != "Fallback Result" {
+		t.Errorf("expected Fallback Result, got %s", results[0].Title)
+	}
+}
+
+
 

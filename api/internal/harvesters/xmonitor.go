@@ -309,10 +309,7 @@ Only return valid JSON array without Markdown code block formatting.
 
 // harvestSearXNGX executes clearnet meta-search via SearXNG for X (Twitter) queries without consuming Gemini API tokens
 func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.QuerySourceConfig, jobs []searchJob, since *time.Time) ([]models.ThreatItem, error) {
-	baseURL := qCfg.URL
-	if baseURL == "" {
-		baseURL = "https://searxng.lab.internal/search"
-	}
+	primaryURL, fallbackURL := ResolveSearXNGBaseURL(qCfg.URL)
 	timeoutSec := qCfg.TimeoutSeconds
 	if timeoutSec <= 0 {
 		timeoutSec = 30
@@ -343,7 +340,7 @@ func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.Que
 		}
 
 		log.Printf("[XMonitor] Executing SearXNG X search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", query, qCfg.Name, qCfg.Engines, categories, timeRange)
-		results, err := QuerySearXNGAPI(ctx, client, baseURL, query, qCfg.Engines, categories, timeRange)
+		results, err := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, query, qCfg.Engines, categories, timeRange)
 		if err != nil {
 			log.Printf("[XMonitor] SearXNG X query '%s' failed: %v", query, err)
 			continue
