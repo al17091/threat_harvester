@@ -257,18 +257,19 @@ func (a *OpenAICompatibleAnalyzer) AnalyzeBatch(ctx context.Context, items []mod
 	if len(items) == 1 {
 		enriched, err := a.Analyze(ctx, items[0])
 		if err != nil {
-			return nil, err
+			log.Printf("[OpenAICompatibleAnalyzer] Single item analysis failed: %v. Using baseline fallback.", err)
+			return []*models.EnrichedThreat{CreateBaselineEnrichedThreat(items[0])}, nil
 		}
 		return []*models.EnrichedThreat{enriched}, nil
 	}
 
-	// Sequential extraction with concurrency limit
+	// Sequential extraction with fallback per item
 	results := make([]*models.EnrichedThreat, len(items))
 	for i, it := range items {
 		en, err := a.Analyze(ctx, it)
 		if err != nil {
-			log.Printf("[OpenAICompatibleAnalyzer] Batch item %d failed: %v", i, err)
-			return nil, fmt.Errorf("item %d (%s) analysis failed: %w", i, it.Title, err)
+			log.Printf("[OpenAICompatibleAnalyzer] Batch item %d (%s) failed: %v. Using baseline fallback.", i, it.Title, err)
+			en = CreateBaselineEnrichedThreat(it)
 		}
 		results[i] = en
 	}

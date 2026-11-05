@@ -170,8 +170,8 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				enriched = enrichedBatch[itemIdx]
 			}
 			if enriched == nil {
-				log.Printf("[Pipeline] Missing enrichment for item: %s", item.Title)
-				continue
+				log.Printf("[Pipeline] Missing enrichment for item: %s. Generating baseline enrichment.", item.Title)
+				enriched = analyzer.CreateBaselineEnrichedThreat(item)
 			}
 
 			if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent, enriched.Title, enriched.TitleJa, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
