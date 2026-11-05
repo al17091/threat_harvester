@@ -46,11 +46,6 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 		model = "gemini-3.5-flash-lite"
 	}
 
-	if apiKey == "" {
-		log.Println("[XMonitor] Gemini API key not configured. Skipping XMonitorHarvester.")
-		return nil, nil
-	}
-
 	var items []models.ThreatItem
 
 	for _, qCfg := range cfg.Sources.XMonitor {
@@ -60,6 +55,15 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 		}
 		if !qCfg.Enabled || !cfg.Compliance.IsTierEnabled(tier) {
 			continue
+		}
+
+		provider := strings.ToLower(strings.TrimSpace(qCfg.Type))
+		if provider == "" {
+			if strings.Contains(qCfg.URL, "searxng") {
+				provider = "searxng"
+			} else {
+				provider = "gemini"
+			}
 		}
 
 		var jobs []searchJob
@@ -89,6 +93,22 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 			}
 			jobs = append(jobs, searchJob{query: strings.TrimSpace(qCfg.Query), directive: "", displayName: label})
 		} else {
+			continue
+		}
+
+		if provider == "searxng" {
+			searxItems, err := h.harvestSearXNGX(ctx, qCfg, jobs, since)
+			if err != nil {
+				log.Printf("[XMonitor] SearXNG X search error for %s: %v", qCfg.Name, err)
+			} else {
+				items = append(items, searxItems...)
+			}
+			continue
+		}
+
+		// Provider is Gemini
+		if apiKey == "" {
+			log.Printf("[XMonitor] Gemini API key not configured. Skipping Gemini search for '%s'.", qCfg.Name)
 			continue
 		}
 
@@ -284,6 +304,120 @@ Only return valid JSON array without Markdown code block formatting.
 	}
 
 	log.Printf("[XMonitor] XMonitorHarvester collected %d items", len(items))
+	return items, nil
+}
+
+// harvestSearXNGX executes clearnet meta-search via SearXNG for X (Twitter) queries without consuming Gemini API tokens
+func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.QuerySourceConfig, jobs []searchJob, since *time.Time) ([]models.ThreatItem, error) {
+	baseURL := qCfg.URL
+	if baseURL == "" {
+		baseURL = "https://searxng.lab.internal/search"
+	}
+	timeoutSec := qCfg.TimeoutSeconds
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+
+	client := &http.Client{
+		Transport: defaultSearxngTransport,
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+	}
+
+	categories := qCfg.Categories
+	if categories == "" {
+		categories = "general,news"
+	}
+	timeRange := strings.TrimSpace(qCfg.TimeRange)
+	if timeRange == "" {
+		timeRange = "day"
+	}
+
+	var items []models.ThreatItem
+	seenURLs := make(map[string]bool)
+
+	for _, job := range jobs {
+		query := job.query
+		// Ensure site filter is present for X monitoring if query doesn't already have it
+		if !strings.Contains(query, "site:x.com") && !strings.Contains(query, "site:twitter.com") {
+			query = fmt.Sprintf("(%s) (site:x.com OR site:twitter.com)", query)
+		}
+
+		log.Printf("[XMonitor] Executing SearXNG X search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", query, qCfg.Name, qCfg.Engines, categories, timeRange)
+		results, err := QuerySearXNGAPI(ctx, client, baseURL, query, qCfg.Engines, categories, timeRange)
+		if err != nil {
+			log.Printf("[XMonitor] SearXNG X query '%s' failed: %v", query, err)
+			continue
+		}
+
+		for _, res := range results {
+			if strings.TrimSpace(res.URL) == "" {
+				continue
+			}
+			if seenURLs[res.URL] {
+				continue
+			}
+			seenURLs[res.URL] = true
+
+			if isHistoricalArticle(res.Title, res.Content) {
+				continue
+			}
+
+			var pubDate *time.Time
+			if res.PublishedDate != "" {
+				layouts := []string{
+					time.RFC3339,
+					"2006-01-02T15:04:05Z07:00",
+					"2006-01-02 15:04:05",
+					"2006-01-02",
+				}
+				for _, layout := range layouts {
+					if t, err := time.Parse(layout, strings.TrimSpace(res.PublishedDate)); err == nil {
+						utc := t.UTC()
+						pubDate = &utc
+						break
+					}
+				}
+			}
+
+			if since != nil && pubDate != nil && pubDate.Before(*since) {
+				continue
+			}
+
+			if !isCTIRelevant(res.Title + " " + res.Content) {
+				continue
+			}
+
+			sourceLabel := job.displayName
+			if sourceLabel == "" {
+				sourceLabel = query
+			}
+			sourceName := models.TruncateRunes(fmt.Sprintf("X:%s", sourceLabel), 30)
+
+			rawContent := fmt.Sprintf("[%s]\nTitle: %s\nSummary: %s\nURL: %s", sourceName, res.Title, res.Content, res.URL)
+			meta := map[string]interface{}{
+				"is_onion":      false,
+				"fetch_status":  "pending",
+				"engine":        res.Engine,
+				"searxng_query": query,
+				"source_engine": res.Engine,
+			}
+			if len(res.Engines) > 0 {
+				meta["engines"] = res.Engines
+			}
+
+			item := models.NewThreatItem(
+				models.SourceTypeXMonitor,
+				sourceName,
+				res.Title,
+				res.URL,
+				res.Content,
+				rawContent,
+				pubDate,
+				meta,
+			)
+			items = append(items, item)
+		}
+	}
 	return items, nil
 }
 

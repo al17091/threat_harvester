@@ -138,6 +138,7 @@ type DarkwebSourceConfig struct {
 	Directive      string `yaml:"directive,omitempty" json:"directive,omitempty"`
 	Engines        string `yaml:"engines,omitempty" json:"engines,omitempty"`
 	Categories     string `yaml:"categories,omitempty" json:"categories,omitempty"`
+	TimeRange      string `yaml:"time_range,omitempty" json:"time_range,omitempty"` // e.g. "day", "week", "month", "year"
 	TimeoutSeconds int    `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
 	ComplianceTier string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`
 	Enabled        bool   `yaml:"enabled" json:"enabled"`
@@ -159,6 +160,7 @@ type QuerySourceConfig struct {
 	URL             string `yaml:"url,omitempty" json:"url,omitempty"`   // custom searxng url
 	Engines         string `yaml:"engines,omitempty" json:"engines,omitempty"` // e.g. "google,bing,duckduckgo,yahoo"
 	Categories      string `yaml:"categories,omitempty" json:"categories,omitempty"` // e.g. "general,news"
+	TimeRange       string `yaml:"time_range,omitempty" json:"time_range,omitempty"`  // e.g. "day", "week", "month", "year"
 	TimeoutSeconds  int    `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
 	IntervalMinutes int    `yaml:"interval_minutes,omitempty" json:"interval_minutes,omitempty"`
 	ComplianceTier  string `yaml:"compliance_tier,omitempty" json:"compliance_tier,omitempty"`

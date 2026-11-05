@@ -188,13 +188,17 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 	if categories == "" {
 		categories = "general,news"
 	}
+	timeRange := strings.TrimSpace(qCfg.TimeRange)
+	if timeRange == "" {
+		timeRange = "day"
+	}
 
 	var items []models.ThreatItem
 	seenURLs := make(map[string]bool)
 
 	for _, job := range jobs {
-		log.Printf("[WebSearch] Executing SearXNG web search query: '%s' (Source: %s, Engines: %s, Categories: %s)", job.query, qCfg.Name, qCfg.Engines, categories)
-		results, err := QuerySearXNGAPI(ctx, client, baseURL, job.query, qCfg.Engines, categories)
+		log.Printf("[WebSearch] Executing SearXNG web search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", job.query, qCfg.Name, qCfg.Engines, categories, timeRange)
+		results, err := QuerySearXNGAPI(ctx, client, baseURL, job.query, qCfg.Engines, categories, timeRange)
 		if err != nil {
 			log.Printf("[WebSearch] SearXNG query '%s' failed: %v", job.query, err)
 			continue
@@ -212,6 +216,11 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 				continue
 			}
 			seenURLs[res.URL] = true
+
+			// Filter out obvious historical/archived articles (e.g. from 2024 or earlier without modern context)
+			if isHistoricalArticle(res.Title, res.Content) {
+				continue
+			}
 
 			// Parse publication date if present
 			var pubDate *time.Time
@@ -466,6 +475,27 @@ func (h *WebSearchHarvester) TestConnection(ctx context.Context) bool {
 	if err == nil && resp.StatusCode == http.StatusOK {
 		resp.Body.Close()
 		return true
+	}
+	return false
+}
+
+func isHistoricalArticle(title, content string) bool {
+	combined := strings.ToLower(title + " " + content)
+	currentYear := time.Now().UTC().Year()
+	currYearStr := fmt.Sprintf("%d", currentYear)
+	prevYearStr := fmt.Sprintf("%d", currentYear-1)
+
+	// If it contains references to current or previous year, consider it active
+	if strings.Contains(combined, currYearStr) || strings.Contains(combined, prevYearStr) {
+		return false
+	}
+
+	// Check for explicit historical years in title or content
+	historicalYears := []string{"2024", "2023", "2022", "2021", "2020", "2019", "2018"}
+	for _, yr := range historicalYears {
+		if strings.Contains(combined, yr+"年") || strings.Contains(combined, yr+"/") || strings.Contains(combined, yr+"-") || strings.Contains(combined, "in "+yr) || strings.Contains(combined, yr+" ") {
+			return true
+		}
 	}
 	return false
 }

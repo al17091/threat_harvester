@@ -360,7 +360,7 @@ func TestQuerySearXNGAPI_PathAutoAppend(t *testing.T) {
 	defer ts.Close()
 
 	// ts.URL has no trailing /search
-	_, err := QuerySearXNGAPI(context.Background(), ts.Client(), ts.URL, "test", "ahmia", "onions")
+	_, err := QuerySearXNGAPI(context.Background(), ts.Client(), ts.URL, "test", "ahmia", "onions", "")
 	if err != nil {
 		t.Fatalf("QuerySearXNGAPI failed: %v", err)
 	}
