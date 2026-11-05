@@ -130,6 +130,9 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 					jobs = append(jobs, searchJob{query: q, directive: directive, displayName: label})
 				}
 			}
+			if strings.TrimSpace(qCfg.Query) != "" {
+				jobs = append(jobs, searchJob{query: strings.TrimSpace(qCfg.Query), directive: directive, displayName: label})
+			}
 		} else if strings.TrimSpace(qCfg.Query) != "" {
 			label := displayName
 			if label == "" {
@@ -196,6 +199,14 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 	for _, job := range jobs {
 		log.Printf("[WebSearch] Executing SearXNG web search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", job.query, qCfg.Name, qCfg.Engines, categories, timeRange)
 		results, err := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, job.query, qCfg.Engines, categories, timeRange)
+		if (err != nil || len(results) == 0) && timeRange == "day" {
+			log.Printf("[WebSearch] 0 results or error with time_range=day for '%s', retrying with time_range=week", job.query)
+			weekResults, weekErr := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, job.query, qCfg.Engines, categories, "week")
+			if weekErr == nil && len(weekResults) > 0 {
+				results = weekResults
+				err = nil
+			}
+		}
 		if err != nil {
 			log.Printf("[WebSearch] SearXNG query '%s' failed: %v", job.query, err)
 			continue
