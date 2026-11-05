@@ -123,6 +123,28 @@ func isWithinWindow(inc *models.Incident, itemTime time.Time, windowDuration tim
 	return true
 }
 
+// isGenericSummaryIncident checks if an incident represents an overarching roundup, trend report, or multi-incident digest
+func isGenericSummaryIncident(inc *models.Incident) bool {
+	if inc == nil {
+		return false
+	}
+	titleLower := strings.ToLower(inc.Title + " " + inc.TitleJa)
+	summaryKeywords := []string{
+		"相次ぐ", "まとめ", "動向", "横断整理", "大規模な不正アクセス・情報漏えい事案",
+		"国内で相次ぐ", "被害が相次ぐ", "注意喚起と攻撃手法の公開", "roundup", "bulletin",
+		"threat intelligence report", "threat report", "weekly threat", "monthly",
+	}
+	for _, kw := range summaryKeywords {
+		if strings.Contains(titleLower, strings.ToLower(kw)) {
+			return true
+		}
+	}
+	if inc.VictimOrg == "" && len(inc.CVEs) >= 3 {
+		return true
+	}
+	return false
+}
+
 // FindOrCreateIncident matches an incoming report to an existing clustered incident
 // using matching CVEs, same affected products, or victim organizations within a sliding window,
 // or creates a new STIX 2.1 compliant parent incident.
@@ -297,6 +319,10 @@ func (s *SQLStore) FindOrCreateIncident(
 						if normProduct != "" && incNorm != "" && normProduct != incNorm {
 							continue
 						}
+						// Generic summary guard: do not merge a specific report into an overarching generic summary/digest incident
+						if isGenericSummaryIncident(inc) {
+							continue
+						}
 						// Aggregated digest guard: if existing incident already holds >= 5 CVEs (patch roundup),
 						// do not merge an incoming single-product report into the digest
 						if len(inc.CVEs) >= 5 && normProduct != "" && incNorm == "" {
@@ -338,6 +364,9 @@ func (s *SQLStore) FindOrCreateIncident(
 						continue
 					}
 					if isWithinWindow(inc, itemTime, windowDuration) {
+						if isGenericSummaryIncident(inc) {
+							continue
+						}
 						incNorm := models.NormalizeProduct(inc.AffectedProduct)
 						if incNorm == normProduct || strings.Contains(strings.ToLower(inc.Title), normProduct) {
 							// Disjoint CVE guard: If both have CVEs and none overlap, they are different vulnerabilities!
@@ -454,6 +483,9 @@ func (s *SQLStore) FindOrCreateIncident(
 					continue
 				}
 				if isWithinWindow(inc, itemTime, windowDuration) {
+					if isGenericSummaryIncident(inc) {
+						continue
+					}
 					// Guard: If both existing incident and incoming report identify specific distinct products,
 					// do not merge them under the general organization (e.g. GMO infoQ vs GMO Desktop Cloud).
 					incNormProd := models.NormalizeProduct(inc.AffectedProduct)
