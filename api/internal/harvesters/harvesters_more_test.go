@@ -347,6 +347,62 @@ func TestXMonitorHarvester(t *testing.T) {
 	}
 }
 
+func TestXMonitorHarvester_SearXNGProvider(t *testing.T) {
+	ctx := context.Background()
+	h := NewXMonitorHarvester()
+
+	searxngResp := `{
+		"results": [
+			{
+				"title": "Breach announcement on X: Corp hacked",
+				"url": "https://x.com/vxunderground/status/987654321",
+				"content": "Threat actor claims ransomware attack on prominent organization",
+				"engine": "bing",
+				"publishedDate": "2026-11-05"
+			}
+		]
+	}`
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(searxngResp))
+	}))
+	defer ts.Close()
+
+	origCfg := config.GetSettings().GetConfig()
+	defer config.GetSettings().SetConfig(origCfg)
+
+	cfg := origCfg
+	cfg.AI.GeminiAPIKey = "" // No Gemini API key
+	cfg.Sources.XMonitor = []config.QuerySourceConfig{
+		{
+			Name:           "X Researcher Feed via SearXNG",
+			Query:          "(ransomware OR breach) site:x.com",
+			Type:           "searxng",
+			URL:            ts.URL,
+			TimeRange:      "day",
+			Enabled:        true,
+			ComplianceTier: config.TierCommercialViaOfficialAPI,
+		},
+	}
+	cfg.Compliance.Tiers.CommercialViaOfficialAPI = true
+	config.GetSettings().SetConfig(cfg)
+
+	items, err := h.Harvest(ctx, nil)
+	if err != nil {
+		t.Fatalf("h.Harvest failed with SearXNG provider: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item from SearXNG, got %d", len(items))
+	}
+	if items[0].SourceType != models.SourceTypeXMonitor {
+		t.Errorf("expected source_type %s, got %s", models.SourceTypeXMonitor, items[0].SourceType)
+	}
+	if items[0].URL != "https://x.com/vxunderground/status/987654321" {
+		t.Errorf("expected URL to be preserved, got %s", items[0].URL)
+	}
+}
+
 func TestGroundingHelpers(t *testing.T) {
 	// isGenericDomain
 	if !isGenericDomain("https://www.google.com/search?q=test") {

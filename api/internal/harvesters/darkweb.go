@@ -730,7 +730,7 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 		}
 
 		log.Printf("[DarkWeb] Executing SearXNG query: '%s' (Target: %s, URL: %s)", q, target.Name, baseURL)
-		results, err := h.querySearXNG(ctx, client, baseURL, q, target.Engines, target.Categories)
+		results, err := h.querySearXNG(ctx, client, baseURL, q, target.Engines, target.Categories, target.TimeRange)
 		<-darkwebSearxngSem
 		if err != nil {
 			log.Printf("[DarkWeb] SearXNG search query '%s' failed: %v", q, err)
@@ -800,12 +800,12 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 }
 
 // querySearXNG calls SearXNG format=json API
-func (h *DarkwebOnionHarvester) querySearXNG(ctx context.Context, client *http.Client, endpoint, query, engines, categories string) ([]searxngResult, error) {
-	return QuerySearXNGAPI(ctx, client, endpoint, query, engines, categories)
+func (h *DarkwebOnionHarvester) querySearXNG(ctx context.Context, client *http.Client, endpoint, query, engines, categories, timeRange string) ([]searxngResult, error) {
+	return QuerySearXNGAPI(ctx, client, endpoint, query, engines, categories, timeRange)
 }
 
 // QuerySearXNGAPI calls SearXNG format=json API and returns parsed results
-func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, engines, categories string) ([]searxngResult, error) {
+func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, engines, categories, timeRange string) ([]searxngResult, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("invalid searxng endpoint: %w", err)
@@ -822,6 +822,9 @@ func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, 
 	}
 	if strings.TrimSpace(categories) != "" {
 		qParams.Set("categories", strings.TrimSpace(categories))
+	}
+	if strings.TrimSpace(timeRange) != "" {
+		qParams.Set("time_range", strings.TrimSpace(timeRange))
 	}
 	u.RawQuery = qParams.Encode()
 

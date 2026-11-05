@@ -94,6 +94,10 @@ sources:
       url: "https://www.ipa.go.jp/security/rss/alert.rdf"
       category: "jp_cert"
       enabled: true
+    - name: "ITmedia エンタープライズ セキュリティ"
+      url: "https://rss.itmedia.co.jp/rss/2.0/enterprise_sub_security.xml"
+      category: "jp_news"
+      enabled: true
     - name: "ScanNetSecurity"
       url: "https://scan.netsecurity.ne.jp/rss/index.rdf"
       category: "jp_news"
@@ -101,6 +105,22 @@ sources:
     - name: "Security Next"
       url: "https://www.security-next.com/feed"
       category: "jp_news"
+      enabled: true
+    - name: "Bluesky vx-underground"
+      url: "https://bsky.app/profile/vxunderground.bsky.social/rss"
+      category: "social_cti"
+      enabled: true
+    - name: "Bluesky MalwareHunterTeam"
+      url: "https://bsky.app/profile/malwrhunterteam.bsky.social/rss"
+      category: "social_cti"
+      enabled: true
+    - name: "Bluesky Catalin Cimpanu"
+      url: "https://bsky.app/profile/campuscodi.bsky.social/rss"
+      category: "social_cti"
+      enabled: true
+    - name: "Bluesky Brian Krebs"
+      url: "https://bsky.app/profile/briankrebs.bsky.social/rss"
+      category: "social_cti"
       enabled: true
     - name: "BleepingComputer"
       url: "https://www.bleepingcomputer.com/feed/"
@@ -110,19 +130,29 @@ sources:
       url: "https://thehackernews.com/rss.xml"
       category: "global_news"
       enabled: true
+    - name: "CyberScoop"
+      url: "https://cyberscoop.com/feed/"
+      category: "global_news"
+      enabled: true
     - name: "CISA Alerts"
       url: "https://www.cisa.gov/uscert/ncas/alerts.xml"
       category: "global_cert"
       enabled: true
 
   telegram:
-    - channel: "redabyss_cti"
-      enabled: true
-    - channel: "malware_traffic"
+    - channel: "vxunderground"
       enabled: true
     - channel: "ransomfeed"
       enabled: true
+    - channel: "redabyss_cti"
+      enabled: true
+    - channel: "dailydarkweb"
+      enabled: true
+    - channel: "malware_traffic"
+      enabled: true
     - channel: "cybersecurity_news_hub"
+      enabled: true
+    - channel: "threatintel"
       enabled: true
 
   darkweb_onion:
@@ -184,22 +214,34 @@ sources:
 
   x_monitor:
     - name: "国内セキュリティ速報 (piyokango / JPCERT)"
-      query: "(from:piyokango OR from:jpcert OR from:ken_security) site:x.com OR site:twitter.com"
+      query: "(from:piyokango OR from:jpcert OR from:ken_security) (site:x.com OR site:twitter.com)"
+      type: "searxng"
+      time_range: "day"
       enabled: true
     - name: "国内ランサム・不正アクセス速報ポスト"
-      query: "(ランサムウェア OR 不正アクセス OR 情報漏洩 OR サイバー攻撃) (被害 OR 停止 OR 調査) site:x.com OR site:twitter.com"
+      query: "(ランサムウェア OR 不正アクセス OR 情報漏洩 OR サイバー攻撃) (被害 OR 停止 OR 調査) (site:x.com OR site:twitter.com)"
+      type: "searxng"
+      time_range: "day"
       enabled: true
     - name: "緊急ゼロデイ・悪用PoC速報ポスト"
-      query: "(脆弱性 OR ゼロデイ OR 悪用 OR CVE) (緊急 OR PoC OR 注意喚起) site:x.com OR site:twitter.com"
+      query: "(脆弱性 OR ゼロデイ OR 悪用 OR CVE) (緊急 OR PoC OR 注意喚起) (site:x.com OR site:twitter.com)"
+      type: "searxng"
+      time_range: "day"
       enabled: true
     - name: "海外CTIアナリスト・ダークウェブ追跡"
-      query: "(from:FalconFeedsio OR from:DarkTracer_Int OR from:ransomfeed) (Japan OR Japanese OR 日本) site:x.com OR site:twitter.com"
+      query: "(from:FalconFeedsio OR from:DarkTracer_Int OR from:ransomfeed) (Japan OR Japanese OR 日本) (site:x.com OR site:twitter.com)"
+      type: "searxng"
+      time_range: "day"
       enabled: true
     - name: "マルウェア・脅威リサーチ速報"
-      query: "(from:vxunderground OR from:malwrhunterteam OR from:Unit42_Intel) site:x.com OR site:twitter.com"
+      query: "(from:vxunderground OR from:malwrhunterteam OR from:Unit42_Intel) (site:x.com OR site:twitter.com)"
+      type: "searxng"
+      time_range: "day"
       enabled: true
     - name: "国内組織ランサムウェア・データ流出速報"
       directive: "国内組織・日本企業のランサムウェア被害や不正アクセス、データリークに関する最新のX/Twitter上の投稿やアナウンス"
+      type: "searxng"
+      time_range: "day"
       enabled: true
 
   web_search:
@@ -208,6 +250,7 @@ sources:
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
+      time_range: "day"
       directive: "日本国内の企業や医療機関、自治体を標的としたランサムウェア攻撃、身代金要求、システム障害、二重脅迫の最新動向"
       query: "(ランサムウェア OR サイバー攻撃) (被害 OR 停止 OR 身代金) (日本 OR 企業)"
       enabled: true
@@ -215,6 +258,7 @@ sources:
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
+      time_range: "day"
       directive: "日本国内の企業や大学、公共機関における不正アクセス、サーバー侵害、顧客情報や機密データの流出・漏洩報告"
       query: "(不正アクセス OR 情報漏洩 OR 個人情報流出) (調査 OR 謝罪 OR 判明)"
       enabled: true
@@ -222,29 +266,39 @@ sources:
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
+      time_range: "day"
       directive: "国内で広く利用されるVPN機器や境界機器（Fortinet, Ivanti, Palo Alto等）の未修正ゼロデイや悪用PoC"
       query: "(ゼロデイ OR 脆弱性 OR Exploit) (VPN OR Fortinet OR Ivanti OR Palo Alto) (悪用 OR 被害)"
+      enabled: true
+    - name: "SearXNG Web: オンラインサービス・ゲーム・サプライチェーン改ざん侵害速報"
+      url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
+      type: "searxng"
+      categories: "general,news"
+      time_range: "day"
+      directive: "国内外のオンラインサービス、ゲーム、Webプラットフォームにおけるサプライチェーン攻撃、スクリプト改ざん、不正プログラム（マルウェア）配信、アカウント侵害、ランチャー脆弱性の最新被害"
+      query: "(サプライチェーン攻撃 OR 改ざん OR マルウェア配信 OR 不正プログラム) (ゲーム OR アプリ OR サービス OR ランチャー) (被害 OR 調査 OR 判明)"
       enabled: true
     - name: "SearXNG Web: 日本標的APT攻撃・サプライチェーン侵害"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
+      time_range: "day"
       directive: "MirrorFace, BlackTech, APT10等の標的型攻撃やサプライチェーン経由の不正侵入動向"
       query: "(標的型攻撃 OR サプライチェーン攻撃 OR APT) (日本 OR 国内) (侵入 OR マルウェア)"
       enabled: true
-    # Gemini Web Search Grounding (4h Throttled Escalation)
+    # Gemini Web Search Grounding (Throttled Escalation)
     - name: "Gemini Grounding: 重要インフラ・サプライチェーン侵害"
       type: "gemini"
       directive: "日本国内の医療機関、製造業サプライチェーン、金融、インフラを標的とした最新のサイバー攻撃被害や身代金要求"
-      interval_minutes: 240
-      enabled: true
+      interval_minutes: 720
+      enabled: false
     - name: "Gemini Grounding: ネットワーク境界・VPN機器のゼロデイ悪用"
       type: "gemini"
       directive: "FortinetやIvanti、Palo Altoなど国内で広く利用されるVPN・ネットワーク境界機器のゼロデイ脆弱性悪用と被害報告"
-      interval_minutes: 240
-      enabled: true
+      interval_minutes: 720
+      enabled: false
     - name: "Gemini Grounding: 日本標的APT攻撃グループの活動動向"
       type: "gemini"
       directive: "BlackTech, MirrorFace, APT10, Kimsukyなど日本国内組織を標的とする国家背景APTグループの最新の攻撃動向"
-      interval_minutes: 240
-      enabled: true
+      interval_minutes: 720
+      enabled: false
