@@ -170,10 +170,7 @@ func (h *WebSearchHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 
 // harvestSearXNGWeb executes clearnet meta-search via SearXNG format=json API (zero cost, no darkweb)
 func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.QuerySourceConfig, jobs []searchJob, since *time.Time) ([]models.ThreatItem, error) {
-	baseURL := qCfg.URL
-	if baseURL == "" {
-		baseURL = "https://searxng.lab.internal/search"
-	}
+	primaryURL, fallbackURL := ResolveSearXNGBaseURL(qCfg.URL)
 	timeoutSec := qCfg.TimeoutSeconds
 	if timeoutSec <= 0 {
 		timeoutSec = 30
@@ -198,7 +195,7 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 
 	for _, job := range jobs {
 		log.Printf("[WebSearch] Executing SearXNG web search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", job.query, qCfg.Name, qCfg.Engines, categories, timeRange)
-		results, err := QuerySearXNGAPI(ctx, client, baseURL, job.query, qCfg.Engines, categories, timeRange)
+		results, err := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, job.query, qCfg.Engines, categories, timeRange)
 		if err != nil {
 			log.Printf("[WebSearch] SearXNG query '%s' failed: %v", job.query, err)
 			continue

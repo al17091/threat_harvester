@@ -804,6 +804,50 @@ func (h *DarkwebOnionHarvester) querySearXNG(ctx context.Context, client *http.C
 	return QuerySearXNGAPI(ctx, client, endpoint, query, engines, categories, timeRange)
 }
 
+// ResolveSearXNGBaseURL returns the configured SearXNG endpoint, prioritizing SEARXNG_RESEARCH_URL if direct is not specified
+func ResolveSearXNGBaseURL(configuredURL string) (primaryURL string, fallbackURL string) {
+	researchURL := os.Getenv("SEARXNG_RESEARCH_URL")
+	if researchURL == "" {
+		researchURL = "https://searxng-research.lab.internal/search"
+	}
+	defaultURL := os.Getenv("SEARXNG_URL")
+	if defaultURL == "" {
+		defaultURL = "https://searxng.lab.internal/search"
+	}
+
+	if configuredURL != "" {
+		primaryURL = configuredURL
+		if configuredURL != researchURL {
+			fallbackURL = researchURL
+		}
+		return
+	}
+
+	// By default, prefer researchURL because it routes via Tor and bypasses search engine CAPTCHAs/rate limits
+	primaryURL = researchURL
+	if primaryURL != defaultURL {
+		fallbackURL = defaultURL
+	}
+	return
+}
+
+// QuerySearXNGAPIWithFallback calls SearXNG format=json API, and falls back to fallbackEndpoint if primary returns 0 results or fails
+func QuerySearXNGAPIWithFallback(ctx context.Context, client *http.Client, primaryEndpoint, fallbackEndpoint, query, engines, categories, timeRange string) ([]searxngResult, error) {
+	results, err := QuerySearXNGAPI(ctx, client, primaryEndpoint, query, engines, categories, timeRange)
+	if (err != nil || len(results) == 0) && fallbackEndpoint != "" && fallbackEndpoint != primaryEndpoint {
+		if err != nil {
+			log.Printf("[SearXNG] Primary endpoint %s failed: %v. Retrying with fallback %s", primaryEndpoint, err, fallbackEndpoint)
+		} else {
+			log.Printf("[SearXNG] Primary endpoint %s returned 0 results. Retrying with fallback %s", primaryEndpoint, fallbackEndpoint)
+		}
+		fallbackResults, fallbackErr := QuerySearXNGAPI(ctx, client, fallbackEndpoint, query, engines, categories, timeRange)
+		if fallbackErr == nil && len(fallbackResults) > 0 {
+			return fallbackResults, nil
+		}
+	}
+	return results, err
+}
+
 // QuerySearXNGAPI calls SearXNG format=json API and returns parsed results
 func QuerySearXNGAPI(ctx context.Context, client *http.Client, endpoint, query, engines, categories, timeRange string) ([]searxngResult, error) {
 	u, err := url.Parse(endpoint)
