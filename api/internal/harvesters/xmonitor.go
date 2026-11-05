@@ -86,6 +86,9 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 					jobs = append(jobs, searchJob{query: q, directive: directive, displayName: label})
 				}
 			}
+			if strings.TrimSpace(qCfg.Query) != "" {
+				jobs = append(jobs, searchJob{query: strings.TrimSpace(qCfg.Query), directive: directive, displayName: label})
+			}
 		} else if strings.TrimSpace(qCfg.Query) != "" {
 			label := displayName
 			if label == "" {
@@ -341,6 +344,14 @@ func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.Que
 
 		log.Printf("[XMonitor] Executing SearXNG X search query: '%s' (Source: %s, Engines: %s, Categories: %s, TimeRange: %s)", query, qCfg.Name, qCfg.Engines, categories, timeRange)
 		results, err := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, query, qCfg.Engines, categories, timeRange)
+		if (err != nil || len(results) == 0) && timeRange == "day" {
+			log.Printf("[XMonitor] 0 results or error with time_range=day for '%s', retrying with time_range=week", query)
+			weekResults, weekErr := QuerySearXNGAPIWithFallback(ctx, client, primaryURL, fallbackURL, query, qCfg.Engines, categories, "week")
+			if weekErr == nil && len(weekResults) > 0 {
+				results = weekResults
+				err = nil
+			}
+		}
 		if err != nil {
 			log.Printf("[XMonitor] SearXNG X query '%s' failed: %v", query, err)
 			continue
