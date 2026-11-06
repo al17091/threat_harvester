@@ -41,8 +41,10 @@ class DiscordNotifier:
 
         # Discord content mention
         content = ""
-        if threat.japan_relevance == JapanRelevance.DIRECT and threat.severity in (Severity.CRITICAL, Severity.HIGH):
+        if threat.japan_relevance == JapanRelevance.DIRECT and threat.severity == Severity.CRITICAL:
             content = "🚨 @here **日本国内を標的とした重大インシデントを検知しました**"
+        elif threat.japan_relevance == JapanRelevance.DIRECT and threat.severity == Severity.HIGH:
+            content = "⚠️ **日本国内を標的とした脅威インシデントを検知しました**"
         elif threat.severity == Severity.CRITICAL:
             content = "🚨 @here **Critical Threat Incident Alert**"
 
