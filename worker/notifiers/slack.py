@@ -25,7 +25,7 @@ class SlackNotifier:
             header_prefix = "🌐 [国内波及] "
 
         mention = ""
-        if threat.japan_relevance == JapanRelevance.DIRECT and threat.severity in (Severity.CRITICAL, Severity.HIGH):
+        if threat.japan_relevance == JapanRelevance.DIRECT and threat.severity == Severity.CRITICAL:
             mention = "<!channel> "
         elif threat.severity == Severity.CRITICAL:
             mention = "<!here> "

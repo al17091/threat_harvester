@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,6 +145,7 @@ func TestDiscordNotifier(t *testing.T) {
 		summary   string
 	}{
 		{models.SeverityCritical, models.JapanRelevanceDirect, "Critical Japan Threat", "Summary EN"},
+		{models.SeverityHigh, models.JapanRelevanceDirect, "High Japan Threat", "Summary EN"},
 		{models.SeverityHigh, models.JapanRelevanceIndirect, "", ""}, // test fallback to TitleJa / SummaryJa
 		{models.SeverityMedium, models.JapanRelevanceNone, "Med Threat", "Summary"},
 		{models.SeverityLow, models.JapanRelevanceNone, "Low Threat", "Summary"},
@@ -162,6 +164,13 @@ func TestDiscordNotifier(t *testing.T) {
 		}
 		if len(lastPayload) == 0 {
 			t.Errorf("No payload received for discord notify")
+		}
+		contentStr, _ := lastPayload["content"].(string)
+		if tc.severity == models.SeverityHigh && strings.Contains(contentStr, "@here") {
+			t.Errorf("Expected NO @here mention for High severity, got content: %s", contentStr)
+		}
+		if tc.severity == models.SeverityCritical && !strings.Contains(contentStr, "@here") {
+			t.Errorf("Expected @here mention for Critical severity, got content: %s", contentStr)
 		}
 	}
 
@@ -241,6 +250,14 @@ func TestSlackNotifier(t *testing.T) {
 		}
 		if ok := notifier.Notify(ctx, th); !ok {
 			t.Errorf("Failed to notify slack for case %v / %v", tc.severity, tc.relevance)
+		}
+		rawBytes, _ := json.Marshal(lastPayload)
+		payloadStr := string(rawBytes)
+		if tc.severity == models.SeverityHigh && (strings.Contains(payloadStr, "!channel") || strings.Contains(payloadStr, "!here")) {
+			t.Errorf("Expected NO mention for High severity in Slack payload, got: %s", payloadStr)
+		}
+		if tc.severity == models.SeverityCritical && tc.relevance == models.JapanRelevanceDirect && !strings.Contains(payloadStr, "!channel") {
+			t.Errorf("Expected <!channel> mention for Critical Direct severity in Slack payload, got: %s", payloadStr)
 		}
 	}
 
