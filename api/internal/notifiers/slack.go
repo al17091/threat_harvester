@@ -84,7 +84,7 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 	}
 
 	mention := ""
-	if threat.JapanRelevance == models.JapanRelevanceDirect && (threat.Severity == models.SeverityCritical || threat.Severity == models.SeverityHigh) {
+	if threat.JapanRelevance == models.JapanRelevanceDirect && threat.Severity == models.SeverityCritical {
 		mention = "<!channel> "
 	} else if threat.Severity == models.SeverityCritical {
 		mention = "<!here> "

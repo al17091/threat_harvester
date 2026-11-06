@@ -98,14 +98,18 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 
 	content := ""
 	if isJa {
-		if threat.JapanRelevance == models.JapanRelevanceDirect && (threat.Severity == models.SeverityCritical || threat.Severity == models.SeverityHigh) {
+		if threat.JapanRelevance == models.JapanRelevanceDirect && threat.Severity == models.SeverityCritical {
 			content = "🚨 @here **【緊急脅威アラート】日本組織を標的とする攻撃を検知しました**"
+		} else if threat.JapanRelevance == models.JapanRelevanceDirect && threat.Severity == models.SeverityHigh {
+			content = "⚠️ **【脅威アラート】日本組織を標的とする攻撃を検知しました**"
 		} else if threat.Severity == models.SeverityCritical {
 			content = "🚨 @here **【重大脅威アラート】重要インシデントを検知しました**"
 		}
 	} else {
-		if threat.JapanRelevance == models.JapanRelevanceDirect && (threat.Severity == models.SeverityCritical || threat.Severity == models.SeverityHigh) {
+		if threat.JapanRelevance == models.JapanRelevanceDirect && threat.Severity == models.SeverityCritical {
 			content = "🚨 @here **Critical Threat Incident Alert - Targeted Attack Detected**"
+		} else if threat.JapanRelevance == models.JapanRelevanceDirect && threat.Severity == models.SeverityHigh {
+			content = "⚠️ **Threat Incident Alert - Targeted Attack Detected**"
 		} else if threat.Severity == models.SeverityCritical {
 			content = "🚨 @here **Critical Threat Incident Alert**"
 		}
