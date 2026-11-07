@@ -15,7 +15,7 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
    - `web/`: Next.js 16 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
    - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/threat-harvester/` for k3s).
 3. **Container Image Naming**:
-   - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated service tags (`api-<version>`, `worker-<version>`, `web-<version>`, and backward-compatible `backend-<version>`).
+   - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated microservice tags (`api-<version>`, `worker-<version>`, `agent-<version>`, and `web-<version>`). Legacy monolithic `backend-<version>` is deprecated and no longer built or deployed.
 4. **Database & Architecture Target**:
    - Deployment target is k3s with PostgreSQL provided by CloudNativePG (CNPG), falling back to SQLite for local development.
    - All database operations in `api/internal/storage/` must remain dialect-aware (PostgreSQL + SQLite).
@@ -59,8 +59,9 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 ## 4. Code & Quality Standards
 
 1. **Language & Environment**:
-   - Go 1.22+ for the backend CTI engine and REST API.
-   - Node.js 20+ / Next.js for the `web/` dashboard.
+   - Go 1.26+ for the backend CTI engine and REST API.
+   - Node.js 26+ for the `agent/` and `web/` dashboard.
+   - Python 3.14+ for the `worker/` threat harvester daemon.
 2. **Quality Gates**:
    - **Go Tests**: `go test -v ./...` in `api/` must pass completely.
    - **Frontend Build**: `npm --prefix web run build` must compile cleanly without errors.
@@ -79,3 +80,11 @@ Threat Harvester implements a multi-tier caching and rendering optimization arch
 - **Tier 2 (Zero Layout Shift)**: Never display full-height skeleton/spinner over existing incident lists. Use top 2px pulse line + `opacity-60` fade.
 - **Tier 3 (Projection Separation)**: Incident list queries (`incidentListSelectCols`) must NEVER load heavy TOAST columns (`raw_content`, `sources_detail`, `source_urls`). Reserve full projections for single-incident details (`/api/incidents/:id`).
 - **Tier 4 (API Concurrency)**: Parallelize distinct queries (e.g. `GetIncidents` and `GetIncidentsTotal`) using Go `sync.WaitGroup`.
+
+---
+
+## 6. Agent Skills
+
+Operational runbooks and SOP skills are maintained in `.agents/skills/`:
+- **[`release-notes`](.agents/skills/release-notes/SKILL.md)**: Canonical formatting rules, section templates, and publication runbook for GitHub releases.
+

@@ -14,7 +14,7 @@ export const ThreatItemSchema = z.object({
   source_name: z.string().default(""),
   summary: z.string().default(""),
   raw_content: z.string().default(""),
-  metadata: z.record(z.any()).optional().default({}),
+  metadata: z.record(z.string(), z.any()).optional().default({}),
 });
 export type ThreatItem = z.infer<typeof ThreatItemSchema>;
 
@@ -30,7 +30,7 @@ export const EnrichedThreatSchema = z.object({
   impact_analysis_ja: z.string(),
   victim_orgs: z.array(z.string()).default([]),
   threat_actors: z.array(z.string()).default([]),
-  threat_actor_reasons: z.record(z.string()).optional().default({}),
+  threat_actor_reasons: z.record(z.string(), z.string()).optional().default({}),
   attack_type: z.string().default("None"),
   cves: z.array(z.string()).default([]),
   affected_products: z.array(z.string()).default([]),

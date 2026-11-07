@@ -1,4 +1,4 @@
-FROM golang:alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates tzdata
@@ -10,7 +10,7 @@ RUN go mod download
 COPY api/ /app/api/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app/harvester ./cmd/harvester
 
-FROM alpine:3.20
+FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata curl
 WORKDIR /app
