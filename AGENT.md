@@ -79,3 +79,11 @@ Threat Harvester implements a multi-tier caching and rendering optimization arch
 - **Tier 2 (Zero Layout Shift)**: Never display full-height skeleton/spinner over existing incident lists. Use top 2px pulse line + `opacity-60` fade.
 - **Tier 3 (Projection Separation)**: Incident list queries (`incidentListSelectCols`) must NEVER load heavy TOAST columns (`raw_content`, `sources_detail`, `source_urls`). Reserve full projections for single-incident details (`/api/incidents/:id`).
 - **Tier 4 (API Concurrency)**: Parallelize distinct queries (e.g. `GetIncidents` and `GetIncidentsTotal`) using Go `sync.WaitGroup`.
+
+---
+
+## 6. Agent Skills
+
+Operational runbooks and SOP skills are maintained in `.agents/skills/`:
+- **[`release-notes`](.agents/skills/release-notes/SKILL.md)**: Canonical formatting rules, section templates, and publication runbook for GitHub releases.
+
