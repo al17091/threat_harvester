@@ -7,16 +7,19 @@ metadata:
 data:
   PORT: {{ ((.Values.api | default dict).port) | default ((.Values.backend | default dict).port) | default 8000 | quote }}
   COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
-  AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "hybrid" | quote }}
+  AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "agent" | quote }}
   AGENT_URL: "http://{{ include "threat-harvester.fullname" . }}-agent:8002"
-  LITELLM_ENDPOINT: {{ .Values.config.litellmEndpoint | default "https://litellm.lab.internal/v1/chat/completions" | quote }}
-  LITELLM_MODEL: {{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" | quote }}
-  GEMINI_MODEL: {{ .Values.config.geminiModel | default "gemini-3.5-flash-lite" | quote }}
+  GENERAL_LLM_ENDPOINT: {{ .Values.config.generalLlmEndpoint | default .Values.config.litellmEndpoint | default "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions" | quote }}
+  GENERAL_LLM_MODEL: {{ .Values.config.generalLlmModel | default .Values.config.litellmModel | default "lab/qwen2.5-3b-instruct" | quote }}
+  JAPANESE_SPECIALIZED_ENDPOINT: {{ .Values.config.japaneseSpecializedEndpoint | default .Values.agent.plamoBaseUrl | default "http://plamo-translator-service.litellm.svc.cluster.local:8080" | quote }}
+  JAPANESE_SPECIALIZED_MODEL: {{ .Values.config.japaneseSpecializedModel | default "lab/plamo-3-translate" | quote }}
+  LITELLM_ENDPOINT: {{ .Values.config.generalLlmEndpoint | default .Values.config.litellmEndpoint | default "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions" | quote }}
+  LITELLM_MODEL: {{ .Values.config.generalLlmModel | default .Values.config.litellmModel | default "lab/qwen2.5-3b-instruct" | quote }}
   AI_TIMEOUT_SECONDS: {{ .Values.config.aiTimeoutSeconds | default 180 | quote }}
   AI_HYBRID_QUERY_GENERATOR: {{ ((.Values.config.hybrid | default dict).queryGenerator) | default "qwen" | quote }}
   AI_HYBRID_EXTRACTOR: {{ ((.Values.config.hybrid | default dict).extractor) | default "qwen" | quote }}
-  AI_HYBRID_REFINER: {{ ((.Values.config.hybrid | default dict).refiner) | default "gemini" | quote }}
-  AI_HYBRID_TRANSLATOR: {{ ((.Values.config.hybrid | default dict).translator) | default "gemini" | quote }}
+  AI_HYBRID_REFINER: {{ ((.Values.config.hybrid | default dict).refiner) | default "qwen" | quote }}
+  AI_HYBRID_TRANSLATOR: {{ ((.Values.config.hybrid | default dict).translator) | default "plamo" | quote }}
   AI_HYBRID_REFINE_SEVERITIES: {{ ((.Values.config.hybrid | default dict).refineSeverities) | default "CRITICAL,HIGH" | quote }}
   AI_HYBRID_REFINE_JAPAN_ONLY: {{ if eq (((.Values.config.hybrid | default dict).refineJapanOnly) | toString) "true" }}"true"{{ else }}"false"{{ end }}
   SEARXNG_URL: {{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" | quote }}

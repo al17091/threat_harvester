@@ -4,25 +4,47 @@ import { ThreatItem, EnrichedThreat } from "./types.js";
 import { request } from "undici";
 
 export interface AgentConfig {
+  generalLlmEndpoint?: string;
+  generalLlmModel?: string;
+  maxLoopTurns?: number;
+  plamoBaseUrl?: string;
+  // Deprecated compatibility fields
   ollamaEndpoint?: string;
   extractorModel?: string;
-  maxLoopTurns?: number;
 }
 
 /**
- * Autonomous CTI Agent orchestrating extraction, tool invocation, and PLaMo translation.
+ * Autonomous CTI Agent orchestrating extraction with General LLM,
+ * entity resolution tools, and translation with Japanese Specialized Model.
  */
 export class CTIAgentService {
-  private ollamaEndpoint: string;
-  private extractorModel: string;
+  private generalLlmEndpoint: string;
+  private generalLlmModel: string;
   private maxLoopTurns: number;
   private translator: PLaMoTranslator;
 
   constructor(config?: AgentConfig) {
-    this.ollamaEndpoint = config?.ollamaEndpoint || process.env.LITELLM_ENDPOINT || "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions";
-    this.extractorModel = config?.extractorModel || process.env.LITELLM_MODEL || "qwen2.5-3b-instruct";
+    this.generalLlmEndpoint =
+      config?.generalLlmEndpoint ||
+      config?.ollamaEndpoint ||
+      process.env.GENERAL_LLM_ENDPOINT ||
+      process.env.LITELLM_ENDPOINT ||
+      "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions";
+
+    this.generalLlmModel =
+      config?.generalLlmModel ||
+      config?.extractorModel ||
+      process.env.GENERAL_LLM_MODEL ||
+      process.env.LITELLM_MODEL ||
+      "lab/qwen2.5-3b-instruct";
+
     this.maxLoopTurns = config?.maxLoopTurns || 3;
-    this.translator = new PLaMoTranslator();
+    this.translator = new PLaMoTranslator({
+      plamoBaseUrl:
+        config?.plamoBaseUrl ||
+        process.env.JAPANESE_SPECIALIZED_ENDPOINT ||
+        process.env.PLAMO_BASE_URL,
+    });
   }
 
   /**
@@ -200,11 +222,11 @@ ${rawContent}`
 
   private async callLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
     try {
-      const res = await request(this.ollamaEndpoint, {
+      const res = await request(this.generalLlmEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: this.extractorModel,
+          model: this.generalLlmModel,
           messages: messages,
           temperature: 0.1,
           response_format: { type: "json_object" }

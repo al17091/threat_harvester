@@ -28,12 +28,20 @@ spec:
           env:
             - name: AGENT_PORT
               value: "{{ .Values.agent.port | default 8002 }}"
+            - name: GENERAL_LLM_ENDPOINT
+              value: "{{ .Values.config.generalLlmEndpoint | default .Values.config.litellmEndpoint | default "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions" }}"
+            - name: GENERAL_LLM_MODEL
+              value: "{{ .Values.config.generalLlmModel | default .Values.config.litellmModel | default "lab/qwen2.5-3b-instruct" }}"
+            - name: JAPANESE_SPECIALIZED_ENDPOINT
+              value: "{{ .Values.config.japaneseSpecializedEndpoint | default .Values.agent.plamoBaseUrl | default "http://plamo-translator-service.litellm.svc.cluster.local:8080" }}"
+            - name: JAPANESE_SPECIALIZED_MODEL
+              value: "{{ .Values.config.japaneseSpecializedModel | default "lab/plamo-3-translate" }}"
             - name: LITELLM_ENDPOINT
-              value: "{{ .Values.config.litellmEndpoint | default "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions" }}"
+              value: "{{ .Values.config.generalLlmEndpoint | default .Values.config.litellmEndpoint | default "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions" }}"
             - name: LITELLM_MODEL
-              value: "{{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" }}"
+              value: "{{ .Values.config.generalLlmModel | default .Values.config.litellmModel | default "lab/qwen2.5-3b-instruct" }}"
             - name: PLAMO_BASE_URL
-              value: "{{ .Values.agent.plamoBaseUrl | default "http://plamo-translator-service.litellm.svc.cluster.local:8080" }}"
+              value: "{{ .Values.config.japaneseSpecializedEndpoint | default .Values.agent.plamoBaseUrl | default "http://plamo-translator-service.litellm.svc.cluster.local:8080" }}"
             - name: SEARXNG_URL
               value: "{{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" }}"
           {{- if .Values.agent.resources }}
