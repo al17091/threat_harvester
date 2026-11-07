@@ -34,10 +34,6 @@ spec:
               value: "{{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" }}"
             - name: PLAMO_BASE_URL
               value: "{{ .Values.agent.plamoBaseUrl | default "http://plamo-translator-service.litellm.svc.cluster.local:8080" }}"
-            - name: OLLAMA_BASE_URL
-              value: "http://ollama-service.litellm.svc.cluster.local:11434"
-            - name: PLAMO_MODEL
-              value: "plamo-3-translate:2b"
             - name: SEARXNG_URL
               value: "{{ .Values.config.searxngUrl | default "https://searxng.lab.internal/search" }}"
           {{- if .Values.agent.resources }}
