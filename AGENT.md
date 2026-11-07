@@ -59,8 +59,9 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 ## 4. Code & Quality Standards
 
 1. **Language & Environment**:
-   - Go 1.22+ for the backend CTI engine and REST API.
-   - Node.js 20+ / Next.js for the `web/` dashboard.
+   - Go 1.26+ for the backend CTI engine and REST API.
+   - Node.js 26+ for the `agent/` and `web/` dashboard.
+   - Python 3.14+ for the `worker/` threat harvester daemon.
 2. **Quality Gates**:
    - **Go Tests**: `go test -v ./...` in `api/` must pass completely.
    - **Frontend Build**: `npm --prefix web run build` must compile cleanly without errors.
