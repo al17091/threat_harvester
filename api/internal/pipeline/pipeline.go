@@ -156,7 +156,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			end = len(newItems)
 		}
 		chunk := newItems[i:end]
-		log.Printf("[Pipeline] [%d-%d/%d] Analyzing threat batch with Gemini (%d items)...",
+		log.Printf("[Pipeline] [%d-%d/%d] Analyzing threat batch (%d items)...",
 			i+1, end, len(newItems), len(chunk))
 
 		enrichedBatch, err := p.analyzer.AnalyzeBatch(ctx, chunk)
