@@ -10,7 +10,7 @@
 
 ## Japan Cyber Threat Intelligence Feeds Collector
 
-Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLLM Qwen2.5-3B + Gemini Escalation), Cyber SOC Dashboard, and notification platform focusing on **Japan-targeted threats and domestic incidents**.
+Automated Cyber Threat Intelligence (CTI) collection, Vendor-Agnostic AI Analysis (General LLM + Japanese Specialized Model via OpenAI-compatible protocol), Cyber SOC Dashboard, and notification platform focusing on **Japan-targeted threats and domestic incidents**.
 
 ---
 
@@ -18,15 +18,22 @@ Automated Cyber Threat Intelligence (CTI) collection, Hybrid AI analysis (LiteLL
 
 The platform consists of a decoupled microservice architecture (orchestrated via Docker Compose or Helm using `ghcr.io/al17091/threat_harvester`):
 - **Web Dashboard (`web/`, tag `web-<version>`)**: Next.js 16 (TypeScript + Tailwind CSS + Lucide React) responsive Cyber SOC UI (`/en`, `/ja` on Port 3000).
-- **API Engine (`api/`, tag `api-<version>`)**: High-performance Go 1.26+ CTI Engine, Hybrid AI analyzer (LiteLLM OpenAI-compatible + Gemini API escalation), async article scraper, and REST API (Port 8000).
-- **Harvester & Analysis Worker (`worker/`, tag `worker-<version>`)**: Python 3.12+ extensible crawler worker and batch processor for continuous CTI enrichment.
+- **API Engine (`api/`, tag `api-<version>`)**: High-performance Go 1.26+ CTI Engine, Autonomous CTI Agent interface, async article scraper, and REST API (Port 8000).
+- **Autonomous CTI Agent (`agent/`, tag `agent-<version>`)**: Vendor-agnostic AI agent orchestrating fact extraction, entity normalization, and glossary-enforced Japanese translation.
+- **Harvester & Analysis Worker (`worker/`, tag `worker-<version>`)**: Extensible crawler worker and batch processor for continuous CTI enrichment.
 - **Database Engine**: PostgreSQL 16 (CloudNativePG on k3s / container) with pure-Go SQLite fallback.
 - **Tor SOCKS5 Proxy**: External or in-cluster Tor SOCKS5h proxy for dark web (`.onion`) reachability.
+
+### AI Architecture & Vendor-Free Policy
+Threat Harvester enforces a strict **Vendor-Agnostic / Protocol-Standard Architecture**:
+- **Standard Protocol**: Communicates solely via OpenAI-compatible HTTP endpoints (`/v1/chat/completions`) or standard completion endpoints. No proprietary SDKs (e.g. Google GenAI, Anthropic SDK) are required.
+- **Role Separation**:
+  - **General LLM (`GENERAL_LLM_MODEL`)**: Extracts verified threat facts, identifies threat actors and CVEs, assesses severity, and formats structured JSON (e.g., self-hosted Qwen 2.5 3B, vLLM, or commercial models like GPT-5.4-mini).
+  - **Japanese Specialized Model (`JAPANESE_SPECIALIZED_MODEL`)**: Handles entity-preserving professional Japanese translation and summarization using CTI glossaries (e.g., self-hosted PLaMo 3 Translate or any preferred translation LLM).
 
 | Intelligence Source | Collection Method | Cost & Footprint |
 | :--- | :--- | :--- |
 | **SearXNG Cross-Search** | Metasearch across Ahmia, Torch (.onion), and Clearnet News/Web | Free (Self-hosted SearXNG JSON API) |
-| **Web Search Grounding** | Gemini API (`gemini-3.5-flash-lite`) Grounded Search (4h throttled) | Low cost / Included in Gemini quota |
 | **Dark Web (.onion)** | Tor SOCKS5h proxy crawler & Ahmia search monitoring ransomware DLS | Free (via Tor proxy service) |
 | **Ransomware Trackers** | Ransomlook API & RansomFeed RSS tracking global/domestic victims | Free & real-time |
 | **Telegram Channels** | Public web preview scraper (`t.me/s/<channel>`) + recursive link scraper | Free (no API key or phone required) |
@@ -121,7 +128,7 @@ helm upgrade --install threat-harvester ./charts/threat-harvester \
   --set dashboard.image.tag="web-0.1.0" \
   --set database.type="postgres" \
   --set database.existingSecret="threat-harvester-db-app" \
-  --set secrets.geminiApiKey="YOUR_GEMINI_API_KEY" \
+  --set config.generalLlmModel="gpt-5.4-mini" \
   --set secrets.discordWebhookUrl="YOUR_DISCORD_WEBHOOK_URL"
 ```
 
@@ -130,6 +137,7 @@ helm upgrade --install threat-harvester ./charts/threat-harvester \
 ## 6. Community & Guidelines
 
 - **Agent Guidelines**: Coding guidelines and commit rules are defined in [AGENT.md](AGENT.md).
+- **Caching & Performance Policy**: Multi-tier caching and rendering optimization architecture is documented in [docs/caching_and_performance_policy.md](docs/caching_and_performance_policy.md).
 - **Contributing**: Please review [CONTRIBUTING.md](CONTRIBUTING.md) for pull request workflows.
 - **Task Tracking**: Progress roadmap is maintained in [docs/task_tracker.md](docs/task_tracker.md).
 - **Security Policy**: See [SECURITY.md](SECURITY.md) for vulnerability disclosure.

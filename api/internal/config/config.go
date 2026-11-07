@@ -268,6 +268,7 @@ type PipelineConfig struct {
 	NotifyLanguage          string `yaml:"notify_language" json:"notify_language"`
 	CircuitBreakerMaxAlerts int    `yaml:"circuit_breaker_max_alerts" json:"circuit_breaker_max_alerts"`
 	NotifyDryRun            bool   `yaml:"notify_dry_run" json:"notify_dry_run"`
+	Environment             string `yaml:"environment" json:"environment"`
 }
 
 type AppConfig struct {
@@ -575,6 +576,11 @@ func (s *SettingsManager) applyEnvOverrides() {
 	}
 	if v := os.Getenv("NOTIFY_DRY_RUN"); v != "" {
 		s.Config.Pipeline.NotifyDryRun = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("ENVIRONMENT"); v != "" {
+		s.Config.Pipeline.Environment = strings.TrimSpace(v)
+	} else if v := os.Getenv("APP_ENV"); v != "" {
+		s.Config.Pipeline.Environment = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("BROWSERLESS_URL"); v != "" {
 		s.Config.Scraper.BrowserlessURL = strings.TrimRight(v, "/")

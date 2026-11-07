@@ -22,6 +22,8 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
 5. **Security & Secrets**:
    - Never commit hardcoded tokens, API keys, passwords, or webhook URLs.
    - Configuration must load from `config.yaml` with dynamic `${ENV_VAR}` expansion or direct environment variables.
+6. **English-Only Repository Documentation**:
+   - All repository documentation (`docs/`, `*.md`), code comments, commit messages, and PR descriptions must be written strictly in English.
 
 ---
 
@@ -66,3 +68,14 @@ All commits **MUST** be signed and adhere to Conventional Commits in English:
 3. **Resilience & Fault Tolerance**:
    - Threat collectors (`api/internal/harvesters/`, `worker/harvesters/`) must never crash the pipeline on external timeouts or HTTP errors. Handle exceptions gracefully with informative logging.
    - Sinks (`api/internal/notifiers/`, `api/internal/reporters/`) must fail safely without interrupting data collection.
+
+---
+
+## 5. Performance & Caching Policy
+
+Threat Harvester implements a multi-tier caching and rendering optimization architecture to maintain zero layout-shift, instantaneous page flips, and lightweight API payloads:
+- Full specification: [`docs/caching_and_performance_policy.md`](docs/caching_and_performance_policy.md).
+- **Tier 1 (Client Cache)**: Feed pagination is cached in-memory (`useRef<Map>`) with composite key `${lang}:${page}:${size}:${search}:${severity}:${japan}:${source}:${sort}`. Invalidate on filter changes, language switch, manual refresh, and harvest completion (`handleHarvestFinished`).
+- **Tier 2 (Zero Layout Shift)**: Never display full-height skeleton/spinner over existing incident lists. Use top 2px pulse line + `opacity-60` fade.
+- **Tier 3 (Projection Separation)**: Incident list queries (`incidentListSelectCols`) must NEVER load heavy TOAST columns (`raw_content`, `sources_detail`, `source_urls`). Reserve full projections for single-incident details (`/api/incidents/:id`).
+- **Tier 4 (API Concurrency)**: Parallelize distinct queries (e.g. `GetIncidents` and `GetIncidentsTotal`) using Go `sync.WaitGroup`.

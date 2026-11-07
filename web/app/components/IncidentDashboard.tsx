@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { usePathname } from "next/navigation";
 import {
   ShieldAlert,
@@ -45,6 +45,14 @@ import {
   Key,
   Target,
   Building2,
+  Cpu,
+  Layers,
+  Play,
+  CheckCircle2,
+  RotateCw,
+  Languages,
+  Filter,
+  ArrowRight,
 } from "lucide-react";
 import { TerminalConsole } from "./TerminalConsole";
 import { withBasePath, isAdminPath } from "./basePath";
@@ -174,6 +182,16 @@ interface SystemStatus {
     configured: boolean;
     model: string;
     primary_provider?: string;
+    general_llm?: {
+      online?: boolean;
+      model?: string;
+      endpoint?: string;
+    };
+    japanese_specialized?: {
+      online?: boolean;
+      model?: string;
+      endpoint?: string;
+    };
     local_llm?: {
       online?: boolean;
       model?: string;
@@ -201,6 +219,28 @@ interface SystemStatus {
     next_run_at?: string | null;
     scheduler_enabled?: boolean;
     interval_hours?: number;
+    stage_progress?: {
+      current_stage: string;
+      stage_title: string;
+      stage_title_ja: string;
+      current_item: number;
+      total_items: number;
+      message: string;
+      started_at?: string;
+    };
+    queue_backlog?: {
+      untranslated_incidents: number;
+      pending_analysis_items: number;
+      total_incidents: number;
+      total_threat_items: number;
+    };
+    last_summary?: {
+      total_harvested?: number;
+      new_items?: number;
+      analyzed?: number;
+      notified?: number;
+      notion_reported?: number;
+    };
   };
 }
 
@@ -599,9 +639,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const [authError, setAuthError] = useState<string>("");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
 
-  const [activeTab, setActiveTab] = useState<"incidents" | "sources" | "config" | "status" | "console">(
+  const [activeTab, setActiveTab] = useState<"incidents" | "workflow" | "sources" | "config" | "status" | "console">(
     "incidents"
   );
+  const [stageProgress, setStageProgress] = useState<{
+    current_stage: string;
+    stage_title: string;
+    stage_title_ja: string;
+    current_item: number;
+    total_items: number;
+    message: string;
+    started_at?: string;
+  } | null>(null);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [config, setConfig] = useState<ConfigData | null>(null);
@@ -936,11 +985,55 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
+        if (data?.pipeline?.stage_progress) {
+          setStageProgress(data.pipeline.stage_progress);
+        }
+        if (typeof data?.pipeline?.is_running === "boolean") {
+          setHarvesting(data.pipeline.is_running);
+        }
       }
     } catch (err) {
       console.error("Status fetch failed:", err);
     }
   };
+
+  // Live SSE listener for real-time pipeline stage progress and backlog updates
+  useEffect(() => {
+    if (!isAdmin) return;
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(withBasePath("/api/pipeline/stream", pathname));
+      es.addEventListener("stage", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          setStageProgress(data);
+          if (data.current_stage && data.current_stage !== "idle" && data.current_stage !== "completed") {
+            setHarvesting(true);
+          } else if (data.current_stage === "completed" || data.current_stage === "idle") {
+            setHarvesting(false);
+            fetchStatus();
+          }
+        } catch (err) {
+          console.error("Failed to parse stage SSE:", err);
+        }
+      });
+      es.addEventListener("status", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (typeof data.is_running === "boolean") {
+            setHarvesting(data.is_running);
+          }
+        } catch (err) {}
+      });
+    } catch (e) {
+      console.error("Stage SSE connection failed:", e);
+    }
+    return () => {
+      if (es) {
+        es.close();
+      }
+    };
+  }, [pathname, isAdmin]);
 
   const fetchConfig = async () => {
     try {
@@ -954,7 +1047,9 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   };
 
-  // Pagination
+  // Pagination & Snappy Client-Side Feed Cache
+  const incidentsCacheRef = useRef<Map<string, { items: Incident[]; total: number }>>(new Map());
+  const isFilterMountedRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
@@ -995,17 +1090,30 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     fetchIncidents(newPage, pageSize);
     const el = document.getElementById("incident-feed-section");
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 0) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
   };
 
   const handlePageSizeChange = (newSize: number) => {
+    incidentsCacheRef.current.clear();
     setPageSize(newSize);
     setCurrentPage(1);
     fetchIncidents(1, newSize);
   };
 
   const fetchIncidents = async (targetPage = currentPage, targetPageSize = pageSize) => {
+    const cacheKey = `${currentLang}:${targetPage}:${targetPageSize}:${search}:${severityFilter}:${japanOnly}:${sourceTypeFilter}:${sortBy}`;
+    if (incidentsCacheRef.current.has(cacheKey)) {
+      const cached = incidentsCacheRef.current.get(cacheKey)!;
+      setIncidents(cached.items);
+      setTotalCount(cached.total);
+      setLoadingIncidents(false);
+      return;
+    }
+
     setLoadingIncidents(true);
     try {
       const offset = (targetPage - 1) * targetPageSize;
@@ -1022,12 +1130,11 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       const res = await fetch(withBasePath(`/api/incidents?${params.toString()}`, pathname));
       if (res.ok) {
         const data = await res.json();
-        setIncidents(data.items || []);
-        if (typeof data.total === "number") {
-          setTotalCount(data.total);
-        } else {
-          setTotalCount(data.count || 0);
-        }
+        const items = data.items || [];
+        const total = typeof data.total === "number" ? data.total : items.length;
+        incidentsCacheRef.current.set(cacheKey, { items, total });
+        setIncidents(items);
+        setTotalCount(total);
       }
     } catch (err) {
       showToast("Failed to fetch incidents", "error");
@@ -1037,6 +1144,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   useEffect(() => {
+    incidentsCacheRef.current.clear();
     fetchStatus();
     fetchConfig();
     fetchEntityStats();
@@ -1046,16 +1154,22 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   }, [currentLang, isAdmin, activeTab]);
 
   useEffect(() => {
+    if (!isFilterMountedRef.current) {
+      isFilterMountedRef.current = true;
+      return;
+    }
+    incidentsCacheRef.current.clear();
     if (!isAdmin || activeTab === "incidents") {
       setCurrentPage(1);
       const timer = setTimeout(() => {
         fetchIncidents(1, pageSize);
-      }, 300);
+      }, 250);
       return () => clearTimeout(timer);
     }
   }, [search, severityFilter, japanOnly, sourceTypeFilter, sortBy, isAdmin, activeTab]);
 
   const handleHarvestFinished = async () => {
+    incidentsCacheRef.current.clear();
     setHarvesting(false);
     showToast("Threat harvesting pipeline completed.");
     if (!isAdmin || activeTab === "incidents") {
@@ -1440,6 +1554,44 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   };
 
+  const handleTranslateIncidents = async () => {
+    showToast("Starting incident translation batch...");
+    try {
+      const res = await fetch(withBasePath("/api/pipeline/translate-incidents", pathname), { method: "POST" });
+      const data = await res.json();
+      showToast(data.message || `Translated ${data.translated || 0} incidents`);
+      await fetchStatus();
+      await fetchIncidents();
+    } catch {
+      showToast("Translation batch failed", "error");
+    }
+  };
+
+  const handleBackfillIncidents = async () => {
+    showToast("Re-clustering parent incidents...");
+    try {
+      const res = await fetch(withBasePath("/api/pipeline/backfill-incidents", pathname), { method: "POST" });
+      const data = await res.json();
+      showToast(data.message || `Clustered ${data.clustered || 0} incidents`);
+      await fetchStatus();
+      await fetchIncidents();
+    } catch {
+      showToast("Re-clustering failed", "error");
+    }
+  };
+
+  const handleBackfillArticles = async () => {
+    showToast("Scraping article contents in background...");
+    try {
+      const res = await fetch(withBasePath("/api/pipeline/backfill-articles", pathname), { method: "POST" });
+      const data = await res.json();
+      showToast(data.message || "Article content backfill started");
+      await fetchStatus();
+    } catch {
+      showToast("Article backfill failed", "error");
+    }
+  };
+
   const formatDate = (isoStr: string | null | undefined, l: "en" | "ja" = currentLang) => {
     return formatIncidentDate(isoStr, l);
   };
@@ -1715,6 +1867,21 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
             >
               <LayoutGrid className="w-4 h-4" />
               <span>Incidents & Labels</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("workflow")}
+              className={`py-3 border-b-2 transition flex items-center space-x-2 ${
+                activeTab === "workflow"
+                  ? "border-cyan-400 text-cyan-400 font-semibold"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              <span>{currentLang === "ja" ? "ワークフロー可視化" : "Workflow & Pipeline"}</span>
+              {harvesting && (
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              )}
             </button>
 
             <button
@@ -2161,12 +2328,16 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
             </div>
 
             {/* Incidents List */}
-            <div className="space-y-3">
-              {loadingIncidents && (
+            <div className="space-y-3 relative">
+              {loadingIncidents && incidents.length === 0 && (
                 <div className="py-16 text-center text-slate-400">
                   <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-cyan-400" />
                   {currentLang === "ja" ? "脅威インテリジェンスデータを読み込み中..." : "Loading threat intelligence data..."}
                 </div>
+              )}
+
+              {loadingIncidents && incidents.length > 0 && (
+                <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-500 animate-pulse rounded-full mb-1" />
               )}
 
               {!loadingIncidents && incidents.length === 0 && (
@@ -2175,7 +2346,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </div>
               )}
 
-              {incidents.map((item) => (
+              <div className={`space-y-3 transition-opacity duration-150 ${loadingIncidents && incidents.length > 0 ? "opacity-60 pointer-events-none" : "opacity-100"}`}>
+                {incidents.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => openIncidentModal(item)}
@@ -2388,6 +2560,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                 </div>
               ))}
+              </div>
             </div>
 
             {/* Bottom Pagination Controls */}
@@ -2492,6 +2665,438 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: WORKFLOW VISUALIZATION & QUEUE MONITOR */}
+        {activeTab === "workflow" && (
+          <div className="space-y-6">
+            {/* Top Workflow Status & Actions Header */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6 relative overflow-hidden shadow-lg">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-3">
+                    <h2 className="text-xl font-bold text-white flex items-center space-x-2">
+                      <Activity className="w-5 h-5 text-cyan-400" />
+                      <span>{currentLang === "ja" ? "パイプライン処理フロー & ワークフロー可視化" : "Pipeline Workflow & Queue Monitor"}</span>
+                    </h2>
+                    <span
+                      className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center ${
+                        harvesting
+                          ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse"
+                          : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full mr-1.5 ${
+                          harvesting ? "bg-cyan-400 animate-ping" : "bg-emerald-400"
+                        }`}
+                      />
+                      {harvesting
+                        ? `${currentLang === "ja" ? "実行中: " : "RUNNING: "}${stageProgress?.stage_title_ja || stageProgress?.stage_title || "処理中"}`
+                        : currentLang === "ja" ? "待機中 (IDLE)" : "READY / IDLE"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
+                    {currentLang === "ja"
+                      ? "脅威インテリジェンスの外部収集から重複排除、汎用LLM（Qwen2.5）トリアージ、STIX 2.1親インシデント統合、通知連携、日本語特化モデル（PLaMo 3）による英語翻訳までの処理パイプラインと蓄積キューをリアルタイムに可視化します。"
+                      : "Real-time visualization of threat harvesting, deduplication, General LLM triage, STIX 2.1 parent incident clustering, alerts, and Japanese specialized model bilingual sync."}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={triggerHarvest}
+                    disabled={harvesting}
+                    className="inline-flex items-center px-4 py-2.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-lg shadow-cyan-900/30 disabled:opacity-50 transition"
+                  >
+                    {harvesting ? (
+                      <>
+                        <RotateCw className="w-4 h-4 mr-2 animate-spin text-cyan-200" />
+                        <span>{currentLang === "ja" ? "パイプライン処理中..." : "Harvesting in progress..."}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 mr-2 text-cyan-200 fill-current" />
+                        <span>{currentLang === "ja" ? "パイプライン手動実行" : "Run Pipeline Now"}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setTerminalOpen(!terminalOpen)}
+                    className="inline-flex items-center px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                  >
+                    <Terminal className="w-4 h-4 mr-1.5 text-slate-300" />
+                    <span>{terminalOpen ? (currentLang === "ja" ? "ログ非表示" : "Hide Logs") : (currentLang === "ja" ? "リアルタイムログ表示" : "View Live Logs")}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress Bar when Active */}
+              {harvesting && stageProgress && stageProgress.total_items > 0 && (
+                <div className="mt-5 pt-4 border-t border-slate-800/80">
+                  <div className="flex justify-between text-xs text-slate-300 mb-1.5 font-medium">
+                    <span className="flex items-center space-x-2">
+                      <span className="text-cyan-400 font-bold">{currentLang === "ja" ? stageProgress.stage_title_ja : stageProgress.stage_title}</span>
+                      <span className="text-slate-400">— {stageProgress.message}</span>
+                    </span>
+                    <span className="font-mono text-cyan-400 font-semibold">
+                      {stageProgress.current_item} / {stageProgress.total_items} (
+                      {Math.min(100, Math.round((stageProgress.current_item / stageProgress.total_items) * 100))}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden border border-slate-800">
+                    <div
+                      className="bg-gradient-to-r from-cyan-500 to-blue-500 h-2.5 rounded-full transition-all duration-300 shadow-sm shadow-cyan-400"
+                      style={{
+                        width: `${Math.min(100, Math.max(5, (stageProgress.current_item / stageProgress.total_items) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Queue Depth & Backlog Metric Counters */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    {currentLang === "ja" ? "未翻訳インシデント滞留" : "Pending English Translations"}
+                  </span>
+                  <Languages className="w-4 h-4 text-sky-400" />
+                </div>
+                <div className="text-2xl font-bold text-white mt-1.5 font-mono">
+                  {status?.pipeline?.queue_backlog?.untranslated_incidents ?? 0}
+                  <span className="text-xs font-normal text-slate-400 ml-1">
+                    {currentLang === "ja" ? "件" : "items"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {currentLang === "ja" ? "英語翻訳待ちバックログ" : "Awaiting PLaMo 3 translation"}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    {currentLang === "ja" ? "分析待ちキュー" : "Analysis Queue Backlog"}
+                  </span>
+                  <Cpu className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-2xl font-bold text-white mt-1.5 font-mono">
+                  {status?.pipeline?.queue_backlog?.pending_analysis_items ?? 0}
+                  <span className="text-xs font-normal text-slate-400 ml-1">
+                    {currentLang === "ja" ? "件" : "items"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {currentLang === "ja" ? "AI未分析の生脅威データ" : "Raw items awaiting AI triage"}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    {currentLang === "ja" ? "統合インシデント総数" : "Total Clustered Incidents"}
+                  </span>
+                  <Layers className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="text-2xl font-bold text-white mt-1.5 font-mono">
+                  {status?.pipeline?.queue_backlog?.total_incidents ?? totalCount}
+                  <span className="text-xs font-normal text-slate-400 ml-1">
+                    {currentLang === "ja" ? "件" : "incidents"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {currentLang === "ja" ? "STIX 2.1 親インシデント" : "STIX 2.1 Canonical Records"}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    {currentLang === "ja" ? "収集データ総数" : "Total Harvested Items"}
+                  </span>
+                  <Database className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-2xl font-bold text-white mt-1.5 font-mono">
+                  {status?.pipeline?.queue_backlog?.total_threat_items ?? status?.database?.total_items ?? 0}
+                  <span className="text-xs font-normal text-slate-400 ml-1">
+                    {currentLang === "ja" ? "件" : "items"}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {currentLang === "ja" ? "全ソースから集約" : "Cumulative threat data items"}
+                </div>
+              </div>
+            </div>
+
+            {/* VISUAL WORKFLOW PIPELINE DAG (6 Connected Stages) */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6">
+              <div className="flex items-center justify-between mb-6 pb-3 border-b border-slate-800">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    <span>{currentLang === "ja" ? "ステージ別 処理フロー & リアルタイム進行状態" : "Stage-by-Stage Processing Flow & Live Status"}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {currentLang === "ja"
+                      ? "実行中のステージが強調表示（シアン枠・パルス点滅）されます。各ステージの役割と使用エンジンをご確認いただけます。"
+                      : "The currently processing stage is prominently highlighted. Inspect role, engine, and queue status per stage."}
+                  </p>
+                </div>
+
+                <div className="flex items-center space-x-2 text-xs text-slate-400">
+                  <span className="inline-flex items-center">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse mr-1.5" />
+                    {currentLang === "ja" ? "処理中 (強調表示)" : "Processing (Highlighted)"}
+                  </span>
+                  <span className="inline-flex items-center ml-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 mr-1.5" />
+                    {currentLang === "ja" ? "待機・完了" : "Ready / Completed"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Connected Stage Nodes Flow */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                {[
+                  {
+                    key: "harvesting",
+                    number: 1,
+                    title: currentLang === "ja" ? "1. 脅威情報収集" : "1. Threat Ingestion",
+                    badge: currentLang === "ja" ? "マルチソース" : "Multi-Source",
+                    icon: Radio,
+                    engine: "Vendor RSS, Tor/DarkWeb, Telegram, Web Search, SNS",
+                    desc: currentLang === "ja"
+                      ? "Vendor RSS、Tor/DarkWeb、Telegram、Web Search、SNSの各フィードから最新脅威インテリジェンスを横断収集"
+                      : "Aggregating raw threat intelligence across RSS, Tor/DarkWeb, Telegram, Web Search, and SNS monitoring.",
+                  },
+                  {
+                    key: "filtering",
+                    number: 2,
+                    title: currentLang === "ja" ? "2. 重複排除・事前フィルタ" : "2. Deduplication & Pre-Filter",
+                    badge: currentLang === "ja" ? "正規化" : "Normalization",
+                    icon: Filter,
+                    engine: "SHA-256 Hash & URL Deduplicator",
+                    desc: currentLang === "ja"
+                      ? "URL・ハッシュによる重複排除、企業の定常PR・決算発表の検知除外、DB既読チェック"
+                      : "In-memory deduplication, corporate PR notice suppression, and persistent database seen-status verification.",
+                  },
+                  {
+                    key: "analyzing",
+                    number: 3,
+                    title: currentLang === "ja" ? "3. AI脅威分析・トリアージ" : "3. AI Threat Triage",
+                    badge: currentLang === "ja" ? "汎用LLM" : "General LLM",
+                    icon: Cpu,
+                    engine: status?.ai?.general_llm?.model || status?.ai?.local_llm?.model || "lab/qwen2.5-3b-instruct",
+                    desc: currentLang === "ja"
+                      ? "OpenAI互換汎用LLMにより、被害組織・CVE・攻撃タイプ・日本関連度・深刻度を抽出・トリアージ"
+                      : "Extracting victims, CVEs, attack types, Japan relevance, and severity via OpenAI-compatible General LLM.",
+                  },
+                  {
+                    key: "clustering",
+                    number: 4,
+                    title: currentLang === "ja" ? "4. インシデント統合" : "4. Incident Clustering",
+                    badge: currentLang === "ja" ? "STIX 2.1" : "STIX 2.1",
+                    icon: Layers,
+                    engine: "30-Day Dynamic Sliding Window",
+                    desc: currentLang === "ja"
+                      ? "同一被害組織や製品・脆弱性に関する複数ソースの個別記事を単一の親インシデントに自動集約・正規化"
+                      : "Clustering multiple source reports into canonical parent incidents across 30-day dynamic sliding window.",
+                  },
+                  {
+                    key: "alerting",
+                    number: 5,
+                    title: currentLang === "ja" ? "5. アラート通知・連携" : "5. Alerts & Integrations",
+                    badge: currentLang === "ja" ? "自動配信" : "Dispatches",
+                    icon: Bell,
+                    engine: "Discord / Slack Webhooks & Notion KB",
+                    desc: currentLang === "ja"
+                      ? "48hクールダウン・重複抑制・サーキットブレーカーを通過した高深刻度脅威を即時Webhook配信およびNotionナレッジベースに同期"
+                      : "Dispatching immediate alerts to Discord/Slack and synchronizing structured incident pages to Notion KB.",
+                  },
+                  {
+                    key: "translating",
+                    number: 6,
+                    title: currentLang === "ja" ? "6. 日英翻訳・多言語同期" : "6. Bilingual Translation",
+                    badge: currentLang === "ja" ? "日本語特化" : "Japanese Spec",
+                    icon: Languages,
+                    engine: status?.ai?.japanese_specialized?.model || "lab/plamo-3-translate",
+                    desc: currentLang === "ja"
+                      ? "日本語特化モデルにより、日本語インシデントを高精度な英語に翻訳してグローバルSOCダッシュボードへ同期"
+                      : "Translating Japanese incidents to English using specialized local model for global dashboard synchronization.",
+                  },
+                ].map((stage) => {
+                  const isCurrent = harvesting && stageProgress?.current_stage === stage.key;
+                  const Icon = stage.icon;
+
+                  return (
+                    <div
+                      key={stage.key}
+                      className={`relative rounded-xl p-5 transition-all duration-300 border ${
+                        isCurrent
+                          ? "ring-2 ring-cyan-400 border-cyan-400 bg-cyan-950/60 shadow-2xl shadow-cyan-500/30 scale-[1.02]"
+                          : "bg-slate-950/80 border-slate-800 hover:border-slate-700"
+                      }`}
+                    >
+                      {/* Top Header of Node */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-2.5">
+                          <div
+                            className={`p-2 rounded-lg ${
+                              isCurrent
+                                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/50"
+                                : "bg-slate-800 text-slate-300"
+                            }`}
+                          >
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-white leading-tight">
+                              {stage.title}
+                            </h4>
+                            <span className="text-[11px] text-slate-400 font-mono">
+                              {stage.engine}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Status Pill */}
+                        <span
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center ${
+                            isCurrent
+                              ? "bg-cyan-500/30 text-cyan-200 border border-cyan-400"
+                              : "bg-slate-800/80 text-slate-400 border border-slate-700/60"
+                          }`}
+                        >
+                          {isCurrent ? (
+                            <>
+                              <RotateCw className="w-3 h-3 mr-1 animate-spin text-cyan-300" />
+                              <span>{currentLang === "ja" ? "処理中" : "PROCESSING"}</span>
+                            </>
+                          ) : (
+                            <span>{stage.badge}</span>
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Description */}
+                      <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                        {stage.desc}
+                      </p>
+
+                      {/* Active State Details Banner */}
+                      {isCurrent && stageProgress && (
+                        <div className="mt-3 pt-3 border-t border-cyan-500/30 bg-cyan-900/30 -mx-5 -mb-5 p-4 rounded-b-xl border-t">
+                          <div className="flex items-center justify-between text-xs font-semibold text-cyan-300 mb-1">
+                            <span className="flex items-center">
+                              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping mr-1.5" />
+                              {stageProgress.message || (currentLang === "ja" ? "処理実行中..." : "Executing stage...")}
+                            </span>
+                            {stageProgress.total_items > 0 && (
+                              <span className="font-mono">
+                                {stageProgress.current_item} / {stageProgress.total_items}
+                              </span>
+                            )}
+                          </div>
+                          {stageProgress.total_items > 0 && (
+                            <div className="w-full bg-slate-950 rounded-full h-1.5 mt-2 overflow-hidden border border-cyan-500/40">
+                              <div
+                                className="bg-cyan-400 h-1.5 rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${Math.min(100, Math.max(8, (stageProgress.current_item / stageProgress.total_items) * 100))}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Previous Harvesting Summary Card */}
+              {status?.pipeline?.last_summary && (
+                <div className="mt-6 pt-5 border-t border-slate-800">
+                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">
+                    {currentLang === "ja" ? "前回の収集・分析サイクル結果サマリー" : "Latest Completed Cycle Summary"}
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                      <div className="text-[11px] text-slate-400">{currentLang === "ja" ? "総収集データ" : "Total Harvested"}</div>
+                      <div className="text-lg font-bold text-white font-mono mt-0.5">
+                        {status.pipeline.last_summary.total_harvested || 0}
+                      </div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                      <div className="text-[11px] text-slate-400">{currentLang === "ja" ? "新規ユニーク" : "New Unique"}</div>
+                      <div className="text-lg font-bold text-cyan-400 font-mono mt-0.5">
+                        {status.pipeline.last_summary.new_items || 0}
+                      </div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                      <div className="text-[11px] text-slate-400">{currentLang === "ja" ? "AI分析完了" : "AI Analyzed"}</div>
+                      <div className="text-lg font-bold text-amber-400 font-mono mt-0.5">
+                        {status.pipeline.last_summary.analyzed || 0}
+                      </div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                      <div className="text-[11px] text-slate-400">{currentLang === "ja" ? "通知送信" : "Alerts Sent"}</div>
+                      <div className="text-lg font-bold text-emerald-400 font-mono mt-0.5">
+                        {status.pipeline.last_summary.notified || 0}
+                      </div>
+                    </div>
+                    <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                      <div className="text-[11px] text-slate-400">{currentLang === "ja" ? "Notion同期" : "Notion Reported"}</div>
+                      <div className="text-lg font-bold text-purple-400 font-mono mt-0.5">
+                        {status.pipeline.last_summary.notion_reported || 0}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Actions & Maintenance Row */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-6">
+              <h3 className="text-sm font-bold text-white mb-2">
+                {currentLang === "ja" ? "パイプライン補正 & 一括同期アクション" : "Pipeline Remediation & Batch Synchronization"}
+              </h3>
+              <p className="text-xs text-slate-400 mb-4">
+                {currentLang === "ja"
+                  ? "滞留した英語翻訳や未集約の親インシデントを一括処理するためのバックフィル機能です。"
+                  : "Batch backfills to resolve translation backlogs and cluster legacy items into parent incidents."}
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleTranslateIncidents}
+                  className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-sky-700 hover:bg-sky-600 text-white shadow transition"
+                >
+                  <Languages className="w-4 h-4 mr-1.5" />
+                  {currentLang === "ja" ? "英語翻訳を一括実行 (PLaMo 3)" : "Translate Incidents to English"}
+                </button>
+
+                <button
+                  onClick={handleBackfillIncidents}
+                  className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-purple-700 hover:bg-purple-600 text-white shadow transition"
+                >
+                  <Layers className="w-4 h-4 mr-1.5" />
+                  {currentLang === "ja" ? "親インシデントを一括再クラスタリング" : "Re-cluster Parent Incidents"}
+                </button>
+
+                <button
+                  onClick={handleBackfillArticles}
+                  className="inline-flex items-center px-4 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                >
+                  <RotateCw className="w-4 h-4 mr-1.5" />
+                  {currentLang === "ja" ? "本文未取得記事をスクレイピング" : "Fetch Unscraped Article Bodies"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -3212,7 +3817,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-2">
                     <Globe className="w-5 h-5 text-emerald-400" />
-                    <h3 className="font-bold text-white text-base">Web Search Threat Hunting (SearXNG / Gemini Grounding)</h3>
+                    <h3 className="font-bold text-white text-base">Web Search Threat Hunting</h3>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-slate-800 text-slate-400 font-mono">
                       {config?.sources?.web_search?.length ?? 0}
                     </span>
@@ -3253,17 +3858,10 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       <div key={identifier} className={`py-3 flex items-start justify-between gap-4 transition ${!active ? "opacity-60 bg-slate-950/30 rounded px-2" : ""}`}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center space-x-2 mb-1 flex-wrap gap-y-1">
-                            {ws.type === "gemini" ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-800 flex items-center">
-                                <Sparkles className="w-3 h-3 mr-1 text-indigo-400" />
-                                Gemini Grounding (4h)
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 flex items-center">
-                                <Globe className="w-3 h-3 mr-1 text-cyan-400" />
-                                SearXNG Clearnet
-                              </span>
-                            )}
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800 flex items-center">
+                              <Globe className="w-3 h-3 mr-1 text-cyan-400" />
+                              Web Search
+                            </span>
                             {isDirective ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center">
                                 <Sparkles className="w-3 h-3 mr-1 text-emerald-400" />
@@ -3479,17 +4077,11 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
-                    <div className="text-sm font-semibold text-slate-200">Gemini Cloud AI (Escalation)</div>
-                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{status?.ai?.model || "gemini-3.5-flash-lite"}</div>
+                    <div className="text-sm font-semibold text-slate-200">Japanese Specialized Model (Bilingual Sync)</div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{status?.ai?.japanese_specialized?.model || "lab/plamo-3-translate"}</div>
                   </div>
-                  <span
-                    className={`px-2.5 py-1 rounded text-xs font-semibold ${
-                      status?.ai?.configured
-                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                        : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                    }`}
-                  >
-                    {status?.ai?.configured ? "Configured" : "Missing API Key"}
+                  <span className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    Active (Local)
                   </span>
                 </div>
 
@@ -4427,7 +5019,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="searxng">SearXNG Cross-Search (Ahmia & Torch via Deverticulum)</option>
+                      <option value="searxng">Web Search Cross-Search (Tor & Onion Metasearch)</option>
                       <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>
@@ -4551,7 +5143,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       <div>
                         <label className="block text-xs font-semibold text-slate-400 mb-1">
                           {addModal.form.type === "searxng"
-                            ? "SearXNG Research URL (Default: https://searxng-research.lab.internal/search)"
+                            ? "Web Search Research URL (Default: https://searxng-research.lab.internal/search)"
                             : "Tor Search Engine Onion URL (Default: official Ahmia onion)"}
                         </label>
                         <input
@@ -4622,7 +5214,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         >
                           <div className="font-semibold flex items-center">
                             <Globe className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
-                            SearXNG Clearnet
+                            Web Search (Clearnet)
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
                             Zero AI cost, meta search
@@ -4660,7 +5252,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="space-y-2 pt-1">
                           <div>
                             <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              SearXNG API Endpoint
+                              Web Search API Endpoint
                             </label>
                             <input
                               type="text"
@@ -4956,7 +5548,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="searxng">SearXNG Cross-Search (Ahmia & Torch via Deverticulum)</option>
+                      <option value="searxng">Web Search Cross-Search (Tor & Onion Metasearch)</option>
                       <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>
@@ -5080,7 +5672,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       <div>
                         <label className="block text-xs font-semibold text-slate-400 mb-1">
                           {editModal.form.type === "searxng"
-                            ? "SearXNG Research URL (Default: https://searxng-research.lab.internal/search)"
+                            ? "Web Search Research URL (Default: https://searxng-research.lab.internal/search)"
                             : "Tor Search Engine Onion URL (Default: official Ahmia onion)"}
                         </label>
                         <input
@@ -5151,7 +5743,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         >
                           <div className="font-semibold flex items-center">
                             <Globe className="w-3.5 h-3.5 mr-1.5 text-cyan-400" />
-                            SearXNG Clearnet
+                            Web Search (Clearnet)
                           </div>
                           <div className="text-[10px] text-slate-400 mt-0.5">
                             Zero AI cost, meta search
@@ -5189,7 +5781,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         <div className="space-y-2 pt-1">
                           <div>
                             <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                              SearXNG API Endpoint
+                              Web Search API Endpoint
                             </label>
                             <input
                               type="text"

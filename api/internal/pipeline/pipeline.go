@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -14,6 +15,31 @@ import (
 	"github.com/al17091/threat_harvester/api/internal/reporters"
 	"github.com/al17091/threat_harvester/api/internal/storage"
 )
+
+type StageName string
+
+const (
+	StageIdle        StageName = "idle"
+	StageHarvesting  StageName = "harvesting"
+	StageFiltering   StageName = "filtering"
+	StageAnalyzing   StageName = "analyzing"
+	StageClustering  StageName = "clustering"
+	StageAlerting    StageName = "alerting"
+	StageTranslating StageName = "translating"
+	StageCompleted   StageName = "completed"
+)
+
+type StageProgress struct {
+	CurrentStage StageName `json:"current_stage"`
+	StageTitle   string    `json:"stage_title"`
+	StageTitleJa string    `json:"stage_title_ja"`
+	CurrentItem  int       `json:"current_item"`
+	TotalItems   int       `json:"total_items"`
+	Message      string    `json:"message"`
+	StartedAt    string    `json:"started_at,omitempty"`
+}
+
+type StageCallback func(progress StageProgress)
 
 type PipelineSummary struct {
 	TotalHarvested   int            `json:"total_harvested"`
@@ -31,6 +57,71 @@ type Pipeline struct {
 	notifier       *notifiers.NotificationManager
 	notionReporter *reporters.NotionReporter
 	harvesterList  []harvesters.Harvester
+	stageMu        sync.RWMutex
+	currentStage   StageProgress
+	stageCallback  StageCallback
+}
+
+func stageTitles(stage StageName) (string, string) {
+	switch stage {
+	case StageHarvesting:
+		return "Threat Ingestion & Harvesting", "脅威情報収集"
+	case StageFiltering:
+		return "Deduplication & Pre-Filter", "重複排除・事前フィルタ"
+	case StageAnalyzing:
+		return "AI Threat Analysis & Triage", "AI脅威分析・トリアージ"
+	case StageClustering:
+		return "STIX 2.1 Incident Clustering", "インシデント統合・クラスタリング"
+	case StageAlerting:
+		return "Alerts & Knowledge Base Sync", "アラート通知・ナレッジ連携"
+	case StageTranslating:
+		return "Bilingual Sync & Translation", "日英翻訳・多言語同期"
+	case StageCompleted:
+		return "Harvest Cycle Completed", "収集サイクル完了"
+	default:
+		return "Idle", "待機中"
+	}
+}
+
+func (p *Pipeline) SetStageCallback(cb StageCallback) {
+	p.stageMu.Lock()
+	defer p.stageMu.Unlock()
+	p.stageCallback = cb
+}
+
+func (p *Pipeline) GetStageProgress() StageProgress {
+	p.stageMu.RLock()
+	defer p.stageMu.RUnlock()
+	if p.currentStage.CurrentStage == "" {
+		return StageProgress{
+			CurrentStage: StageIdle,
+			StageTitle:   "Idle",
+			StageTitleJa: "待機中",
+			Message:      "パイプライン待機中",
+		}
+	}
+	return p.currentStage
+}
+
+func (p *Pipeline) updateStage(stage StageName, current, total int, msg string) {
+	titleEn, titleJa := stageTitles(stage)
+	p.stageMu.Lock()
+	p.currentStage = StageProgress{
+		CurrentStage: stage,
+		StageTitle:   titleEn,
+		StageTitleJa: titleJa,
+		CurrentItem:  current,
+		TotalItems:   total,
+		Message:      msg,
+		StartedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	cb := p.stageCallback
+	prog := p.currentStage
+	p.stageMu.Unlock()
+
+	if cb != nil {
+		cb(prog)
+	}
 }
 
 func NewPipeline(store storage.Store) *Pipeline {
@@ -69,6 +160,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 
 	since := time.Now().UTC().Add(-time.Duration(lookbackHours)*time.Hour - 15*time.Minute)
 	log.Printf("=== Starting threat collection cycle (lookback: %dh, since: %s) ===", lookbackHours, since.Format(time.RFC3339))
+	p.updateStage(StageHarvesting, 0, len(p.harvesterList), "情報ソース (RSS, Tor, Telegram, Web Search, X) から脅威データを収集中...")
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -103,6 +195,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 
 	wg.Wait()
 
+	p.updateStage(StageFiltering, 0, len(allItems), "収集データの重複排除・事前フィルタリングを実行中...")
 	// In-memory deduplication across all sources in this cycle
 	seenIDs := make(map[string]bool)
 	seenURLs := make(map[string]bool)
@@ -143,6 +236,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	}
 
 	log.Printf("[Pipeline] Collected total: %d (unique batch: %d), New unique items to analyze: %d", len(allItems), len(uniqueBatch), len(newItems))
+	p.updateStage(StageAnalyzing, 0, len(newItems), fmt.Sprintf("新着 %d 件の脅威データを汎用LLMで分析開始...", len(newItems)))
 
 	analyzedCount := 0
 	notifiedCount := 0
@@ -156,8 +250,9 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 			end = len(newItems)
 		}
 		chunk := newItems[i:end]
-		log.Printf("[Pipeline] [%d-%d/%d] Analyzing threat batch with Gemini (%d items)...",
+		log.Printf("[Pipeline] [%d-%d/%d] Analyzing threat batch (%d items)...",
 			i+1, end, len(newItems), len(chunk))
+		p.updateStage(StageAnalyzing, i+1, len(newItems), fmt.Sprintf("汎用LLMによる脅威分析 (%d-%d/%d)...", i+1, end, len(newItems)))
 
 		enrichedBatch, err := p.analyzer.AnalyzeBatch(ctx, chunk)
 		if err != nil {
@@ -316,6 +411,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		needingTrans, err := p.store.GetIncidentsNeedingTranslation(ctx, 50)
 		if err == nil && len(needingTrans) > 0 {
 			log.Printf("[Pipeline] Translating %d incidents into English...", len(needingTrans))
+			p.updateStage(StageTranslating, 0, len(needingTrans), fmt.Sprintf("日本語特化モデルによる英語翻訳処理中 (%d件)...", len(needingTrans)))
 			var transItems []analyzer.BatchTranslateItem
 			for _, inc := range needingTrans {
 				sum := inc.Summary
@@ -347,6 +443,7 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 					}
 				}
 				log.Printf("[Pipeline] Successfully translated %d incidents into English", len(results))
+				p.updateStage(StageTranslating, len(results), len(needingTrans), fmt.Sprintf("英語翻訳完了 (%d/%d件)", len(results), len(needingTrans)))
 			}
 		}
 	}
@@ -362,5 +459,10 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 	}
 
 	log.Printf("=== Harvesting cycle complete: %+v ===", summary)
+	p.updateStage(StageCompleted, len(newItems), len(newItems), fmt.Sprintf("パイプライン収集・分析サイクル完了 (新着: %d, 分析: %d, 通知: %d)", len(newItems), analyzedCount, notifiedCount))
+	go func() {
+		time.Sleep(4 * time.Second)
+		p.updateStage(StageIdle, 0, 0, "パイプライン待機中")
+	}()
 	return summary, nil
 }

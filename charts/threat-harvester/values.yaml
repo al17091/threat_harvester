@@ -52,6 +52,23 @@ worker:
       cpu: 100m
       memory: 128Mi
 
+# Autonomous CTI Agent Service (TypeScript + Pi Core + PLaMo 3 Translate)
+agent:
+  enabled: true
+  replicas: 1
+  port: 8002
+  image:
+    repository: ghcr.io/al17091/threat_harvester
+    tag: "agent-0.1.18"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
 # Headless Chrome Service (Browserless Chromium) for dynamic JavaScript / SPA article scraping
 browserless:
   enabled: true
@@ -138,16 +155,19 @@ secrets:
 # General application configuration
 config:
   complianceMode: "all"
-  aiPrimaryProvider: "hybrid"
+  aiPrimaryProvider: "agent"
   aiTimeoutSeconds: 180
-  litellmEndpoint: "https://litellm.lab.internal/v1/chat/completions"
-  litellmModel: "qwen2.5-3b-instruct"
-  geminiModel: "gemini-3.5-flash-lite"
+  litellmEndpoint: "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions"
+  litellmModel: "lab/qwen2.5-3b-instruct"
+  generalLlmEndpoint: "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions"
+  generalLlmModel: "lab/qwen2.5-3b-instruct"
+  japaneseSpecializedEndpoint: "http://plamo-translator-service.litellm.svc.cluster.local:8080"
+  japaneseSpecializedModel: "lab/plamo-3-translate"
   hybrid:
     queryGenerator: "qwen"
     extractor: "qwen"
-    refiner: "gemini"
-    translator: "gemini"
+    refiner: "qwen"
+    translator: "plamo"
     refineSeverities: "CRITICAL"
     refineJapanOnly: true
   searxngUrl: "https://searxng.lab.internal/search"

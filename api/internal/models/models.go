@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -54,6 +55,14 @@ const (
 	JapanRelevanceNone     JapanRelevance = "None"
 	JapanRelevanceUnknown  JapanRelevance = "Unknown"
 )
+
+// QueueBacklogStats represents current queue depth, pending translations, and accumulated items in the pipeline.
+type QueueBacklogStats struct {
+	UntranslatedIncidents int `json:"untranslated_incidents"`
+	PendingAnalysisItems  int `json:"pending_analysis_items"`
+	TotalIncidents        int `json:"total_incidents"`
+	TotalThreatItems      int `json:"total_threat_items"`
+}
 
 // ThreatItem represents raw normalized threat data gathered from external feeds.
 type ThreatItem struct {
@@ -172,6 +181,68 @@ func isGenericURL(uStr string) bool {
 	return false
 }
 
+var (
+	accountHandleRegex  = regexp.MustCompile(`(?i)\s*\(@?[A-Za-z0-9_]+(?:\s*[\/&,]\s*@?[A-Za-z0-9_]+)*\)`)
+	rawSearchQueryRegex = regexp.MustCompile(`(?i)^(?:WebSearch|X|XMonitor|DarkWeb):\s*[\(\[].*`)
+)
+
+// SanitizeSourceName standardizes source names:
+// 1. Replaces engine branding ("SearXNG Web" -> "Web Search", "SearXNG Cross-Search" -> "Web Search (Tor)")
+// 2. Strips specific account names/handles e.g. "(piyokango / JPCERT)"
+// 3. Sanitizes boolean query leaks e.g. "WebSearch:(..."
+func SanitizeSourceName(sourceType SourceType, name string) string {
+	s := strings.TrimSpace(name)
+	if s == "" {
+		switch sourceType {
+		case SourceTypeVendorRSS:
+			return "Vendor Security Advisory"
+		case SourceTypeTelegram:
+			return "Telegram CTI Feed"
+		case SourceTypeDarkwebOnion:
+			return "Web Search (Tor)"
+		case SourceTypeRansomwareTracker:
+			return "Ransomware Tracker"
+		case SourceTypeXMonitor:
+			return "X / SNS: 国内セキュリティ速報"
+		case SourceTypeWebSearch:
+			return "Web Search"
+		default:
+			return "Threat Intelligence Source"
+		}
+	}
+
+	// Replace SearXNG references with Web Search
+	s = strings.ReplaceAll(s, "SearXNG Web:", "Web Search:")
+	s = strings.ReplaceAll(s, "SearXNG Cross-Search:", "Web Search (Tor):")
+	s = strings.ReplaceAll(s, "SearXNG Web", "Web Search")
+	s = strings.ReplaceAll(s, "SearXNG Cross-Search", "Web Search (Tor)")
+	s = strings.ReplaceAll(s, "SearXNG", "Web Search")
+
+	// Strip specific account handles in parentheses e.g. "(piyokango / JPCERT)"
+	s = accountHandleRegex.ReplaceAllString(s, "")
+	if strings.HasPrefix(s, "X:@") || strings.HasPrefix(s, "XMonitor:@") {
+		s = "X: 国内セキュリティ速報"
+	}
+
+	// Clean raw boolean query leaks e.g. "WebSearch:(ランサムウェア OR サイバー攻撃)"
+	if rawSearchQueryRegex.MatchString(s) || strings.Contains(s, " OR ") || strings.Contains(s, " AND ") || strings.Contains(s, "site:x.com") {
+		switch sourceType {
+		case SourceTypeXMonitor:
+			s = "X: 国内セキュリティ速報"
+		case SourceTypeDarkwebOnion:
+			s = "Web Search (Tor): 脅威探索"
+		default:
+			s = "Web Search: 国内脅威速報"
+		}
+	}
+
+	s = strings.TrimSpace(s)
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return s
+}
+
 // NewThreatItem creates a new ThreatItem with a deterministic SHA256 hash ID.
 func NewThreatItem(
 	sourceType SourceType,
@@ -186,6 +257,7 @@ func NewThreatItem(
 	cleanTitle := strings.TrimSpace(title)
 	normURL := NormalizeURL(rawURL)
 	cleanSummary := strings.TrimSpace(summary)
+	cleanSourceName := SanitizeSourceName(sourceType, sourceName)
 
 	var identifier string
 	if normURL != "" && !isGenericURL(normURL) {
@@ -198,7 +270,7 @@ func NewThreatItem(
 		if normTitle != "" {
 			identifier = fmt.Sprintf("title:%s", normTitle)
 		} else {
-			identifier = fmt.Sprintf("%s:%s:%s", sourceType, sourceName, strings.ToLower(cleanSummary))
+			identifier = fmt.Sprintf("%s:%s:%s", sourceType, cleanSourceName, strings.ToLower(cleanSummary))
 		}
 	}
 
@@ -217,7 +289,7 @@ func NewThreatItem(
 	item := ThreatItem{
 		ID:          itemID,
 		SourceType:  sourceType,
-		SourceName:  sourceName,
+		SourceName:  cleanSourceName,
 		Title:       cleanTitle,
 		URL:         normURL,
 		Summary:     cleanSummary,

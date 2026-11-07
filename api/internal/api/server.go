@@ -40,6 +40,9 @@ type Server struct {
 	schedulerEnabled bool
 	lastPipeSummary  interface{}
 
+	stageBroadcastMu    sync.Mutex
+	stageBroadcastChans map[chan []byte]struct{}
+
 	torMu        sync.Mutex
 	lastTorCheck time.Time
 	lastTorState bool
@@ -49,16 +52,33 @@ type Server struct {
 	lastLLMState bool
 }
 
+func (s *Server) broadcastSSEStage(data []byte) {
+	s.stageBroadcastMu.Lock()
+	defer s.stageBroadcastMu.Unlock()
+	for ch := range s.stageBroadcastChans {
+		select {
+		case ch <- data:
+		default:
+		}
+	}
+}
+
 func NewServer(store storage.Store) *Server {
 	logger.InitGlobalLogger()
 	cfg := config.GetSettings().GetConfig()
 	pipe := pipeline.NewPipeline(store)
 	s := &Server{
-		store:      store,
-		pipeline:   pipe,
-		scraperMgr: scraper.NewScraperManager(store, pipe.Analyzer(), cfg.Scraper, cfg.Network),
-		router:     chi.NewRouter(),
+		store:               store,
+		pipeline:            pipe,
+		scraperMgr:          scraper.NewScraperManager(store, pipe.Analyzer(), cfg.Scraper, cfg.Network),
+		router:              chi.NewRouter(),
+		stageBroadcastChans: make(map[chan []byte]struct{}),
 	}
+	pipe.SetStageCallback(func(progress pipeline.StageProgress) {
+		if data, err := json.Marshal(progress); err == nil {
+			s.broadcastSSEStage(data)
+		}
+	})
 	s.setupRoutes()
 	s.triggerAsyncHealthChecks(cfg)
 	go func() {
@@ -117,6 +137,7 @@ func (s *Server) setupRoutes() {
 		r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
 		r.Post("/pipeline/translate-incidents", s.handleTranslateIncidents)
 		r.Post("/pipeline/remediate-japanese", s.handleRemediateJapanese)
+		r.Get("/pipeline/stage", s.handleGetPipelineStage)
 		r.Get("/pipeline/stream", s.handlePipelineStream)
 		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
 		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
@@ -266,6 +287,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.pipeMu.Lock()
+	stageProg := s.pipeline.GetStageProgress()
+	backlogStats, _ := s.store.GetQueueBacklogStats(r.Context())
 	pipeState := map[string]interface{}{
 		"is_running":        s.isPipeRunning,
 		"last_run_at":       s.lastPipeRunAt,
@@ -273,6 +296,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"scheduler_enabled": s.schedulerEnabled,
 		"interval_hours":    cfg.Pipeline.CheckIntervalHours,
 		"last_summary":      s.lastPipeSummary,
+		"stage_progress":    stageProg,
+		"queue_backlog":     backlogStats,
 	}
 	s.pipeMu.Unlock()
 
@@ -286,9 +311,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"url":    cfg.Network.TorProxyURL,
 		},
 		"ai": map[string]interface{}{
-			"configured":       cfg.AI.GeminiAPIKey != "",
-			"model":            cfg.AI.GeminiModel,
+			"configured":       true,
 			"primary_provider": cfg.AI.PrimaryProvider,
+			"general_llm": map[string]interface{}{
+				"online":   llmOnline,
+				"model":    cfg.AI.Model,
+				"endpoint": cfg.AI.Endpoint,
+			},
+			"japanese_specialized": map[string]interface{}{
+				"online":   llmOnline,
+				"model":    "lab/plamo-3-translate",
+				"endpoint": cfg.AI.Endpoint,
+			},
 			"local_llm": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    cfg.AI.Model,
@@ -359,6 +393,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 	sourceType := q.Get("source_type")
 	search := q.Get("search")
 	sortBy := q.Get("sort_by")
+	lang := strings.ToLower(strings.TrimSpace(q.Get("lang")))
 
 	filter := storage.HistoryFilter{
 		Limit:      limit,
@@ -368,6 +403,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		SourceType: sourceType,
 		Search:     search,
 		OrderBy:    sortBy,
+		Lang:       lang,
 	}
 
 	viewMode := q.Get("view")
@@ -386,13 +422,24 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 			total = len(items)
 		}
 	} else {
-		items, err = s.store.GetIncidents(ctx, filter)
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, err.Error())
+		var wg sync.WaitGroup
+		var itemsErr, totalErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			items, itemsErr = s.store.GetIncidents(ctx, filter)
+		}()
+		go func() {
+			defer wg.Done()
+			total, totalErr = s.store.GetIncidentsTotal(ctx, filter)
+		}()
+		wg.Wait()
+
+		if itemsErr != nil {
+			errorResponse(w, http.StatusInternalServerError, itemsErr.Error())
 			return
 		}
-		total, err = s.store.GetIncidentsTotal(ctx, filter)
-		if err != nil {
+		if totalErr != nil {
 			total = len(items)
 		}
 		// Graceful fallback to raw history if incidents have not yet been clustered
@@ -409,7 +456,6 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		items = []map[string]interface{}{}
 	}
 
-	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang")))
 	for _, inc := range items {
 		formatIncidentForLang(inc, lang)
 	}
@@ -1292,6 +1338,19 @@ func (s *Server) handleTriggerPipeline(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleGetPipelineStage(w http.ResponseWriter, r *http.Request) {
+	stage := s.pipeline.GetStageProgress()
+	backlog, _ := s.store.GetQueueBacklogStats(r.Context())
+	s.pipeMu.Lock()
+	isRunning := s.isPipeRunning
+	s.pipeMu.Unlock()
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"is_running":     isRunning,
+		"stage_progress": stage,
+		"queue_backlog":  backlog,
+	})
+}
+
 func (s *Server) handlePipelineStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -1308,6 +1367,17 @@ func (s *Server) handlePipelineStream(w http.ResponseWriter, r *http.Request) {
 	ch, unsub := logger.DefaultHub.Subscribe()
 	defer unsub()
 
+	// Subscribe to live stage progress
+	stageCh := make(chan []byte, 10)
+	s.stageBroadcastMu.Lock()
+	s.stageBroadcastChans[stageCh] = struct{}{}
+	s.stageBroadcastMu.Unlock()
+	defer func() {
+		s.stageBroadcastMu.Lock()
+		delete(s.stageBroadcastChans, stageCh)
+		s.stageBroadcastMu.Unlock()
+	}()
+
 	// Flush initial recent logs
 	recent := logger.DefaultHub.GetEntries(100)
 	for _, entry := range recent {
@@ -1322,6 +1392,12 @@ func (s *Server) handlePipelineStream(w http.ResponseWriter, r *http.Request) {
 	})
 	s.pipeMu.Unlock()
 	fmt.Fprintf(w, "event: status\ndata: %s\n\n", statusData)
+
+	// Flush initial stage progress
+	initStage := s.pipeline.GetStageProgress()
+	if stageData, err := json.Marshal(initStage); err == nil {
+		fmt.Fprintf(w, "event: stage\ndata: %s\n\n", stageData)
+	}
 	flusher.Flush()
 
 	ticker := time.NewTicker(15 * time.Second)
@@ -1337,6 +1413,12 @@ func (s *Server) handlePipelineStream(w http.ResponseWriter, r *http.Request) {
 			}
 			data, _ := json.Marshal(entry)
 			fmt.Fprintf(w, "event: log\ndata: %s\n\n", data)
+			flusher.Flush()
+		case stageBytes, ok := <-stageCh:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: stage\ndata: %s\n\n", stageBytes)
 			flusher.Flush()
 		case <-ticker.C:
 			fmt.Fprintf(w, ": keepalive\n\n")

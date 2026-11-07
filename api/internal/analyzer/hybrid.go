@@ -3,6 +3,7 @@ package analyzer
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/al17091/threat_harvester/api/internal/config"
@@ -31,19 +32,6 @@ func NewHybridThreatAnalyzer(cfg config.AiConfig) *HybridThreatAnalyzer {
 
 	var escalation ThreatAnalyzer
 	escEnabled := cfg.Escalation.Enabled
-
-	// If escalation is enabled and Gemini API key is provided
-	geminiKey := cfg.Escalation.GeminiAPIKey
-	if geminiKey == "" {
-		geminiKey = cfg.GeminiAPIKey
-	}
-	if geminiKey != "" {
-		escalation = NewGeminiThreatAnalyzer()
-		escEnabled = true
-	} else if escEnabled && geminiKey == "" {
-		log.Printf("[HybridAnalyzer] Escalation is enabled but Gemini API key is missing. Running in primary-only mode.")
-		escEnabled = false
-	}
 
 	maxRunes := cfg.Escalation.MaxLocalContentRunes
 	if maxRunes <= 0 {
@@ -282,11 +270,15 @@ func (h *HybridThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	return h.primary.LocalizeThreatToJapanese(ctx, enriched)
 }
 
-// NewDefaultThreatAnalyzer returns the configured analyzer (Hybrid, OpenAI-compatible, or Gemini)
+// NewDefaultThreatAnalyzer returns the configured analyzer (Agent or OpenAI-compatible)
 func NewDefaultThreatAnalyzer() ThreatAnalyzer {
 	cfg := config.GetSettings().GetConfig()
-	if cfg.AI.PrimaryProvider == "gemini" && cfg.AI.GeminiAPIKey != "" {
-		return NewGeminiThreatAnalyzer()
+	if cfg.AI.PrimaryProvider == "agent" || os.Getenv("AGENT_URL") != "" {
+		agentURL := os.Getenv("AGENT_URL")
+		if agentURL == "" {
+			agentURL = "http://threat-harvester-agent:8002"
+		}
+		return NewAgentClientAnalyzer(agentURL, cfg.AI.TimeoutSeconds)
 	}
 	if cfg.AI.PrimaryProvider == "openai_compatible" {
 		return NewOpenAICompatibleAnalyzer(

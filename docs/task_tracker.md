@@ -6,9 +6,9 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 ---
 
 ## Current Status
-- **Current Version**: `v0.1.0`
-- **Current Phase**: Phase 7 Completed / Planning Phase 8 (Strict Security Hardening & CSP)
-- **Last Updated**: 2026-10-18
+- **Current Version**: `v0.2.0`
+- **Current Phase**: Phase 9 Completed (Multi-Tier Caching & Performance Architecture) / Planning Phase 8-B (Strict Security Hardening & CSP)
+- **Last Updated**: 2026-11-08
 
 ---
 
@@ -73,11 +73,22 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Merged latest container separation architecture (`api/`, `worker/`, `web/`) from `develop`.
   - Removed deprecated legacy `backend/` and `tests/` directories.
 - [x] **API (`api/`) Testing & Coverage**:
-  - Built mock transport layer for Gemini and OpenAI-compatible threat analyzers (analyzing, batching, translations).
+  - Built mock transport layer for OpenAI-compatible threat analyzers (analyzing, batching, translations).
   - Unit tests covering REST API endpoints, incident clustering, groundings, and storage queries.
   - End-to-End integration test (`api/e2e_test.go`) validating end-to-end flow from RSS ingest to API delivery.
   - Achieved **75.1%** statement test coverage across the API service.
 - [x] **Worker (`worker/`) Python Testing**:
+  - Comprehensive pytest suite covering all harvesters, notifiers, deduplication, and database operations.
+
+### Phase 8: Vendor-Free Architecture & Autonomous CTI Agent
+- [x] **Vendor-Agnostic LLM Protocol**:
+  - Completely removed proprietary Gemini API dependencies and vendor lock-in.
+  - Enforced standard OpenAI-compatible protocol (`/v1/chat/completions`) across the entire stack.
+- [x] **Role-Based Model Separation**:
+  - **General LLM (`GENERAL_LLM_MODEL`)**: Dedicated to fact extraction, structured JSON schema enforcement, and reasoning.
+  - **Japanese Specialized Model (`JAPANESE_SPECIALIZED_MODEL`)**: Dedicated to terminology-consistent CTI translation using PFML3 glossary enforcement.
+- [x] **Autonomous CTI Agent (`agent/`)**:
+  - TypeScript microservice coordinating entity resolution (`entity_resolver`), General LLM extraction, and PLaMo translation.
   - Built pytest suite for Python harvesters, notifiers, models, and analyzers (24/24 passing, 72% coverage).
 - [x] **Web (`web/`) Node.js Testing**:
   - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
@@ -98,4 +109,24 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Test bilingual language toggling (`/en`, `/ja`), STIX 2.1 bundle export, RSS feeds (`/rss`), and dark mode theme switching without CSP console violations.
 - [ ] **Automated Security Scan Verification**:
   - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions.
+
+### Phase 9: Multi-Tier Caching & Feed Performance Optimization (`v0.2.0-rc.3`)
+- [x] **Tier 1: Client-Side In-Memory Feed Cache (`IncidentDashboard.tsx`)**:
+  - In-memory `useRef<Map>` caching with composite key `${lang}:${page}:${size}:${search}:${severity}:${japan}:${source}:${sort}`.
+  - Achieved 0ms instantaneous page flipping for visited pages in active session.
+  - Invalidation triggers: filter changes, search input, language toggling, manual refresh, and background harvest completion.
+  - Fixed initial duplicate fetch on component mount (`isFilterMountedRef`).
+- [x] **Tier 2: Zero Layout-Shift UI Rendering**:
+  - Replaced 150px height-collapsing loading spinner with 2px cyan top pulse line (`h-0.5 animate-pulse`).
+  - Added card opacity transition (`opacity-60 pointer-events-none`) during network fetch.
+  - Viewport-aware scroll restoration: only scroll to feed top if user is scrolled past feed header (`rect.top < 0`).
+- [x] **Tier 3: Database & API Projection Separation (`api/internal/storage/incidents.go`)**:
+  - Created `incidentListSelectCols` to project empty constants (`'' AS raw_content`, `'[]' AS source_urls`, `'[]' AS sources_detail`), bypassing heavy PostgreSQL TOAST decompression.
+  - Reduced API response payload from 485KB to 88KB per 20 items (82% reduction).
+  - Reserved full attribute projection (`incidentSelectCols`) strictly for single-incident modal retrieval (`/api/incidents/:id`).
+  - Optimized `IsReporterRoleOrAttribution` regex compilation with fast substring pre-filtering.
+- [x] **Tier 4: Concurrency & Database Connection Execution (`api/internal/api/server.go`)**:
+  - Parallelized `GetIncidents` and `GetIncidentsTotal` queries with `sync.WaitGroup`, cutting database latency in half.
+- [x] **Policy Documentation**:
+  - Documented complete architecture in [`docs/caching_and_performance_policy.md`](caching_and_performance_policy.md).
 

@@ -23,6 +23,15 @@ const incidentSelectCols = `
 	COALESCE(summary, ''), COALESCE(impact_analysis, '')
 `
 
+// incidentListSelectCols omits raw_content, source_urls, and sources_detail to keep paginated list API responses compact and fast.
+const incidentListSelectCols = `
+	id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+	severity, japan_relevance, attack_type, '' AS raw_content, primary_url, '[]' AS source_urls, '[]' AS sources_detail,
+	first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at,
+	COALESCE(title_ja, ''), COALESCE(victim_org_en, ''), COALESCE(victim_org_ja, ''), COALESCE(affected_product_en, ''), COALESCE(affected_product_ja, ''),
+	COALESCE(summary, ''), COALESCE(impact_analysis, '')
+`
+
 // normalizeClusterURL sanitizes a URL for incident clustering by removing tracking query parameters and trailing slashes.
 func normalizeClusterURL(rawURL string) string {
 	trimmed := strings.TrimSpace(rawURL)
@@ -195,7 +204,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// Detail record for this source report
 	detail := models.SourceDetail{
 		Type:        item.SourceType,
-		Name:        item.SourceName,
+		Name:        models.SanitizeSourceName(item.SourceType, item.SourceName),
 		Title:       item.Title,
 		URL:         item.URL,
 		PublishedAt: item.PublishedAt,
@@ -1145,6 +1154,14 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 		}
 	}
 
+	if strings.ToLower(f.Lang) == "en" {
+		if !s.isSQLite {
+			conditions = append(conditions, "(summary IS NOT NULL AND summary != '' AND summary !~ '[\u3040-\u30ff\u4e00-\u9faf]') AND (title IS NOT NULL AND title != '' AND title !~ '[\u3040-\u30ff\u4e00-\u9faf]')")
+		} else {
+			conditions = append(conditions, "(title NOT LIKE '%Translation Pending%' AND summary NOT LIKE '%translation in progress%')")
+		}
+	}
+
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
@@ -1156,7 +1173,7 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 func (s *SQLStore) GetIncidents(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
 	whereClause, args := s.buildIncidentsConditions(f)
 	query := `
-		SELECT ` + incidentSelectCols + `
+		SELECT ` + incidentListSelectCols + `
 		FROM incidents
 	` + whereClause
 
@@ -1296,10 +1313,13 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		cleanActors, _ := res["threat_actors"].([]string)
 
 		for _, c := range childItems {
+			cSrcType, _ := c["source_type"].(string)
 			cSrcName, _ := c["source_name"].(string)
 			if cSrcName == "" {
-				cSrcName, _ = c["source_type"].(string)
+				cSrcName = cSrcType
 			}
+			cSrcName = models.SanitizeSourceName(models.SourceType(cSrcType), cSrcName)
+			c["source_name"] = cSrcName
 			cTitle, _ := c["title"].(string)
 			cRaw, _ := c["raw_content"].(string)
 			cSum, _ := c["summary"].(string)

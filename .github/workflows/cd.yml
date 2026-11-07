@@ -58,17 +58,20 @@ jobs:
 
           API_TAG="${REPO_IMAGE}:api-${VER}"
           WORKER_TAG="${REPO_IMAGE}:worker-${VER}"
+          AGENT_TAG="${REPO_IMAGE}:agent-${VER}"
           WEB_TAG="${REPO_IMAGE}:web-${VER}"
           DEV_TAG="${REPO_IMAGE}:dev-${VER}"
 
           echo "Resolved Version : ${VER}"
           echo "API Image        : ${API_TAG}"
           echo "Worker Image     : ${WORKER_TAG}"
+          echo "Agent Image      : ${AGENT_TAG}"
           echo "Web Image        : ${WEB_TAG}"
 
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "api_tag=${API_TAG}" >> "$GITHUB_OUTPUT"
           echo "worker_tag=${WORKER_TAG}" >> "$GITHUB_OUTPUT"
+          echo "agent_tag=${AGENT_TAG}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_TAG}" >> "$GITHUB_OUTPUT"
           echo "dev_tag=${DEV_TAG}" >> "$GITHUB_OUTPUT"
 
@@ -103,6 +106,16 @@ jobs:
           tags: ${{ steps.meta.outputs.web_tag }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
+
+      - name: Build and push Autonomous CTI Agent image (agent-${{ steps.meta.outputs.version }})
+        uses: docker/build-push-action@v7
+        with:
+          context: ./agent
+          file: agent/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.agent_tag }}
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,mode=max,scope=agent
 
       - name: Build and push Dev CLI image (dev-${{ steps.meta.outputs.version }})
         if: ${{ inputs.include_dev == true }}

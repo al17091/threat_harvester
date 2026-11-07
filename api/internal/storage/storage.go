@@ -27,6 +27,7 @@ type HistoryFilter struct {
 	SourceType string
 	Search     string
 	OrderBy    string
+	Lang       string
 }
 
 type Store interface {
@@ -54,6 +55,7 @@ type Store interface {
 	GetIncidentsNeedingJapaneseRemediation(ctx context.Context, limit int) ([]models.Incident, error)
 	CleanChineseCTITermsInDatabase(ctx context.Context) (int64, error)
 	GetEntityStats(ctx context.Context, limit int, japanOnly bool) (*models.EntityStats, error)
+	GetQueueBacklogStats(ctx context.Context) (models.QueueBacklogStats, error)
 
 	GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error)
 	UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error
@@ -887,6 +889,15 @@ func (s *SQLStore) GetStats(ctx context.Context) (map[string]interface{}, error)
 		"database_url":       maskedURL,
 		"db_path":            s.dbURL,
 	}, nil
+}
+
+func (s *SQLStore) GetQueueBacklogStats(ctx context.Context) (models.QueueBacklogStats, error) {
+	var stats models.QueueBacklogStats
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM threat_items").Scan(&stats.TotalThreatItems)
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM incidents").Scan(&stats.TotalIncidents)
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM threat_items WHERE fetch_status = 'pending'").Scan(&stats.PendingAnalysisItems)
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM incidents WHERE (title IS NULL OR title = '' OR title LIKE '%Translation Pending%') AND (title_ja IS NOT NULL AND title_ja != '')").Scan(&stats.UntranslatedIncidents)
+	return stats, nil
 }
 
 func (s *SQLStore) GetLatestHarvestTime(ctx context.Context) (*time.Time, error) {
