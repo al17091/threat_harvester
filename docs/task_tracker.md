@@ -73,11 +73,22 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Merged latest container separation architecture (`api/`, `worker/`, `web/`) from `develop`.
   - Removed deprecated legacy `backend/` and `tests/` directories.
 - [x] **API (`api/`) Testing & Coverage**:
-  - Built mock transport layer for Gemini and OpenAI-compatible threat analyzers (analyzing, batching, translations).
+  - Built mock transport layer for OpenAI-compatible threat analyzers (analyzing, batching, translations).
   - Unit tests covering REST API endpoints, incident clustering, groundings, and storage queries.
   - End-to-End integration test (`api/e2e_test.go`) validating end-to-end flow from RSS ingest to API delivery.
   - Achieved **75.1%** statement test coverage across the API service.
 - [x] **Worker (`worker/`) Python Testing**:
+  - Comprehensive pytest suite covering all harvesters, notifiers, deduplication, and database operations.
+
+### Phase 8: Vendor-Free Architecture & Autonomous CTI Agent
+- [x] **Vendor-Agnostic LLM Protocol**:
+  - Completely removed proprietary Gemini API dependencies and vendor lock-in.
+  - Enforced standard OpenAI-compatible protocol (`/v1/chat/completions`) across the entire stack.
+- [x] **Role-Based Model Separation**:
+  - **General LLM (`GENERAL_LLM_MODEL`)**: Dedicated to fact extraction, structured JSON schema enforcement, and reasoning.
+  - **Japanese Specialized Model (`JAPANESE_SPECIALIZED_MODEL`)**: Dedicated to terminology-consistent CTI translation using PFML3 glossary enforcement.
+- [x] **Autonomous CTI Agent (`agent/`)**:
+  - TypeScript microservice coordinating entity resolution (`entity_resolver`), General LLM extraction, and PLaMo translation.
   - Built pytest suite for Python harvesters, notifiers, models, and analyzers (24/24 passing, 72% coverage).
 - [x] **Web (`web/`) Node.js Testing**:
   - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
