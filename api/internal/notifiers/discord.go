@@ -80,7 +80,13 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 		color = 0x808080
 	}
 
-	badges := ""
+	envTag := getEnvTag(cfg.Pipeline.Environment)
+	envPrefix := ""
+	if envTag != "" {
+		envPrefix = fmt.Sprintf("[%s] ", envTag)
+	}
+
+	badges := envPrefix
 	if isJa {
 		if threat.JapanRelevance == models.JapanRelevanceDirect {
 			badges += "🇯🇵 [日本直接標的] "
@@ -113,6 +119,9 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 		} else if threat.Severity == models.SeverityCritical {
 			content = "🚨 @here **Critical Threat Incident Alert**"
 		}
+	}
+	if content != "" && envPrefix != "" {
+		content = envPrefix + content
 	}
 
 	var srcLabel, relLabel, typeLabel, victimLabel, prodLabel, cveLabel, actorLabel, impactLabel, refLabel string
@@ -187,7 +196,12 @@ func (n *DiscordNotifier) Notify(ctx context.Context, threat *models.EnrichedThr
 				"color":       color,
 				"fields":      fields,
 				"footer": map[string]string{
-					"text": fmt.Sprintf("Harvester ID: %s | Threat Harvester Bot", shortID),
+					"text": func() string {
+						if envTag != "" {
+							return fmt.Sprintf("Harvester ID: %s | Threat Harvester Bot [%s]", shortID, envTag)
+						}
+						return fmt.Sprintf("Harvester ID: %s | Threat Harvester Bot", shortID)
+					}(),
 				},
 				"timestamp": threat.AnalyzedAt.Format(time.RFC3339),
 			},
@@ -231,26 +245,38 @@ func (n *DiscordNotifier) NotifySummary(ctx context.Context, totalAlerts int, ma
 		return true
 	}
 
+	envTag := getEnvTag(cfg.Pipeline.Environment)
+	envPrefix := ""
+	if envTag != "" {
+		envPrefix = fmt.Sprintf("[%s] ", envTag)
+	}
+
 	isJa := cfg.Pipeline.NotifyLanguage == "ja"
 	var title, desc string
 	if isJa {
-		title = fmt.Sprintf("⚠️ 【大量検知】サーキットブレーカー発動 (%d件超過)", maxAlerts)
+		title = fmt.Sprintf("%s⚠️ 【大量検知】サーキットブレーカー発動 (%d件超過)", envPrefix, maxAlerts)
 		desc = fmt.Sprintf("本収集サイクルにおいて通知上限（%d件）を超える脅威インシデントを検知しました。\n通知の連投・スパムを防止するため、これ以降の個別アラートを集約しました。\n最新のインシデント一覧や詳細な調査結果はダッシュボードをご確認ください。", maxAlerts)
 	} else {
-		title = fmt.Sprintf("⚠️ [High Volume Alert] Circuit Breaker Triggered (Exceeded %d alerts)", maxAlerts)
+		title = fmt.Sprintf("%s⚠️ [High Volume Alert] Circuit Breaker Triggered (Exceeded %d alerts)", envPrefix, maxAlerts)
 		desc = fmt.Sprintf("The threat harvester detected incidents exceeding the alert threshold (%d items) in the current harvesting cycle.\nTo prevent notification flooding, individual notifications have been temporarily grouped.\nPlease inspect the dashboard for full correlation and threat intelligence details.", maxAlerts)
 	}
 
+	summaryContent := fmt.Sprintf("%s⚠️ **Circuit Breaker Rate Limiter Activated**", envPrefix)
 	payload := map[string]interface{}{
 		"username": "Threat Harvester CTI",
-		"content":  "⚠️ **Circuit Breaker Rate Limiter Activated**",
+		"content":  summaryContent,
 		"embeds": []map[string]interface{}{
 			{
 				"title":       title,
 				"description": desc,
 				"color":       0xFF9900,
 				"footer": map[string]string{
-					"text": "Threat Harvester Safety Circuit Breaker",
+					"text": func() string {
+						if envTag != "" {
+							return fmt.Sprintf("Threat Harvester Safety Circuit Breaker [%s]", envTag)
+						}
+						return "Threat Harvester Safety Circuit Breaker"
+					}(),
 				},
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
 			},
@@ -271,6 +297,20 @@ func (n *DiscordNotifier) NotifySummary(ctx context.Context, totalAlerts int, ma
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent
+}
+
+func getEnvTag(rawEnv string) string {
+	raw := strings.ToUpper(strings.TrimSpace(rawEnv))
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(raw, "STG") || strings.Contains(raw, "STAGING") {
+		return "STG"
+	}
+	if strings.Contains(raw, "PROD") || strings.Contains(raw, "PRODUCTION") {
+		return "PROD"
+	}
+	return raw
 }
 
 func truncate(s string, max int) string {

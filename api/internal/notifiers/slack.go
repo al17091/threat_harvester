@@ -68,6 +68,12 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 		impactText = threat.ImpactAnalysisJa
 	}
 
+	envTag := getEnvTag(cfg.Pipeline.Environment)
+	envPrefix := ""
+	if envTag != "" {
+		envPrefix = fmt.Sprintf("[%s] ", envTag)
+	}
+
 	headerPrefix := ""
 	if isJa {
 		if threat.JapanRelevance == models.JapanRelevanceDirect {
@@ -138,7 +144,7 @@ func (n *SlackNotifier) Notify(ctx context.Context, threat *models.EnrichedThrea
 			"type": "header",
 			"text": map[string]interface{}{
 				"type":  "plain_text",
-				"text":  fmt.Sprintf("%s[%s] %s", headerPrefix, threat.Severity, truncate(titleText, 80)),
+				"text":  fmt.Sprintf("%s%s[%s] %s", envPrefix, headerPrefix, threat.Severity, truncate(titleText, 70)),
 				"emoji": true,
 			},
 		},
@@ -220,13 +226,19 @@ func (n *SlackNotifier) NotifySummary(ctx context.Context, totalAlerts int, maxA
 		return true
 	}
 
+	envTag := getEnvTag(cfg.Pipeline.Environment)
+	envPrefix := ""
+	if envTag != "" {
+		envPrefix = fmt.Sprintf("[%s] ", envTag)
+	}
+
 	isJa := cfg.Pipeline.NotifyLanguage == "ja"
 	var title, desc string
 	if isJa {
-		title = fmt.Sprintf("⚠️ 【大量検知】サーキットブレーカー発動 (%d件超過)", maxAlerts)
+		title = fmt.Sprintf("%s⚠️ 【大量検知】サーキットブレーカー発動 (%d件超過)", envPrefix, maxAlerts)
 		desc = fmt.Sprintf("本収集サイクルにおいて通知上限（%d件）を超える脅威インシデントを検知しました。\n通知スパム防止のため、これ以降の個別アラートを集約しました。\n最新のインシデント一覧や詳細な調査結果はダッシュボードをご確認ください。", maxAlerts)
 	} else {
-		title = fmt.Sprintf("⚠️ [High Volume Alert] Circuit Breaker Triggered (Exceeded %d alerts)", maxAlerts)
+		title = fmt.Sprintf("%s⚠️ [High Volume Alert] Circuit Breaker Triggered (Exceeded %d alerts)", envPrefix, maxAlerts)
 		desc = fmt.Sprintf("The threat harvester detected incidents exceeding the alert threshold (%d items) in the current harvesting cycle.\nTo prevent notification flooding, individual notifications have been temporarily grouped.\nPlease inspect the dashboard for full correlation and threat intelligence details.", maxAlerts)
 	}
 

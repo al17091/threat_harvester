@@ -1,82 +1,79 @@
 import { request } from "undici";
 
 export interface TranslateOptions {
-  ollamaBaseUrl?: string;
-  model?: string;
-  glossary?: Record<string, string>;
+  plamoBaseUrl?: string;
+  timeoutMs?: number;
 }
 
 export class PLaMoTranslator {
   private baseUrl: string;
-  private model: string;
+  private timeoutMs: number;
 
   constructor(options?: TranslateOptions) {
-    this.baseUrl = options?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://ollama-service.litellm.svc.cluster.local:11434";
-    this.model = options?.model || process.env.PLAMO_MODEL || "plamo-3-translate:2b";
+    this.baseUrl = (options?.plamoBaseUrl || process.env.PLAMO_BASE_URL || "http://plamo-translator-service.litellm.svc.cluster.local:8080").replace(/\/+$/, "");
+    this.timeoutMs = options?.timeoutMs || 45000;
   }
 
   /**
-   * Translates English text to professional Japanese, safeguarding designated CTI terms.
+   * Translates English text to professional Japanese using PLaMo 3 Translate (llama-server /completion).
+   * Utilizes native PFML3 prompt format with glossary support to preserve CTI entities and enforce canonical names.
    */
-  async translateToJapanese(text: string, preservedTerms: string[] = []): Promise<string> {
+  async translateToJapanese(text: string, glossary: Record<string, string> | string[] = {}): Promise<string> {
     if (!text || text.trim() === "") return "";
 
-    // 1. Replace preserved terms (CVEs, Victim Org names, Actor names) with placeholder tokens
-    const placeholders = new Map<string, string>();
-    let maskedText = text;
+    // Normalize glossary entries
+    const glossaryEntries: [string, string][] = [];
+    if (Array.isArray(glossary)) {
+      for (const term of glossary) {
+        if (term && term.trim()) {
+          glossaryEntries.push([term.trim(), term.trim()]);
+        }
+      }
+    } else if (typeof glossary === "object" && glossary !== null) {
+      for (const [k, v] of Object.entries(glossary)) {
+        if (k && k.trim() && v && v.trim()) {
+          glossaryEntries.push([k.trim(), v.trim()]);
+        }
+      }
+    }
 
-    // Sort terms by length descending to prevent sub-string collision
-    const sortedTerms = Array.from(new Set(preservedTerms.filter(t => t && t.trim().length > 1)))
-      .sort((a, b) => b.length - a.length);
+    // Sort glossary entries by length descending so longer phrases match first
+    glossaryEntries.sort((a, b) => b[0].length - a[0].length);
 
-    sortedTerms.forEach((term, index) => {
-      const token = `__CTI_TERM_${index}__`;
-      placeholders.set(token, term);
-      // Case-insensitive boundary or exact match
-      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      maskedText = maskedText.replace(new RegExp(escaped, "gi"), token);
-    });
+    // Construct PFML3 prompt
+    let glossaryTag = "";
+    if (glossaryEntries.length > 0) {
+      glossaryTag = "<|plamo:tag|>glossary" + glossaryEntries
+        .map(([src, tgt]) => `<|plamo:index|>${src}<|plamo:item|>${tgt}`)
+        .join("");
+    }
 
-    const prompt = `Translate the following English cyber threat intelligence text into concise, professional Japanese.
-Rules:
-- Translate into natural Japanese (da/dearu style).
-- Do NOT translate or modify placeholder tokens like __CTI_TERM_0__.
-- Strictly output ONLY the Japanese translation. No commentary.
-
-Text to translate:
-${maskedText}`;
+    const prompt = `<|plamo:tag|>dataset<|plamo:msg|>translation${glossaryTag}<|plamo:tag|>input<|plamo:msg|>${text.trim()}<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>ja<|plamo:key|>form<|plamo:val|>plain<|plamo:msg|>`;
 
     try {
-      const res = await request(`${this.baseUrl}/api/generate`, {
+      const res = await request(`${this.baseUrl}/completion`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        headersTimeout: this.timeoutMs,
+        bodyTimeout: this.timeoutMs,
         body: JSON.stringify({
-          model: this.model,
           prompt: prompt,
-          stream: false,
-          options: {
-            temperature: 0.1
-          }
+          n_predict: 512,
+          temperature: 0.1,
+          stop: ["<|plamo:tag|>", "<|plamo:bos|>"]
         })
       });
 
       if (res.statusCode !== 200) {
-        throw new Error(`Ollama translator returned status ${res.statusCode}`);
+        throw new Error(`llama-server returned status ${res.statusCode}`);
       }
 
       const body = (await res.body.json()) as any;
-      let translated = (body.response || "").trim();
-
-      // 2. Restore placeholder tokens with original preserved strings
-      for (const [token, original] of placeholders.entries()) {
-        translated = translated.replaceAll(token, original);
-      }
-
-      return translated;
+      const translated = (body.content || "").trim();
+      return translated || text;
     } catch (err: any) {
       console.warn(`[PLaMoTranslator] Translation call failed: ${err.message}. Returning original text.`);
       return text;
     }
   }
 }
-

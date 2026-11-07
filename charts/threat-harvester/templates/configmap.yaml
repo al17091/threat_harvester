@@ -26,6 +26,7 @@ data:
   NOTIFY_LANGUAGE: {{ .Values.config.notifyLanguage | default "ja" | quote }}
   CIRCUIT_BREAKER_MAX_ALERTS: {{ .Values.config.circuitBreakerMaxAlerts | default 5 | quote }}
   NOTIFY_DRY_RUN: {{ if eq (.Values.config.notifyDryRun | toString) "true" }}"true"{{ else }}"false"{{ end }}
+  ENVIRONMENT: {{ .Values.config.environment | default .Release.Namespace | quote }}
   {{- if and .Values.browserless .Values.browserless.enabled }}
   BROWSERLESS_URL: "http://{{ include "threat-harvester.fullname" . }}-browserless:{{ .Values.browserless.port | default 3000 }}"
   {{- else if .Values.config.browserlessUrl }}

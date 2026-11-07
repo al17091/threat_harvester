@@ -135,33 +135,40 @@ ${rawContent}`
 
     // === Tool Invocation: Japanese Entity Resolution ===
     const resolvedVictimOrgs: string[] = [];
+    const entityGlossary: Record<string, string> = {};
     const victimList: string[] = Array.isArray(structuredOutput.victim_orgs) ? structuredOutput.victim_orgs : [];
 
     for (const victim of victimList) {
       const resolution = await resolveJapaneseEntity(victim);
       if (resolution.officialNameJa) {
         resolvedVictimOrgs.push(resolution.officialNameJa);
+        entityGlossary[victim] = resolution.officialNameJa;
         // Elevate to Direct if official Japanese entity was confirmed
         if (resolution.isJapaneseEntity && structuredOutput.japan_relevance === "None") {
           structuredOutput.japan_relevance = "Direct";
         }
       } else {
         resolvedVictimOrgs.push(victim);
+        entityGlossary[victim] = victim;
       }
     }
 
-    // === Final Stage: PLaMo 3 Translation with Preserved Entities ===
-    const preservedTerms = [
-      ...resolvedVictimOrgs,
-      ...(structuredOutput.threat_actors || []),
-      ...(structuredOutput.cves || []),
-      ...(structuredOutput.affected_products || [])
-    ];
+    // Preserve threat actors, CVEs, and affected products in glossary
+    for (const actor of (structuredOutput.threat_actors || [])) {
+      if (actor && actor.trim()) entityGlossary[actor.trim()] = actor.trim();
+    }
+    for (const cve of (structuredOutput.cves || [])) {
+      if (cve && cve.trim()) entityGlossary[cve.trim()] = cve.trim();
+    }
+    for (const prod of (structuredOutput.affected_products || [])) {
+      if (prod && prod.trim()) entityGlossary[prod.trim()] = prod.trim();
+    }
 
+    // === Final Stage: PLaMo 3 Translation with Native PFML3 Glossary ===
     const [titleJa, summaryJa, impactJa] = await Promise.all([
-      this.translator.translateToJapanese(structuredOutput.title || item.title, preservedTerms),
-      this.translator.translateToJapanese(structuredOutput.summary || item.summary, preservedTerms),
-      this.translator.translateToJapanese(structuredOutput.impact_analysis || "", preservedTerms)
+      this.translator.translateToJapanese(structuredOutput.title || item.title, entityGlossary),
+      this.translator.translateToJapanese(structuredOutput.summary || item.summary, entityGlossary),
+      this.translator.translateToJapanese(structuredOutput.impact_analysis || "", entityGlossary)
     ]);
 
     return {
