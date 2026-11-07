@@ -137,6 +137,7 @@ helm upgrade --install threat-harvester ./charts/threat-harvester \
 ## 6. Community & Guidelines
 
 - **Agent Guidelines**: Coding guidelines and commit rules are defined in [AGENT.md](AGENT.md).
+- **Caching & Performance Policy**: Multi-tier caching and rendering optimization architecture is documented in [docs/caching_and_performance_policy.md](docs/caching_and_performance_policy.md).
 - **Contributing**: Please review [CONTRIBUTING.md](CONTRIBUTING.md) for pull request workflows.
 - **Task Tracking**: Progress roadmap is maintained in [docs/task_tracker.md](docs/task_tracker.md).
 - **Security Policy**: See [SECURITY.md](SECURITY.md) for vulnerability disclosure.
