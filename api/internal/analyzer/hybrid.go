@@ -3,6 +3,7 @@ package analyzer
 import (
 	"context"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/al17091/threat_harvester/api/internal/config"
@@ -282,9 +283,16 @@ func (h *HybridThreatAnalyzer) LocalizeThreatToJapanese(ctx context.Context, enr
 	return h.primary.LocalizeThreatToJapanese(ctx, enriched)
 }
 
-// NewDefaultThreatAnalyzer returns the configured analyzer (Hybrid, OpenAI-compatible, or Gemini)
+// NewDefaultThreatAnalyzer returns the configured analyzer (Agent, Hybrid, OpenAI-compatible, or Gemini)
 func NewDefaultThreatAnalyzer() ThreatAnalyzer {
 	cfg := config.GetSettings().GetConfig()
+	if cfg.AI.PrimaryProvider == "agent" || os.Getenv("AGENT_URL") != "" {
+		agentURL := os.Getenv("AGENT_URL")
+		if agentURL == "" {
+			agentURL = "http://threat-harvester-agent:8002"
+		}
+		return NewAgentClientAnalyzer(agentURL, cfg.AI.TimeoutSeconds)
+	}
 	if cfg.AI.PrimaryProvider == "gemini" && cfg.AI.GeminiAPIKey != "" {
 		return NewGeminiThreatAnalyzer()
 	}

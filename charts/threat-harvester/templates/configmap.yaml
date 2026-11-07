@@ -8,6 +8,7 @@ data:
   PORT: {{ ((.Values.api | default dict).port) | default ((.Values.backend | default dict).port) | default 8000 | quote }}
   COMPLIANCE_MODE: {{ .Values.config.complianceMode | default "all" | quote }}
   AI_PRIMARY_PROVIDER: {{ .Values.config.aiPrimaryProvider | default "hybrid" | quote }}
+  AGENT_URL: "http://{{ include "threat-harvester.fullname" . }}-agent:8002"
   LITELLM_ENDPOINT: {{ .Values.config.litellmEndpoint | default "https://litellm.lab.internal/v1/chat/completions" | quote }}
   LITELLM_MODEL: {{ .Values.config.litellmModel | default "qwen2.5-3b-instruct" | quote }}
   GEMINI_MODEL: {{ .Values.config.geminiModel | default "gemini-3.5-flash-lite" | quote }}
