@@ -6,8 +6,8 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 ---
 
 ## Current Status
-- **Current Version**: `v0.2.1-rc.1`
-- **Current Phase**: Phase 10 In-Progress (Agent Vulnerability Remediation & Security Hardening) / Planning Phase 8-B (Strict Security Hardening & CSP)
+- **Current Version**: `v0.2.1`
+- **Current Phase**: Phase 10 Completed (Agent Vulnerability Remediation, Modern Runtimes & Security Hardening) / Planning Phase 8-B (Strict Security Hardening & CSP)
 - **Last Updated**: 2026-11-08
 
 ---
