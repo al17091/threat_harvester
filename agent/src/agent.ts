@@ -65,15 +65,26 @@ Evaluation Criteria:
 
 2. severity (Strict Guardrails):
    - RULE 1: If japan_relevance != "Direct", severity MUST NOT be "Critical" (Maximum "High").
-   - RULE 2: General summaries, weekly digests, or FAQs without specific victim organizations MUST be "Medium" or lower.
+   - RULE 2: Vulnerability advisories, security patches, PoC releases, or vulnerability observation reports without a confirmed compromised organization MUST be "Medium" or lower ("Low", "Info"). NEVER "Critical" or "High".
+   - RULE 3: General summaries, weekly digests, or FAQs without specific victim organizations MUST be "Medium" or lower.
    - "Critical": japan_relevance == "Direct" AND severe confirmed damage (ransomware encryption, major data breach, critical system outage).
-   - "High": Confirmed breach of enterprise/government, or actively exploited (In-the-wild) zero-day.
+   - "High": Confirmed breach of enterprise/government, or actively exploited (In-the-wild) zero-day against confirmed targets.
    - "Medium": Vulnerability advisory, minor incident, or generic summary.
    - "Low": Routine patch, low severity bug fix.
    - "Info": PR announcements, product launches, corporate notices.
 
-3. threat_actors:
-   - Only include threat group/APT names explicitly named in text (e.g. "Qilin", "BlackTech", "APT10").
+3. victim_orgs (Strict Invariant):
+   - A victim is STRICTLY a real enterprise, government agency, educational institution, or healthcare facility that suffered a confirmed breach, ransomware encryption, or unauthorized data access.
+   - NEVER put software names, products, open source libraries, vulnerability advisories, or CVE numbers into victim_orgs!
+   - NEVER put generic categories into victim_orgs, such as:
+     "中小企業", "中小企業等", "国内企業", "国内組織", "SMEs", "small and medium businesses", "Japanese enterprises", "companies", "organizations", "users", "customers".
+   - If an article is a vulnerability advisory, patch release, or general observation without a named, confirmed breached organization, victim_orgs MUST BE EMPTY [].
+
+4. threat_actors (Strict Invariant):
+   - Only include threat group/APT names explicitly named in text as conducting malicious activity (e.g. "Volt Typhoon", "BlackTech", "LockBit", "Qilin").
+   - NEVER extract security researchers, vulnerability reporters, security bloggers, news posters, or defensive organizations (e.g. accounts ending with "on X", handles starting with "@", "JPCERT", "IPA", "Trend Micro", "Kaspersky") as threat_actors! They are reporters/researchers, NOT threat actors.
+   - If an entity is the author, poster, or discoverer of a report (e.g., "<Author> on X: ...", "reported by <Author>"), they are the REPORTER, NEVER a threat actor.
+   - For vulnerability advisories or observation reports that lack concrete breach reports or specific attack attribution, threat_actors MUST be empty [].
    - NEVER guess or output vague terms like "Chinese APT", "Cybercriminals", "Attackers".
 
 Output pure JSON matching this exact schema:
@@ -155,10 +166,52 @@ ${rawContent}`
       };
     }
 
+    // === Post-Processing Guardrails ===
+    // 1. Sanitize victim_orgs: strip generic categories, products, or CVE IDs
+    const genericVictimPattern = /(?:中小企業|中小事業者|小規模事業者|中小|国内企業|日本企業|複数企業|各社|sme|small\s+and\s+medium|enterprise|organization|company|user|customer|vulnerability|advisory|patch|cve-\d+)/i;
+    const rawVictims: string[] = Array.isArray(structuredOutput.victim_orgs) ? structuredOutput.victim_orgs : [];
+    const validVictims = rawVictims.filter((v: string) => {
+      const trimmed = v.trim();
+      if (!trimmed || trimmed.length < 2) return false;
+      if (genericVictimPattern.test(trimmed)) return false;
+      if (/^cve-\d+/i.test(trimmed)) return false;
+      return true;
+    });
+
+    // 2. Sanitize threat_actors: strip reporters, security researchers, or social media handles
+    const invalidActorPattern = /(?:researcher|reporter|blogger|journalist|analyst|報告者|研究者|調査員|アナリスト|記者|投稿者|jpcert|ipa|trend\s*micro|kaspersky|google\s*tag|\bon\s+x\b|\bon\s+twitter\b|\bon\s+bluesky\b)/i;
+    let validActors: string[] = Array.isArray(structuredOutput.threat_actors) ? structuredOutput.threat_actors : [];
+    validActors = validActors.filter((a: string) => {
+      const trimmed = a.trim();
+      if (!trimmed || trimmed.length < 2) return false;
+      if (trimmed.startsWith("@")) return false; // Social media handles are never threat actors
+      if (invalidActorPattern.test(trimmed)) return false;
+      return true;
+    });
+
+    // 3. Vulnerability observation guardrail:
+    // If it's a vulnerability advisory or CVE observation without confirmed breached victim organizations,
+    // severity MUST be capped at Medium, and threat_actors MUST NOT be attached.
+    const isVulnerabilityAdvisory =
+      (structuredOutput.cves && structuredOutput.cves.length > 0) ||
+      structuredOutput.attack_type === "Vulnerability" ||
+      /vulnerability\s+advisory|脆弱性速報|脆弱性観測|cve-\d+/i.test(item.title);
+
+    if (isVulnerabilityAdvisory && validVictims.length === 0) {
+      if (structuredOutput.severity === "Critical" || structuredOutput.severity === "High") {
+        structuredOutput.severity = "Medium";
+      }
+      validActors = [];
+      structuredOutput.threat_actor_reasons = {};
+    }
+
+    structuredOutput.victim_orgs = validVictims;
+    structuredOutput.threat_actors = validActors;
+
     // === Tool Invocation: Japanese Entity Resolution ===
     const resolvedVictimOrgs: string[] = [];
     const entityGlossary: Record<string, string> = {};
-    const victimList: string[] = Array.isArray(structuredOutput.victim_orgs) ? structuredOutput.victim_orgs : [];
+    const victimList: string[] = structuredOutput.victim_orgs;
 
     for (const victim of victimList) {
       const resolution = await resolveJapaneseEntity(victim);

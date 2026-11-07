@@ -75,6 +75,12 @@ var genericVictimWords = map[string]bool{
 	"各社": true, "複数社": true, "不特定": true, "未特定": true, "不明": true,
 	"未確認": true, "未詳": true, "未指定": true, "未具体提及": true, "未提及": true,
 	"未公表": true, "未公開": true, "特定なし": true, "指定なし": true, "該当なし": true, "対象なし": true, "なし": true,
+	"中小企業": true, "中小企業等": true, "中小事業者": true, "小規模事業者": true, "中小": true,
+	"国内中小企業": true, "日本の中小企業": true, "事業者": true, "個人": true, "利用者": true, "契約者": true, "会員": true,
+	"sme": true, "smes": true, "small and medium": true, "small and medium enterprise": true,
+	"small and medium enterprises": true, "small and medium businesses": true, "small businesses": true,
+	"enterprises": true, "enterprise": true, "companies": true, "organizations": true,
+	"customers": true, "users": true, "clients": true,
 }
 
 var genericVictimSubstrings = []string{
@@ -90,6 +96,9 @@ var genericVictimSubstrings = []string{
 	"複数の組織", "各企業", "複数企業", "各組織", "複数組織", "サプライチェーン", "調査レポート",
 	"未具体", "未指定", "未提及", "未特定", "未公開企業", "特定なし", "指定なし",
 	"導入企業", "導入組織", "利用する日本の組織", "利用する日本の企業", "利用する組織", "利用する企業", "利用組織", "利用企業",
+	"中小企業", "中小事業者", "小規模事業者", "国内中小", "日本の中小", "small and medium", "sme",
+	"vulnerability", "advisory", "cve-", "security update", "patch", "firmware", "driver", "plugin", "module", "sdk",
+	"脆弱性", "アドバイザリ", "セキュリティ情報", "修正プログラム", "更新プログラム", "アップデート",
 	"ransomware group", "ransomware gang", "ransomware leak", "leak site", "ransomware victims",
 	"apt group", "threat group", "threat actor", "cybercrime group", "extortion group",
 }
@@ -121,6 +130,10 @@ func IsGenericVictimOrg(name string) bool {
 	}
 	// Reject redacted/masked victim placeholders such as "Ca***ka" or "A... F..."
 	if strings.Contains(cleaned, "***") || strings.Contains(cleaned, "...") {
+		return true
+	}
+	// Vulnerability IDs, patches, and software products are never victim organizations
+	if strings.Contains(cleaned, "cve-") || strings.HasPrefix(cleaned, "cve") {
 		return true
 	}
 	// Cyberattack groups and dark web forums are threat actors/sources, never victim organizations
@@ -186,6 +199,9 @@ var invalidActorSubstrings = []string{
 	"it労働者", "it workers", "associated groups", "linked actors", "関連グループ",
 	"傘下サイバー部隊", "配下グループ", "関連懸念", "国家安全部", "通用技術研究院",
 	"darknet army", "darknetarmy",
+	// Security researchers, posters, analysts, and reporters on social media / blogs
+	" on x", " on twitter", " on bluesky", " on threads", "researcher", "reporter", "analyst",
+	"セキュリティ研究者", "報告者", "情報発信者", "調査員", "アナリスト", "記者",
 }
 
 var invalidActorExact = map[string]bool{
@@ -200,6 +216,10 @@ var invalidActorExact = map[string]bool{
 	"openai（エージェントの不正動作）": true, "chaotic eclipse (researcher)": true,
 	"nightmare eclipse (研究者)": true, "chaotic eclipse": true, "nightmare eclipse": true,
 	"chaotic-eclipse": true, "nightmare-eclipse": true,
+	"researcher": true, "reporter": true, "analyst": true, "security researcher": true,
+	"security analyst": true, "threat analyst": true, "security journalist": true,
+	"セキュリティ研究者": true, "報告者": true, "情報発信者": true, "調査員": true,
+	"アナリスト": true, "記者": true, "投稿者": true,
 	"black kite": true, "darknet army": true, "darknetarmy": true,
 	"ghostwire": true,
 	"world leaks": true, "leakeddata": true, "contagious interview": true,
@@ -580,8 +600,16 @@ func IsValidThreatActor(actor string) bool {
 	if s == "" || len([]rune(s)) < 2 || len(s) > 40 {
 		return false
 	}
+	// Account handles starting with @ are social/reporter identities, NEVER threat actors
+	if strings.HasPrefix(s, "@") {
+		return false
+	}
 	low := strings.ToLower(s)
 	if invalidActorExact[low] || strings.HasPrefix(low, "not ") || strings.HasPrefix(low, "unknown") {
+		return false
+	}
+	// Post attribution signatures e.g. "on X", "on Twitter", "on Bluesky"
+	if strings.Contains(low, " on x") || strings.Contains(low, " on twitter") || strings.Contains(low, " on bluesky") {
 		return false
 	}
 	for _, sub := range invalidActorSubstrings {
@@ -590,6 +618,44 @@ func IsValidThreatActor(actor string) bool {
 		}
 	}
 	return true
+}
+
+// IsReporterRoleOrAttribution evaluates semantic role exclusion rules:
+// It checks whether an entity is framed in the source text as a reporter, observer, researcher,
+// author, or publisher rather than an executing cyberattack adversary.
+func IsReporterRoleOrAttribution(actor string, texts ...string) bool {
+	clean := stripActorGroupQualifiers(actor)
+	if clean == "" || len([]rune(clean)) < 2 {
+		return false
+	}
+	lowActor := strings.ToLower(clean)
+	lowQuoted := regexp.QuoteMeta(lowActor)
+
+	rolePatterns := []*regexp.Regexp{
+		// Entity followed by platform attribution, honorific, or reporting action:
+		// e.g. "<Entity> on X:", "<Entity> on Twitter:", "<Entity>氏によれば", "<Entity>アナリスト", "<Entity>が指摘"
+		regexp.MustCompile(`(?i)(?:^|[\s"'\(\[（【])` + lowQuoted + `\s*(?:on\s+(?:x|twitter|bluesky|threads)|氏|アナリスト|研究者|記者|による報告|によれば|が報告|が投稿|が指摘|が注意喚起|が解説|のポスト|のツイート|のアナウンス|:|\s*：)`),
+		// Preceded by reporting verbs: "reported by <Entity>", "observed by <Entity>", "tweeted by <Entity>"
+		regexp.MustCompile(`(?i)\b(?:reported|observed|discovered|analyzed|shared|tweeted|posted|flagged|stated|noted)\s+by\s+` + lowQuoted + `\b`),
+		// Preceded by "according to <Entity>"
+		regexp.MustCompile(`(?i)\baccording\s+to\s+` + lowQuoted + `\b`),
+		// Japanese reporting prefixes: "報告者: <Entity>", "情報源: <Entity>", "投稿者: <Entity>"
+		regexp.MustCompile(`(?i)(?:報告者|情報源|投稿者|アナリスト|研究者|セキュリティアナリスト)\s*[:：]\s*` + lowQuoted),
+	}
+
+	for _, txt := range texts {
+		t := strings.TrimSpace(txt)
+		if t == "" {
+			continue
+		}
+		low := strings.ToLower(t)
+		for _, re := range rolePatterns {
+			if re.MatchString(low) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CleanThreatActors normalizes cyberattack group names, filters out generic/stopword/vendor strings,
@@ -836,7 +902,32 @@ func ExtractThreatActors(item ThreatItem, enriched *EnrichedThreat, extraTexts .
 	}
 	groundTexts = append(groundTexts, extraTexts...)
 
-	return FilterGroundedThreatActors(candidates, groundTexts...)
+	filtered := FilterGroundedThreatActors(candidates, groundTexts...)
+
+	// Role exclusion filter: remove any entity acting as a reporter, observer, poster, or researcher
+	var roleFiltered []string
+	for _, a := range filtered {
+		if IsReporterRoleOrAttribution(a, groundTexts...) {
+			continue
+		}
+		roleFiltered = append(roleFiltered, a)
+	}
+	filtered = roleFiltered
+
+	// For vulnerability advisories and observation reports without concrete breached victims,
+	// only retain threat actors if they are verified known adversary groups (e.g. APTs, ransomware gangs).
+	// Never attach researchers, reporters, or arbitrary names to vulnerability disclosures lacking concrete breach attribution.
+	if enriched != nil && len(enriched.CVEs) > 0 && !HasSpecificVictimOrg(enriched.VictimOrgs) {
+		var verified []string
+		for _, a := range filtered {
+			if IsKnownThreatActor(a) {
+				verified = append(verified, a)
+			}
+		}
+		return verified
+	}
+
+	return filtered
 }
 
 // NormalizeVictimOrg normalizes an organization name for clustering.
@@ -1398,17 +1489,16 @@ func RefineSeverity(item ThreatItem, enriched *EnrichedThreat) Severity {
 		}
 	}
 
-	// DoS-only vulnerability advisories without specific breached victims are capped at Medium
+	// Vulnerability advisories / observation reports without confirmed breached victims are capped at Medium
 	if !HasSpecificVictimOrg(enriched.VictimOrgs) && (sev == SeverityCritical || sev == SeverityHigh) {
 		tLower := strings.ToLower(item.Title + " " + enriched.Title + " " + enriched.TitleJa)
-		isDoS := strings.Contains(tLower, "dos脆弱性") || strings.Contains(tLower, "dos vulnerability") ||
-			strings.Contains(tLower, "denial of service") || strings.Contains(tLower, "denial-of-service") ||
-			strings.Contains(tLower, "サービス拒否") || strings.Contains(tLower, "crash ssl vpn")
-		hasRCE := strings.Contains(tLower, "rce") || strings.Contains(tLower, "remote code") ||
-			strings.Contains(tLower, "コード実行") || strings.Contains(tLower, "認証回避") ||
-			strings.Contains(tLower, "authentication bypass")
-		if isDoS && !hasRCE {
-			sev = SeverityMedium
+		isZeroDay := enriched.AttackType == "Zero-day" || strings.Contains(tLower, "zero-day") || strings.Contains(tLower, "ゼロデイ")
+		if !isZeroDay {
+			if len(enriched.CVEs) > 0 || strings.Contains(tLower, "脆弱性") || strings.Contains(tLower, "vulnerability") ||
+				strings.Contains(tLower, "cve-") || strings.Contains(tLower, "advisory") || strings.Contains(tLower, "欠陥") ||
+				strings.Contains(tLower, "認証回避") || strings.Contains(tLower, "authentication bypass") {
+				sev = SeverityMedium
+			}
 		}
 	}
 

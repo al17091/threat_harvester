@@ -271,7 +271,7 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 
 			sourceName := qCfg.Name
 			if sourceName == "" {
-				sourceName = "SearXNG Web"
+				sourceName = "Web Search"
 			}
 
 			item := models.NewThreatItem(

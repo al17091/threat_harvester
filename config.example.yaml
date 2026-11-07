@@ -156,7 +156,7 @@ sources:
       enabled: true
 
   darkweb_onion:
-    - name: "SearXNG Cross-Search: Japan Ransomware & Leak Sites"
+    - name: "Web Search (Tor): Japan Ransomware & Leak Sites"
       url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
@@ -165,7 +165,7 @@ sources:
       query: "(japan OR 日本) (ransomware OR ランサムウェア OR leak OR breach OR リーク)"
       timeout_seconds: 300
       enabled: true
-    - name: "SearXNG Cross-Search: 0day Exploit & Initial Access"
+    - name: "Web Search (Tor): 0day Exploit & Initial Access"
       url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
@@ -174,7 +174,7 @@ sources:
       query: "(0day OR ゼロデイ OR exploit OR 脆弱性) (poc OR broker OR \"initial access\" OR 初期アクセス)"
       timeout_seconds: 300
       enabled: true
-    - name: "SearXNG Cross-Search: Database Leaks & Credentials"
+    - name: "Web Search (Tor): Database Leaks & Credentials"
       url: "${SEARXNG_RESEARCH_URL:-https://searxng-research.lab.internal/search}"
       type: "searxng"
       engines: "ahmia,torch"
@@ -213,7 +213,7 @@ sources:
       enabled: true
 
   x_monitor:
-    - name: "国内セキュリティ速報 (piyokango / JPCERT)"
+    - name: "国内セキュリティ速報"
       query: "(from:piyokango OR from:jpcert OR from:ken_security) (site:x.com OR site:twitter.com)"
       type: "searxng"
       time_range: "day"
@@ -245,8 +245,7 @@ sources:
       enabled: true
 
   web_search:
-    # Zero-Cost SearXNG Clearnet Web Search (General / News Engines)
-    - name: "SearXNG Web: 国内ランサムウェア・サイバー攻撃被害速報"
+    - name: "Web Search: 国内ランサムウェア・サイバー攻撃被害速報"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -254,7 +253,7 @@ sources:
       directive: "日本国内の企業や医療機関、自治体を標的としたランサムウェア攻撃、身代金要求、システム障害、二重脅迫の最新動向"
       query: "(ランサムウェア OR サイバー攻撃) (被害 OR 停止 OR 身代金) (日本 OR 企業)"
       enabled: true
-    - name: "SearXNG Web: 国内組織 不正アクセス・個人情報流出・漏洩インシデント"
+    - name: "Web Search: 国内組織 不正アクセス・個人情報流出・漏洩インシデント"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -262,7 +261,7 @@ sources:
       directive: "日本国内の企業や大学、公共機関における不正アクセス、サーバー侵害、顧客情報や機密データの流出・漏洩報告"
       query: "(不正アクセス OR 情報漏洩 OR 個人情報流出) (調査 OR 謝罪 OR 判明)"
       enabled: true
-    - name: "SearXNG Web: ネットワーク境界・VPN機器 ゼロデイ脆弱性悪用 (PoC / KEV)"
+    - name: "Web Search: ネットワーク境界・VPN機器 ゼロデイ脆弱性悪用 (PoC / KEV)"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -270,7 +269,7 @@ sources:
       directive: "国内で広く利用されるVPN機器や境界機器（Fortinet, Ivanti, Palo Alto等）の未修正ゼロデイや悪用PoC"
       query: "(ゼロデイ OR 脆弱性 OR Exploit) (VPN OR Fortinet OR Ivanti OR Palo Alto) (悪用 OR 被害)"
       enabled: true
-    - name: "SearXNG Web: オンラインサービス・ゲーム・サプライチェーン改ざん侵害速報"
+    - name: "Web Search: オンラインサービス・ゲーム・サプライチェーン改ざん侵害速報"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -278,7 +277,7 @@ sources:
       directive: "国内外のオンラインサービス、ゲーム、Webプラットフォームにおけるサプライチェーン攻撃、スクリプト改ざん、不正プログラム（マルウェア）配信、アカウント侵害、ランチャー脆弱性の最新被害"
       query: "(サプライチェーン攻撃 OR 改ざん OR マルウェア配信 OR 不正プログラム) (ゲーム OR アプリ OR サービス OR ランチャー) (被害 OR 調査 OR 判明)"
       enabled: true
-    - name: "SearXNG Web: PCランチャー改ざん・クライアント不正プログラム配信"
+    - name: "Web Search: PCランチャー改ざん・クライアント不正プログラム配信"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -286,7 +285,7 @@ sources:
       directive: "『勝利の女神: NIKKE』をはじめとするPCゲーム・クライアントソフトウェアのランチャー改ざん、不正スクリプト混入、不正プログラム配信インシデント"
       query: "(勝利の女神 OR NIKKE OR ランチャー) (改ざん OR 不正プログラム OR 不正アクセス OR 侵害)"
       enabled: true
-    - name: "SearXNG Web: 日本標的APT攻撃・サプライチェーン侵害"
+    - name: "Web Search: 日本標的APT攻撃・サプライチェーン侵害"
       url: "${SEARXNG_URL:-https://searxng.lab.internal/search}"
       type: "searxng"
       categories: "general,news"
@@ -294,19 +293,3 @@ sources:
       directive: "MirrorFace, BlackTech, APT10等の標的型攻撃やサプライチェーン経由の不正侵入動向"
       query: "(標的型攻撃 OR サプライチェーン攻撃 OR APT) (日本 OR 国内) (侵入 OR マルウェア)"
       enabled: true
-    # Gemini Web Search Grounding (Throttled Escalation)
-    - name: "Gemini Grounding: 重要インフラ・サプライチェーン侵害"
-      type: "gemini"
-      directive: "日本国内の医療機関、製造業サプライチェーン、金融、インフラを標的とした最新のサイバー攻撃被害や身代金要求"
-      interval_minutes: 720
-      enabled: false
-    - name: "Gemini Grounding: ネットワーク境界・VPN機器のゼロデイ悪用"
-      type: "gemini"
-      directive: "FortinetやIvanti、Palo Altoなど国内で広く利用されるVPN・ネットワーク境界機器のゼロデイ脆弱性悪用と被害報告"
-      interval_minutes: 720
-      enabled: false
-    - name: "Gemini Grounding: 日本標的APT攻撃グループの活動動向"
-      type: "gemini"
-      directive: "BlackTech, MirrorFace, APT10, Kimsukyなど日本国内組織を標的とする国家背景APTグループの最新の攻撃動向"
-      interval_minutes: 720
-      enabled: false

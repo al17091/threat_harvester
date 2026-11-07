@@ -53,7 +53,18 @@ export async function searchOfficialName(
  * Resolves an entity string to its official Japanese representation.
  */
 export async function resolveJapaneseEntity(rawName: string): Promise<EntityResolutionResult> {
-  const dictMatch = lookupJapanOrgAlias(rawName);
+  const trimmed = (rawName || "").trim();
+  const genericVictimPattern = /(?:中小企業|中小事業者|小規模事業者|中小|国内企業|日本企業|複数企業|各社|sme|small\s+and\s+medium|enterprise|organization|company|user|customer|vulnerability|advisory|patch|cve-\d+)/i;
+  if (!trimmed || genericVictimPattern.test(trimmed)) {
+    return {
+      officialNameJa: null,
+      isJapaneseEntity: false,
+      confidence: "low",
+      source: "none"
+    };
+  }
+
+  const dictMatch = lookupJapanOrgAlias(trimmed);
   if (dictMatch) {
     return {
       officialNameJa: dictMatch,

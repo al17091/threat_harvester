@@ -397,7 +397,7 @@ func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.Que
 
 			sourceLabel := job.displayName
 			if sourceLabel == "" {
-				sourceLabel = query
+				sourceLabel = "国内セキュリティ速報"
 			}
 			sourceName := models.TruncateRunes(fmt.Sprintf("X:%s", sourceLabel), 30)
 

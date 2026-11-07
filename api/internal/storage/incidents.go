@@ -195,7 +195,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// Detail record for this source report
 	detail := models.SourceDetail{
 		Type:        item.SourceType,
-		Name:        item.SourceName,
+		Name:        models.SanitizeSourceName(item.SourceType, item.SourceName),
 		Title:       item.Title,
 		URL:         item.URL,
 		PublishedAt: item.PublishedAt,
@@ -1296,10 +1296,13 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		cleanActors, _ := res["threat_actors"].([]string)
 
 		for _, c := range childItems {
+			cSrcType, _ := c["source_type"].(string)
 			cSrcName, _ := c["source_name"].(string)
 			if cSrcName == "" {
-				cSrcName, _ = c["source_type"].(string)
+				cSrcName = cSrcType
 			}
+			cSrcName = models.SanitizeSourceName(models.SourceType(cSrcType), cSrcName)
+			c["source_name"] = cSrcName
 			cTitle, _ := c["title"].(string)
 			cRaw, _ := c["raw_content"].(string)
 			cSum, _ := c["summary"].(string)
