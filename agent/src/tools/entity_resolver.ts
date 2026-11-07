@@ -13,14 +13,16 @@ export interface EntityResolutionResult {
  */
 export async function searchOfficialName(
   query: string,
-  searxngUrl: string = process.env.SEARXNG_URL || "https://searxng.lab.internal/search"
+  searxngUrl: string = process.env.SEARXNG_URL || "http://searxng-service.searxng.svc.cluster.local:8080/search"
 ): Promise<string | null> {
   try {
     const encoded = encodeURIComponent(`${query} 正式名称 会社 日本`);
     const target = `${searxngUrl}?q=${encoded}&format=json`;
     const res = await request(target, {
       method: "GET",
-      headers: { "Accept": "application/json" }
+      headers: { "Accept": "application/json" },
+      headersTimeout: 4000,
+      bodyTimeout: 4000
     });
 
     if (res.statusCode !== 200) {

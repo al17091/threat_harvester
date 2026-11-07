@@ -11,7 +11,7 @@ export class PLaMoTranslator {
 
   constructor(options?: TranslateOptions) {
     this.baseUrl = (options?.plamoBaseUrl || process.env.PLAMO_BASE_URL || "http://plamo-translator-service.litellm.svc.cluster.local:8080").replace(/\/+$/, "");
-    this.timeoutMs = options?.timeoutMs || 45000;
+    this.timeoutMs = options?.timeoutMs || 60000;
   }
 
   /**

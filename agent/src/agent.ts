@@ -164,12 +164,18 @@ ${rawContent}`
       if (prod && prod.trim()) entityGlossary[prod.trim()] = prod.trim();
     }
 
-    // === Final Stage: PLaMo 3 Translation with Native PFML3 Glossary ===
-    const [titleJa, summaryJa, impactJa] = await Promise.all([
-      this.translator.translateToJapanese(structuredOutput.title || item.title, entityGlossary),
-      this.translator.translateToJapanese(structuredOutput.summary || item.summary, entityGlossary),
-      this.translator.translateToJapanese(structuredOutput.impact_analysis || "", entityGlossary)
-    ]);
+    // === Final Stage: PLaMo 3 Translation with Native PFML3 Glossary (Sequential to maximize CPU throughput) ===
+    const titleJa = await this.translator.translateToJapanese(
+      structuredOutput.title || item.title,
+      entityGlossary
+    );
+    const summaryJa = await this.translator.translateToJapanese(
+      structuredOutput.summary || item.summary,
+      entityGlossary
+    );
+    const impactJa = structuredOutput.impact_analysis
+      ? await this.translator.translateToJapanese(structuredOutput.impact_analysis, entityGlossary)
+      : "";
 
     return {
       item_id: item.id,
