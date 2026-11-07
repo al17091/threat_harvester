@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { usePathname } from "next/navigation";
 import {
   ShieldAlert,
@@ -1047,7 +1047,9 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   };
 
-  // Pagination
+  // Pagination & Snappy Client-Side Feed Cache
+  const incidentsCacheRef = useRef<Map<string, { items: Incident[]; total: number }>>(new Map());
+  const isFilterMountedRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(0);
@@ -1088,17 +1090,30 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     fetchIncidents(newPage, pageSize);
     const el = document.getElementById("incident-feed-section");
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      const rect = el.getBoundingClientRect();
+      if (rect.top < 0) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
   };
 
   const handlePageSizeChange = (newSize: number) => {
+    incidentsCacheRef.current.clear();
     setPageSize(newSize);
     setCurrentPage(1);
     fetchIncidents(1, newSize);
   };
 
   const fetchIncidents = async (targetPage = currentPage, targetPageSize = pageSize) => {
+    const cacheKey = `${currentLang}:${targetPage}:${targetPageSize}:${search}:${severityFilter}:${japanOnly}:${sourceTypeFilter}:${sortBy}`;
+    if (incidentsCacheRef.current.has(cacheKey)) {
+      const cached = incidentsCacheRef.current.get(cacheKey)!;
+      setIncidents(cached.items);
+      setTotalCount(cached.total);
+      setLoadingIncidents(false);
+      return;
+    }
+
     setLoadingIncidents(true);
     try {
       const offset = (targetPage - 1) * targetPageSize;
@@ -1116,12 +1131,10 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       if (res.ok) {
         const data = await res.json();
         const items = data.items || [];
+        const total = typeof data.total === "number" ? data.total : items.length;
+        incidentsCacheRef.current.set(cacheKey, { items, total });
         setIncidents(items);
-        if (typeof data.total === "number") {
-          setTotalCount(data.total);
-        } else {
-          setTotalCount(items.length);
-        }
+        setTotalCount(total);
       }
     } catch (err) {
       showToast("Failed to fetch incidents", "error");
@@ -1131,6 +1144,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   useEffect(() => {
+    incidentsCacheRef.current.clear();
     fetchStatus();
     fetchConfig();
     fetchEntityStats();
@@ -1140,16 +1154,22 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   }, [currentLang, isAdmin, activeTab]);
 
   useEffect(() => {
+    if (!isFilterMountedRef.current) {
+      isFilterMountedRef.current = true;
+      return;
+    }
+    incidentsCacheRef.current.clear();
     if (!isAdmin || activeTab === "incidents") {
       setCurrentPage(1);
       const timer = setTimeout(() => {
         fetchIncidents(1, pageSize);
-      }, 300);
+      }, 250);
       return () => clearTimeout(timer);
     }
   }, [search, severityFilter, japanOnly, sourceTypeFilter, sortBy, isAdmin, activeTab]);
 
   const handleHarvestFinished = async () => {
+    incidentsCacheRef.current.clear();
     setHarvesting(false);
     showToast("Threat harvesting pipeline completed.");
     if (!isAdmin || activeTab === "incidents") {
@@ -2308,12 +2328,16 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
             </div>
 
             {/* Incidents List */}
-            <div className="space-y-3">
-              {loadingIncidents && (
+            <div className="space-y-3 relative">
+              {loadingIncidents && incidents.length === 0 && (
                 <div className="py-16 text-center text-slate-400">
                   <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-cyan-400" />
                   {currentLang === "ja" ? "脅威インテリジェンスデータを読み込み中..." : "Loading threat intelligence data..."}
                 </div>
+              )}
+
+              {loadingIncidents && incidents.length > 0 && (
+                <div className="h-0.5 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-500 animate-pulse rounded-full mb-1" />
               )}
 
               {!loadingIncidents && incidents.length === 0 && (
@@ -2322,18 +2346,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </div>
               )}
 
-              {incidents
-                .filter((item) => {
-                  if (currentLang === "en") {
-                    const t = item.title || "";
-                    const s = item.summary || "";
-                    if (t.includes("Translation Pending") || s.includes("translation in progress")) {
-                      return false;
-                    }
-                  }
-                  return true;
-                })
-                .map((item) => (
+              <div className={`space-y-3 transition-opacity duration-150 ${loadingIncidents && incidents.length > 0 ? "opacity-60 pointer-events-none" : "opacity-100"}`}>
+                {incidents.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => openIncidentModal(item)}
@@ -2546,6 +2560,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                   </div>
                 </div>
               ))}
+              </div>
             </div>
 
             {/* Bottom Pagination Controls */}

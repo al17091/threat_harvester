@@ -422,13 +422,24 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 			total = len(items)
 		}
 	} else {
-		items, err = s.store.GetIncidents(ctx, filter)
-		if err != nil {
-			errorResponse(w, http.StatusInternalServerError, err.Error())
+		var wg sync.WaitGroup
+		var itemsErr, totalErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			items, itemsErr = s.store.GetIncidents(ctx, filter)
+		}()
+		go func() {
+			defer wg.Done()
+			total, totalErr = s.store.GetIncidentsTotal(ctx, filter)
+		}()
+		wg.Wait()
+
+		if itemsErr != nil {
+			errorResponse(w, http.StatusInternalServerError, itemsErr.Error())
 			return
 		}
-		total, err = s.store.GetIncidentsTotal(ctx, filter)
-		if err != nil {
+		if totalErr != nil {
 			total = len(items)
 		}
 		// Graceful fallback to raw history if incidents have not yet been clustered
