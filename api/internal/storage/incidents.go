@@ -23,6 +23,15 @@ const incidentSelectCols = `
 	COALESCE(summary, ''), COALESCE(impact_analysis, '')
 `
 
+// incidentListSelectCols omits raw_content to keep paginated list API responses compact and fast.
+const incidentListSelectCols = `
+	id, victim_org, normalized_victim_org, cves, affected_product, title, summary_ja, impact_analysis_ja,
+	severity, japan_relevance, attack_type, '' AS raw_content, primary_url, source_urls, sources_detail,
+	first_seen_at, last_seen_at, report_count, threat_actors, created_at, updated_at,
+	COALESCE(title_ja, ''), COALESCE(victim_org_en, ''), COALESCE(victim_org_ja, ''), COALESCE(affected_product_en, ''), COALESCE(affected_product_ja, ''),
+	COALESCE(summary, ''), COALESCE(impact_analysis, '')
+`
+
 // normalizeClusterURL sanitizes a URL for incident clustering by removing tracking query parameters and trailing slashes.
 func normalizeClusterURL(rawURL string) string {
 	trimmed := strings.TrimSpace(rawURL)
@@ -1164,7 +1173,7 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 func (s *SQLStore) GetIncidents(ctx context.Context, f HistoryFilter) ([]map[string]interface{}, error) {
 	whereClause, args := s.buildIncidentsConditions(f)
 	query := `
-		SELECT ` + incidentSelectCols + `
+		SELECT ` + incidentListSelectCols + `
 		FROM incidents
 	` + whereClause
 

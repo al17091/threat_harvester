@@ -629,8 +629,31 @@ func IsReporterRoleOrAttribution(actor string, texts ...string) bool {
 		return false
 	}
 	lowActor := strings.ToLower(clean)
-	lowQuoted := regexp.QuoteMeta(lowActor)
 
+	// Fast pre-filter: check if any text even mentions this actor.
+	// In the vast majority of cases, texts don't mention the actor in question,
+	// so we avoid compiling dynamic regexes entirely.
+	var matchingTexts []string
+	for _, txt := range texts {
+		t := strings.TrimSpace(txt)
+		if t == "" {
+			continue
+		}
+		// Truncate overly long text (e.g. scraped raw HTML) to 4000 characters.
+		// Reporter attributions always occur in the header, metadata, or introductory lines.
+		if len(t) > 4000 {
+			t = t[:4000]
+		}
+		low := strings.ToLower(t)
+		if strings.Contains(low, lowActor) {
+			matchingTexts = append(matchingTexts, low)
+		}
+	}
+	if len(matchingTexts) == 0 {
+		return false
+	}
+
+	lowQuoted := regexp.QuoteMeta(lowActor)
 	rolePatterns := []*regexp.Regexp{
 		// Entity followed by platform attribution, honorific, or reporting action:
 		// e.g. "<Entity> on X:", "<Entity> on Twitter:", "<Entity>氏によれば", "<Entity>アナリスト", "<Entity>が指摘"
@@ -643,12 +666,7 @@ func IsReporterRoleOrAttribution(actor string, texts ...string) bool {
 		regexp.MustCompile(`(?i)(?:報告者|情報源|投稿者|アナリスト|研究者|セキュリティアナリスト)\s*[:：]\s*` + lowQuoted),
 	}
 
-	for _, txt := range texts {
-		t := strings.TrimSpace(txt)
-		if t == "" {
-			continue
-		}
-		low := strings.ToLower(t)
+	for _, low := range matchingTexts {
 		for _, re := range rolePatterns {
 			if re.MatchString(low) {
 				return true
