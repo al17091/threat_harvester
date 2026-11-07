@@ -72,7 +72,6 @@ The release notes body must adhere to the following clean structure:
 | **Autonomous Agent** | `ghcr.io/al17091/<repo>:agent-<version>` |
 | **Ingestion Worker** | `ghcr.io/al17091/<repo>:worker-<version>` |
 | **SOC Dashboard** | `ghcr.io/al17091/<repo>:web-<version>` |
-| **Unified Backend** | `ghcr.io/al17091/<repo>:backend-<version>` |
 
 ---
 

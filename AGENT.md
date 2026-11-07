@@ -15,7 +15,7 @@ Guidelines, constraints, and operational protocols for AI coding assistants and 
    - `web/`: Next.js 16 (TypeScript, Tailwind CSS, Lucide React) Cyber SOC Dashboard.
    - Orchestration via `docker-compose.yml` (development/testing) and Helm (`charts/threat-harvester/` for k3s).
 3. **Container Image Naming**:
-   - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated service tags (`api-<version>`, `worker-<version>`, `web-<version>`, and backward-compatible `backend-<version>`).
+   - The Docker image repository is strictly `ghcr.io/al17091/threat_harvester` with separated microservice tags (`api-<version>`, `worker-<version>`, `agent-<version>`, and `web-<version>`). Legacy monolithic `backend-<version>` is deprecated and no longer built or deployed.
 4. **Database & Architecture Target**:
    - Deployment target is k3s with PostgreSQL provided by CloudNativePG (CNPG), falling back to SQLite for local development.
    - All database operations in `api/internal/storage/` must remain dialect-aware (PostgreSQL + SQLite).
