@@ -52,6 +52,23 @@ worker:
       cpu: 100m
       memory: 128Mi
 
+# Autonomous CTI Agent Service (TypeScript + Pi Core + PLaMo 3 Translate)
+agent:
+  enabled: true
+  replicas: 1
+  port: 8002
+  image:
+    repository: ghcr.io/al17091/threat_harvester
+    tag: "agent-0.1.18"
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+
 # Headless Chrome Service (Browserless Chromium) for dynamic JavaScript / SPA article scraping
 browserless:
   enabled: true
