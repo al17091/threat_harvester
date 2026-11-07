@@ -27,6 +27,7 @@ type HistoryFilter struct {
 	SourceType string
 	Search     string
 	OrderBy    string
+	Lang       string
 }
 
 type Store interface {

@@ -393,6 +393,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 	sourceType := q.Get("source_type")
 	search := q.Get("search")
 	sortBy := q.Get("sort_by")
+	lang := strings.ToLower(strings.TrimSpace(q.Get("lang")))
 
 	filter := storage.HistoryFilter{
 		Limit:      limit,
@@ -402,6 +403,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		SourceType: sourceType,
 		Search:     search,
 		OrderBy:    sortBy,
+		Lang:       lang,
 	}
 
 	viewMode := q.Get("view")
@@ -443,20 +445,9 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		items = []map[string]interface{}{}
 	}
 
-	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("lang")))
-	var filteredItems []map[string]interface{}
 	for _, inc := range items {
 		formatIncidentForLang(inc, lang)
-		if lang != "ja" {
-			t, _ := inc["title"].(string)
-			s, _ := inc["summary"].(string)
-			if strings.Contains(t, "Translation Pending") || strings.Contains(s, "translation in progress") {
-				continue
-			}
-		}
-		filteredItems = append(filteredItems, inc)
 	}
-	items = filteredItems
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"count":  len(items),

@@ -1115,14 +1115,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       const res = await fetch(withBasePath(`/api/incidents?${params.toString()}`, pathname));
       if (res.ok) {
         const data = await res.json();
-        let items = data.items || [];
-        if (currentLang === "en") {
-          items = items.filter((item: any) => {
-            const title = item.title || "";
-            const summary = item.summary || "";
-            return !title.includes("Translation Pending") && !summary.includes("translation in progress");
-          });
-        }
+        const items = data.items || [];
         setIncidents(items);
         if (typeof data.total === "number") {
           setTotalCount(data.total);

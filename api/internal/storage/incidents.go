@@ -1145,6 +1145,14 @@ func (s *SQLStore) buildIncidentsConditions(f HistoryFilter) (string, []interfac
 		}
 	}
 
+	if strings.ToLower(f.Lang) == "en" {
+		if !s.isSQLite {
+			conditions = append(conditions, "(summary IS NOT NULL AND summary != '' AND summary !~ '[\u3040-\u30ff\u4e00-\u9faf]') AND (title IS NOT NULL AND title != '' AND title !~ '[\u3040-\u30ff\u4e00-\u9faf]')")
+		} else {
+			conditions = append(conditions, "(title NOT LIKE '%Translation Pending%' AND summary NOT LIKE '%translation in progress%')")
+		}
+	}
+
 	whereClause := ""
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
