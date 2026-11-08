@@ -395,18 +395,20 @@ func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.Que
 				continue
 			}
 
-			sourceLabel := job.displayName
-			if sourceLabel == "" {
-				sourceLabel = "国内セキュリティ速報"
+			sourceName := models.ExtractSourceFromURL(res.URL)
+			if sourceName == "" || sourceName == "Web Source" {
+				sourceLabel := job.displayName
+				if sourceLabel == "" {
+					sourceLabel = "国内セキュリティ速報"
+				}
+				sourceName = models.TruncateRunes(fmt.Sprintf("X:%s", sourceLabel), 30)
 			}
-			sourceName := models.TruncateRunes(fmt.Sprintf("X:%s", sourceLabel), 30)
 
 			rawContent := fmt.Sprintf("[%s]\nTitle: %s\nSummary: %s\nURL: %s", sourceName, res.Title, res.Content, res.URL)
 			meta := map[string]interface{}{
 				"is_onion":      false,
 				"fetch_status":  "pending",
 				"engine":        res.Engine,
-				"searxng_query": query,
 				"source_engine": res.Engine,
 			}
 			if len(res.Engines) > 0 {

@@ -341,7 +341,7 @@ func DefaultConfig() AppConfig {
 			WorkerIntervalSeconds:  10,
 			BatchSize:              20,
 			MaxAttempts:            2,
-			AutoReAnalyze:          false,
+			AutoReAnalyze:          true,
 		},
 		Network: NetworkConfig{
 			TorProxyURL:    "socks5h://127.0.0.1:9050",

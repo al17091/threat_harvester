@@ -273,25 +273,93 @@ interface ConfigData {
   };
 }
 
+function stripInternalQueryMetadata(text: string): string {
+  if (!text) return "";
+  return text.replace(/\n*\s*\[SearXNG Query:[^\]]*\]\s*(\n\s*\[Engine:[^\]]*\])?\s*(\n\s*\[URL:[^\]]*\])?/g, "").trim();
+}
+
+const KNOWN_PUBLISHER_DOMAINS: Record<string, string> = {
+  "scan.netsecurity.ne.jp": "ScanNetSecurity",
+  "security-next.com": "Security Next",
+  "news.yahoo.co.jp": "Yahoo! ニュース",
+  "nikkei.com": "日本経済新聞",
+  "asahi.com": "朝日新聞",
+  "mainichi.jp": "毎日新聞",
+  "yomiuri.co.jp": "読売新聞",
+  "nhk.or.jp": "NHK NEWS",
+  "itmedia.co.jp": "ITmedia",
+  "zdnet.com": "ZDNet Japan",
+  "japan.zdnet.com": "ZDNet Japan",
+  "japan.cnet.com": "CNET Japan",
+  "bleepingcomputer.com": "BleepingComputer",
+  "thehackernews.com": "The Hacker News",
+  "sbbit.jp": "ビジネス+IT (sbbit.jp)",
+  "speedsystem-jp.com": "SpeedSystem Blog",
+  "minpo.jp": "民報ニュース",
+  "chiba-tv.com": "千葉テレビ",
+  "socradar.io": "SOCRadar",
+  "crowdsec.net": "CrowdSec",
+  "hub.ivanti.com": "Ivanti Advisory",
+  "ransomware.live": "Ransomware.live",
+  "ransomfeed.it": "RansomFeed",
+};
+
+export function getCleanSourceName(name?: string | null, url?: string | null): string {
+  const s = (name || "").trim();
+  if (url && (s.includes("SearXNG") || s.startsWith("WebSearch") || s.includes("WebSearch:(") || s === "" || s === "Web Search" || s === "Web Source")) {
+    try {
+      const u = new URL(url);
+      let host = u.hostname.toLowerCase().replace(/^www[0-9]?\./, "");
+      if (KNOWN_PUBLISHER_DOMAINS[host]) {
+        return KNOWN_PUBLISHER_DOMAINS[host];
+      }
+      for (const [dom, pub] of Object.entries(KNOWN_PUBLISHER_DOMAINS)) {
+        if (host.endsWith("." + dom)) return pub;
+      }
+      if (host.includes(".onion")) {
+        return host.length > 24 ? `Onion: ${host.slice(0, 16)}...onion` : `Onion: ${host}`;
+      }
+      if (host === "x.com" || host === "twitter.com") {
+        const parts = u.pathname.split("/").filter(Boolean);
+        if (parts.length > 0 && parts[0] !== "search" && parts[0] !== "i") {
+          return `X: @${parts[0]}`;
+        }
+        return "X (Twitter)";
+      }
+      return host;
+    } catch {
+      // invalid URL
+    }
+  }
+
+  if (s.includes("SearXNG")) {
+    return s.replace(/SearXNG Web:\s*/gi, "Web News: ")
+      .replace(/SearXNG Cross-Search:\s*/gi, "Tor / Onion: ")
+      .replace(/SearXNG\s*/gi, "Web News ");
+  }
+  return s || "Web Source";
+}
+
 function getRawContentText(inc: Incident | null): string {
   if (!inc) return "";
+  let raw = "";
   if (inc.raw_content && inc.raw_content.trim() !== "") {
-    return inc.raw_content.trim();
-  }
-  if (inc.child_items && inc.child_items.length > 0) {
+    raw = inc.raw_content.trim();
+  } else if (inc.child_items && inc.child_items.length > 0) {
     const parts = inc.child_items
       .map((c) => {
-        const raw = (c.raw_content || c.summary || "").trim();
-        if (!raw) return null;
-        const header = `=== [${c.source_type || "Source"} / ${c.source_name || "Unknown"}] ${c.title || ""} ===${c.url ? `\nURL: ${c.url}` : ""}`;
-        return `${header}\n\n${raw}`;
+        const r = (c.raw_content || c.summary || "").trim();
+        if (!r) return null;
+        const src = getCleanSourceName(c.source_name, c.url);
+        const header = `=== [${c.source_type || "Source"} / ${src}] ${c.title || ""} ===${c.url ? `\nURL: ${c.url}` : ""}`;
+        return `${header}\n\n${r}`;
       })
       .filter((p): p is string => Boolean(p));
     if (parts.length > 0) {
-      return parts.join("\n\n---\n\n");
+      raw = parts.join("\n\n---\n\n");
     }
   }
-  return "";
+  return stripInternalQueryMetadata(raw);
 }
 
 function containsJapanese(s?: string): boolean {
@@ -2391,7 +2459,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                         </span>
                       ) : null}
 
-                      <span className="text-xs text-slate-400 font-mono truncate max-w-[150px] sm:max-w-xs">{item.source_name}</span>
+                      <span className="text-xs text-slate-400 font-mono truncate max-w-[150px] sm:max-w-xs">{getCleanSourceName(item.source_name, item.primary_url || item.url)}</span>
                     </div>
 
                     <div className="text-right">
@@ -4230,7 +4298,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       🇯🇵 Japan Direct
                     </span>
                   )}
-                  <span className="text-xs text-slate-400 font-mono">{selectedIncident.source_name}</span>
+                  <span className="text-xs text-slate-400 font-mono">{getCleanSourceName(selectedIncident.source_name, selectedIncident.primary_url || selectedIncident.url)}</span>
                 </div>
                 <h2 className="text-lg font-bold text-white leading-snug">
                   {getCleanDisplayTitle(selectedIncident, currentLang)}
@@ -4718,10 +4786,12 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     return `${start > 0 ? "..." : ""}${s}${end < txt.length ? "..." : ""}`;
                   };
 
-                  const srcLabel =
+                  const srcLabel = getCleanSourceName(
                     selectedIncident.sources_detail?.[0]?.source_name ||
                     selectedIncident.source_name ||
-                    "Report";
+                    "Report",
+                    selectedIncident.sources_detail?.[0]?.url || selectedIncident.primary_url || selectedIncident.url
+                  );
                   const titleSnip = extractSnip(selectedIncident.title) || extractSnip(selectedIncident.title_ja);
                   if (titleSnip) {
                     return currentLang === "ja"
@@ -4807,7 +4877,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                               {src.source_type}
                             </span>
                             <span className="text-xs font-medium text-slate-300 truncate">
-                              {src.source_name}
+                              {getCleanSourceName(src.source_name, src.url)}
                             </span>
                           </div>
                           <p className="text-xs text-slate-400 truncate">{src.title}</p>
@@ -4889,7 +4959,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       {selectedIncident.child_items.map((c, cIdx) => (
                         <div key={cIdx} className="bg-slate-950/60 p-2 rounded border border-slate-800 text-xs">
                           <div className="flex items-center justify-between text-slate-500 text-[10px] font-mono mb-1">
-                            <span>{c.source_name} ({c.source_type})</span>
+                            <span>{getCleanSourceName(c.source_name, c.url)} ({c.source_type})</span>
                             <div className="text-right flex items-center space-x-2">
                               {c.published_at ? (
                                 <span className="text-cyan-400">
@@ -5019,7 +5089,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setAddModal({ ...addModal, form: { ...addModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="searxng">Web Search Cross-Search (Tor & Onion Metasearch)</option>
+                      <option value="searxng">Tor / Onion Metasearch (Cross-Engine)</option>
                       <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>
@@ -5548,7 +5618,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       onChange={(e) => setEditModal({ ...editModal, form: { ...editModal.form, type: e.target.value } })}
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-sm text-slate-100"
                     >
-                      <option value="searxng">Web Search Cross-Search (Tor & Onion Metasearch)</option>
+                      <option value="searxng">Tor / Onion Metasearch (Cross-Engine)</option>
                       <option value="search">Tor Search Engine (Direct Ahmia)</option>
                       <option value="onion">onion (Tor site HTML)</option>
                       <option value="html">html (Tor HTML Scraping)</option>

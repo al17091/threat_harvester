@@ -204,7 +204,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// Detail record for this source report
 	detail := models.SourceDetail{
 		Type:        item.SourceType,
-		Name:        models.SanitizeSourceName(item.SourceType, item.SourceName),
+		Name:        models.SanitizeSourceNameWithURL(item.SourceType, item.SourceName, item.URL),
 		Title:       item.Title,
 		URL:         item.URL,
 		PublishedAt: item.PublishedAt,
@@ -1315,13 +1315,18 @@ func (s *SQLStore) GetIncident(ctx context.Context, incidentID string) (map[stri
 		for _, c := range childItems {
 			cSrcType, _ := c["source_type"].(string)
 			cSrcName, _ := c["source_name"].(string)
+			cURL, _ := c["url"].(string)
 			if cSrcName == "" {
 				cSrcName = cSrcType
 			}
-			cSrcName = models.SanitizeSourceName(models.SourceType(cSrcType), cSrcName)
+			cSrcName = models.SanitizeSourceNameWithURL(models.SourceType(cSrcType), cSrcName, cURL)
 			c["source_name"] = cSrcName
 			cTitle, _ := c["title"].(string)
 			cRaw, _ := c["raw_content"].(string)
+			if strings.Contains(cRaw, "[SearXNG Query:") {
+				cRaw = strings.TrimSpace(models.SearXNGQueryRegex.ReplaceAllString(cRaw, ""))
+				c["raw_content"] = cRaw
+			}
 			cSum, _ := c["summary"].(string)
 
 			if ep, ok := c["enriched_parsed"].(map[string]interface{}); ok {

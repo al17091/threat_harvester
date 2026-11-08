@@ -330,7 +330,113 @@ func (s *SQLStore) initSchema() error {
 	// Reconcile threat actors, misclassified cyberattack groups, and ungrounded actors across existing incidents
 	s.cleanUngroundedIncidentThreatActors()
 
+	// Remediate historical SearXNG source references and query snippet leaks
+	s.remediateSearXNGSourcesAndSnippets()
+
 	return nil
+}
+
+// remediateSearXNGSourcesAndSnippets reconciles historical records:
+// 1. Replaces search engine branding (e.g. "SearXNG Web") in threat_items.source_name and incidents.sources_detail with the actual publisher/domain.
+// 2. Removes internal search query metadata leaks (e.g. "[SearXNG Query: ...]") from raw_content.
+func (s *SQLStore) remediateSearXNGSourcesAndSnippets() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// 1. Remediate threat_items
+	rows, err := s.db.QueryContext(ctx, "SELECT id, url, source_type, source_name, raw_content FROM threat_items WHERE source_name LIKE '%SearXNG%' OR raw_content LIKE '%[SearXNG Query:%'")
+	if err == nil {
+		type itemUpdate struct {
+			id         string
+			sourceName string
+			rawContent string
+		}
+		var updates []itemUpdate
+		for rows.Next() {
+			var id, urlStr, srcType, srcName string
+			var raw sql.NullString
+			if err := rows.Scan(&id, &urlStr, &srcType, &srcName, &raw); err == nil {
+				cleanSource := srcName
+				if strings.Contains(strings.ToLower(srcName), "searxng") {
+					cleanSource = models.SanitizeSourceNameWithURL(models.SourceType(srcType), srcName, urlStr)
+				}
+				cleanRaw := raw.String
+				if strings.Contains(cleanRaw, "[SearXNG Query:") {
+					cleanRaw = strings.TrimSpace(models.SearXNGQueryRegex.ReplaceAllString(cleanRaw, ""))
+				}
+				if cleanSource != srcName || cleanRaw != raw.String {
+					updates = append(updates, itemUpdate{id: id, sourceName: cleanSource, rawContent: cleanRaw})
+				}
+			}
+		}
+		rows.Close()
+
+		if len(updates) > 0 {
+			for _, u := range updates {
+				if s.isSQLite {
+					_, _ = s.db.ExecContext(ctx, "UPDATE threat_items SET source_name = ?, raw_content = ? WHERE id = ?", u.sourceName, u.rawContent, u.id)
+				} else {
+					_, _ = s.db.ExecContext(ctx, "UPDATE threat_items SET source_name = $1, raw_content = $2 WHERE id = $3", u.sourceName, u.rawContent, u.id)
+				}
+			}
+			log.Printf("[SQLStore] Remediated %d threat_items: replaced SearXNG references with actual publisher names and cleaned query snippets", len(updates))
+		}
+	}
+
+	// 2. Remediate incidents
+	iRows, iErr := s.db.QueryContext(ctx, "SELECT id, sources_detail, raw_content FROM incidents WHERE sources_detail LIKE '%SearXNG%' OR raw_content LIKE '%[SearXNG Query:%'")
+	if iErr == nil {
+		type incUpdate struct {
+			id            string
+			sourcesDetail string
+			rawContent    string
+		}
+		var incUpdates []incUpdate
+		for iRows.Next() {
+			var id string
+			var srcDetail, raw sql.NullString
+			if err := iRows.Scan(&id, &srcDetail, &raw); err == nil {
+				changed := false
+				newDetailJSON := srcDetail.String
+				if strings.Contains(srcDetail.String, "SearXNG") {
+					var details []models.SourceDetail
+					if err := json.Unmarshal([]byte(srcDetail.String), &details); err == nil {
+						for idx := range details {
+							if strings.Contains(strings.ToLower(details[idx].Name), "searxng") {
+								details[idx].Name = models.SanitizeSourceNameWithURL(details[idx].Type, details[idx].Name, details[idx].URL)
+								changed = true
+							}
+						}
+						if b, err := json.Marshal(details); err == nil {
+							newDetailJSON = string(b)
+						}
+					}
+				}
+
+				cleanRaw := raw.String
+				if strings.Contains(cleanRaw, "[SearXNG Query:") {
+					cleanRaw = strings.TrimSpace(models.SearXNGQueryRegex.ReplaceAllString(cleanRaw, ""))
+					changed = true
+				}
+
+				if changed {
+					incUpdates = append(incUpdates, incUpdate{id: id, sourcesDetail: newDetailJSON, rawContent: cleanRaw})
+				}
+			}
+		}
+		iRows.Close()
+
+		if len(incUpdates) > 0 {
+			for _, u := range incUpdates {
+				if s.isSQLite {
+					_, _ = s.db.ExecContext(ctx, "UPDATE incidents SET sources_detail = ?, raw_content = ? WHERE id = ?", u.sourcesDetail, u.rawContent, u.id)
+				} else {
+					_, _ = s.db.ExecContext(ctx, "UPDATE incidents SET sources_detail = $1, raw_content = $2 WHERE id = $3", u.sourcesDetail, u.rawContent, u.id)
+				}
+			}
+			log.Printf("[SQLStore] Remediated %d incidents: replaced SearXNG references with actual publisher names and cleaned query snippets", len(incUpdates))
+		}
+	}
 }
 
 // cleanUngroundedIncidentThreatActors deterministically reconciles existing incidents:
