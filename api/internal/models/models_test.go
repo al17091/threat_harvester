@@ -82,6 +82,50 @@ func TestNewThreatItem(t *testing.T) {
 	}
 }
 
+func TestExtractSourceFromURL(t *testing.T) {
+	cases := []struct {
+		url      string
+		expected string
+	}{
+		{"https://scan.netsecurity.ne.jp/article/2026/10/20/56517.html", "ScanNetSecurity"},
+		{"https://news.yahoo.co.jp/articles/1da2a8cd46238134235940dc791df104e190baa1", "Yahoo! ニュース"},
+		{"https://www.nikkei.com/article/DGXZQOUC0663J0W6A101C2000000/", "日本経済新聞"},
+		{"https://sbbit.jp/article/cont1/188176", "ビジネス+IT (sbbit.jp)"},
+		{"https://cyber.spool.co.jp/cyber_news/20261102", "Cyber Spool"},
+		{"https://socradar.io/blog/ivanti-connect-secure-0day", "SOCRadar"},
+		{"https://x.com/piyokango/status/123456789", "X: @piyokango"},
+		{"http://evilvaultleak7777777777.onion/victim-corp", "Onion: evilvaultleak777...onion"},
+		{"https://example.org/security/report", "example.org"},
+		{"", "Web Source"},
+	}
+
+	for _, tc := range cases {
+		got := ExtractSourceFromURL(tc.url)
+		if got != tc.expected {
+			t.Errorf("ExtractSourceFromURL(%q) = %q; want %q", tc.url, got, tc.expected)
+		}
+	}
+}
+
+func TestSanitizeSourceNameWithURL(t *testing.T) {
+	// SearXNG should never be returned as a source
+	got := SanitizeSourceNameWithURL(SourceTypeWebSearch, "SearXNG Web: 国内ランサムウェア・サイバー攻撃被害速報", "https://scan.netsecurity.ne.jp/article/123")
+	if got != "ScanNetSecurity" {
+		t.Errorf("Expected ScanNetSecurity, got %q", got)
+	}
+
+	got2 := SanitizeSourceNameWithURL(SourceTypeDarkwebOnion, "SearXNG Cross-Search: Japan Ransomware", "http://lockbitev374628746283.onion/leak")
+	if !strings.Contains(got2, "Onion:") {
+		t.Errorf("Expected Onion: ..., got %q", got2)
+	}
+
+	// Boolean query leak
+	got3 := SanitizeSourceNameWithURL(SourceTypeWebSearch, "WebSearch:(ランサムウェア OR サイバー攻撃)", "https://www.nikkei.com/article/123")
+	if got3 != "日本経済新聞" {
+		t.Errorf("Expected 日本経済新聞, got %q", got3)
+	}
+}
+
 func TestNormalizeURL(t *testing.T) {
 	cases := []struct {
 		input    string

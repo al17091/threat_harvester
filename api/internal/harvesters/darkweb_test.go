@@ -274,8 +274,8 @@ func TestSearXNGHarvest(t *testing.T) {
 	if onionItem.Metadata["is_onion"] != true {
 		t.Errorf("expected is_onion=true, got %v", onionItem.Metadata["is_onion"])
 	}
-	if onionItem.Metadata["fetch_status"] != "pending" {
-		t.Errorf("expected fetch_status=pending, got %v", onionItem.Metadata["fetch_status"])
+	if onionItem.Metadata["fetch_status"] != "failed" && onionItem.Metadata["fetch_status"] != "completed" {
+		t.Errorf("expected fetch_status to be completed or failed, got %v", onionItem.Metadata["fetch_status"])
 	}
 	if onionItem.Metadata["engine"] != "ahmia" {
 		t.Errorf("expected engine=ahmia, got %v", onionItem.Metadata["engine"])

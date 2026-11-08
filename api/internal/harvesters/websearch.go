@@ -212,6 +212,9 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 			continue
 		}
 
+		var validResults []searxngResult
+		var validPubDates []*time.Time
+
 		for _, res := range results {
 			if strings.TrimSpace(res.URL) == "" {
 				continue
@@ -257,21 +260,85 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 				continue
 			}
 
-			rawContent := fmt.Sprintf("%s\n\n[SearXNG Query: %s]\n[Engine: %s]\n[URL: %s]", res.Content, job.query, res.Engine, res.URL)
+			validResults = append(validResults, res)
+			validPubDates = append(validPubDates, pubDate)
+		}
+
+		// Perform actual web access (実アクセス) concurrently across valid search results
+		type fetchedDoc struct {
+			content string
+			status  string
+			errMsg  string
+		}
+		docs := make([]fetchedDoc, len(validResults))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 4)
+
+		for i, vr := range validResults {
+			wg.Add(1)
+			go func(idx int, targetURL string, fallbackSnippet string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				fetchCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+				defer cancel()
+
+				content, err := FetchArticleContentWithTimeout(fetchCtx, targetURL, 10)
+				if err == nil && len([]rune(strings.TrimSpace(content))) >= 80 {
+					docs[idx] = fetchedDoc{
+						content: content,
+						status:  "completed",
+					}
+					log.Printf("[WebSearch] Actually fetched article for '%s' (%d runes)", targetURL, len([]rune(content)))
+				} else {
+					errStr := "empty article content"
+					if err != nil {
+						errStr = err.Error()
+					}
+					docs[idx] = fetchedDoc{
+						content: fallbackSnippet,
+						status:  "failed",
+						errMsg:  errStr,
+					}
+					log.Printf("[WebSearch] Direct fetch failed for '%s' (%s), using snippet fallback", targetURL, errStr)
+				}
+			}(i, vr.URL, vr.Content)
+		}
+		wg.Wait()
+
+		for i, res := range validResults {
+			doc := docs[i]
+			pubDate := validPubDates[i]
+
+			// Determine true information source from the publisher URL, never SearXNG
+			sourceName := models.ExtractSourceFromURL(res.URL)
+			if sourceName == "" || sourceName == "Web Source" {
+				sourceName = qCfg.Name
+			}
+
+			summary := res.Content
+			if doc.status == "completed" && strings.TrimSpace(summary) == "" {
+				summary = models.TruncateRunes(doc.content, 300)
+			}
+
 			meta := map[string]interface{}{
 				"is_onion":      false,
-				"fetch_status":  "pending",
+				"fetch_status":  doc.status,
 				"engine":        res.Engine,
-				"searxng_query": job.query,
 				"source_engine": res.Engine,
+			}
+			if doc.errMsg != "" {
+				meta["fetch_error"] = doc.errMsg
+			}
+			if doc.status == "completed" {
+				meta["fetched_at"] = time.Now().UTC().Format(time.RFC3339)
+				meta["content_source"] = "direct_fetch"
+			} else {
+				meta["content_source"] = "snippet_fallback"
 			}
 			if len(res.Engines) > 0 {
 				meta["engines"] = res.Engines
-			}
-
-			sourceName := qCfg.Name
-			if sourceName == "" {
-				sourceName = "Web Search"
 			}
 
 			item := models.NewThreatItem(
@@ -279,8 +346,8 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 				sourceName,
 				res.Title,
 				res.URL,
-				res.Content,
-				rawContent,
+				summary,
+				doc.content,
 				pubDate,
 				meta,
 			)

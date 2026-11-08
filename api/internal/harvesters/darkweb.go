@@ -768,14 +768,50 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 			}
 
 			isOnion := strings.Contains(res.URL, ".onion")
-			rawContent := fmt.Sprintf("%s\n\n[SearXNG Query: %s]\n[Engine: %s]\n[URL: %s]", res.Content, q, res.Engine, res.URL)
+
+			// Derive true information source from onion host or target URL, never SearXNG
+			sourceName := models.ExtractSourceFromURL(res.URL)
+			if sourceName == "" || sourceName == "Web Source" {
+				sourceName = target.Name
+			}
+
+			cfg := config.GetSettings().GetConfig()
+			var rawContent string
+			fetchStatus := "failed"
+			var fetchErrMsg string
+
+			if isOnion && cfg.Network.TorProxyURL != "" {
+				fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				onionContent, fetchErr := FetchOnionArticleContent(fetchCtx, res.URL, cfg.Network.TorProxyURL, 12)
+				cancel()
+				if fetchErr == nil && len([]rune(strings.TrimSpace(onionContent))) >= 50 {
+					rawContent = onionContent
+					fetchStatus = "completed"
+					log.Printf("[DarkWeb] Actually fetched onion content for '%s' (%d runes)", res.URL, len([]rune(onionContent)))
+				} else {
+					rawContent = res.Content
+					if fetchErr != nil {
+						fetchErrMsg = fetchErr.Error()
+					}
+				}
+			} else {
+				rawContent = res.Content
+			}
 
 			meta := map[string]interface{}{
-				"is_onion":       isOnion,
-				"engine":         res.Engine,
-				"searxng_query":  q,
-				"fetch_status":   "pending",
-				"source_engine":  res.Engine,
+				"is_onion":      isOnion,
+				"engine":        res.Engine,
+				"fetch_status":  fetchStatus,
+				"source_engine": res.Engine,
+			}
+			if fetchErrMsg != "" {
+				meta["fetch_error"] = fetchErrMsg
+			}
+			if fetchStatus == "completed" {
+				meta["fetched_at"] = time.Now().UTC().Format(time.RFC3339)
+				meta["content_source"] = "direct_fetch"
+			} else {
+				meta["content_source"] = "snippet_fallback"
 			}
 			if len(res.Engines) > 0 {
 				meta["engines"] = res.Engines
@@ -783,7 +819,7 @@ func (h *DarkwebOnionHarvester) harvestSearXNG(ctx context.Context, target confi
 
 			item := models.NewThreatItem(
 				models.SourceTypeDarkwebOnion,
-				target.Name,
+				sourceName,
 				res.Title,
 				res.URL,
 				res.Content,

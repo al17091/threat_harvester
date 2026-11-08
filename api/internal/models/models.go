@@ -184,10 +184,124 @@ func isGenericURL(uStr string) bool {
 var (
 	accountHandleRegex  = regexp.MustCompile(`(?i)\s*\(@?[A-Za-z0-9_]+(?:\s*[\/&,]\s*@?[A-Za-z0-9_]+)*\)`)
 	rawSearchQueryRegex = regexp.MustCompile(`(?i)^(?:WebSearch|X|XMonitor|DarkWeb):\s*[\(\[].*`)
+	SearXNGQueryRegex   = regexp.MustCompile(`(?s)\n*\s*\[SearXNG Query:[^\]]*\]\s*(\n\s*\[Engine:[^\]]*\])?\s*(\n\s*\[URL:[^\]]*\])?`)
+
+	knownPublishers = map[string]string{
+		"scan.netsecurity.ne.jp":   "ScanNetSecurity",
+		"security-next.com":        "Security Next",
+		"news.yahoo.co.jp":         "Yahoo! ニュース",
+		"nikkei.com":               "日本経済新聞",
+		"asahi.com":                "朝日新聞",
+		"mainichi.jp":              "毎日新聞",
+		"yomiuri.co.jp":            "読売新聞",
+		"nhk.or.jp":                "NHK NEWS",
+		"jiji.com":                 "時事通信",
+		"kyodo.co.jp":              "共同通信",
+		"itmedia.co.jp":            "ITmedia",
+		"zdnet.com":                "ZDNet Japan",
+		"japan.zdnet.com":          "ZDNet Japan",
+		"japan.cnet.com":           "CNET Japan",
+		"techcrunch.com":           "TechCrunch",
+		"bleepingcomputer.com":     "BleepingComputer",
+		"thehackernews.com":        "The Hacker News",
+		"krebsonsecurity.com":      "Krebs on Security",
+		"darkreading.com":          "Dark Reading",
+		"securityweek.com":         "SecurityWeek",
+		"cyberplace.jp":            "CyberPlace",
+		"jpcert.or.jp":             "JPCERT/CC",
+		"ipa.go.jp":                "IPA",
+		"cisa.gov":                 "CISA",
+		"ransomware.live":          "Ransomware.live",
+		"ransomfeed.it":            "RansomFeed",
+		"sbbit.jp":                 "ビジネス+IT (sbbit.jp)",
+		"speedsystem-jp.com":       "SpeedSystem Blog",
+		"minpo.jp":                 "民報ニュース",
+		"chiba-tv.com":             "千葉テレビ",
+		"socradar.io":              "SOCRadar",
+		"crowdsec.net":             "CrowdSec",
+		"cysec148.hatenablog.com":  "CySec148 Blog",
+		"mytech-blog.com":          "MY TECH BLOG",
+		"cyber.spool.co.jp":        "Cyber Spool",
+		"cyberhubpodcast.com":      "CyberHub Podcast",
+		"dailysecurityreview.com":  "Daily Security Review",
+		"mylinux.work":             "MyLinux.work",
+		"dev.to":                   "DEV Community",
+		"hub.ivanti.com":           "Ivanti Security Advisory",
+	}
 )
 
+// ExtractSourceFromURL derives the human-readable publisher name or clean domain from a URL.
+// Search engines (like SearXNG) are discovery mechanisms, not sources.
+func ExtractSourceFromURL(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return "Web Source"
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Host == "" {
+		return "Web Source"
+	}
+
+	host := strings.ToLower(u.Host)
+	if colonIdx := strings.Index(host, ":"); colonIdx != -1 {
+		host = host[:colonIdx]
+	}
+	cleanHost := strings.TrimPrefix(host, "www.")
+	cleanHost = strings.TrimPrefix(cleanHost, "www3.")
+
+	// Direct match
+	if pub, ok := knownPublishers[cleanHost]; ok {
+		return pub
+	}
+
+	// Suffix match (e.g. news.itmedia.co.jp -> ITmedia)
+	for d, pub := range knownPublishers {
+		if strings.HasSuffix(cleanHost, "."+d) {
+			return pub
+		}
+	}
+
+	// X (Twitter) status
+	if cleanHost == "x.com" || cleanHost == "twitter.com" {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 1 && parts[0] != "" && parts[0] != "i" && parts[0] != "search" {
+			return fmt.Sprintf("X: @%s", parts[0])
+		}
+		return "X (Twitter)"
+	}
+
+	// Onion leak site / service
+	if strings.HasSuffix(cleanHost, ".onion") {
+		if len(cleanHost) > 24 {
+			return fmt.Sprintf("Onion: %s...onion", cleanHost[:16])
+		}
+		return fmt.Sprintf("Onion: %s", cleanHost)
+	}
+
+	return cleanHost
+}
+
+// SanitizeSourceNameWithURL standardizes source names using both the declared name and the actual URL.
+// If the source name refers to a search engine (e.g. SearXNG) or is a query leak, the true source
+// is extracted from the publisher's URL.
+func SanitizeSourceNameWithURL(sourceType SourceType, name string, rawURL string) string {
+	s := strings.TrimSpace(name)
+	isSearXNG := strings.Contains(strings.ToLower(s), "searxng")
+	isQueryLeak := rawSearchQueryRegex.MatchString(s) || strings.Contains(s, " OR ") || strings.Contains(s, " AND ") || strings.Contains(s, "site:")
+	isGeneric := s == "" || s == "Web Search" || s == "WebSearch" || s == "Web Search (Tor)" || s == "Tor / Onion"
+
+	if (isSearXNG || isQueryLeak || isGeneric) && rawURL != "" {
+		extracted := ExtractSourceFromURL(rawURL)
+		if extracted != "" && extracted != "Web Source" {
+			return extracted
+		}
+	}
+
+	return SanitizeSourceName(sourceType, name)
+}
+
 // SanitizeSourceName standardizes source names:
-// 1. Replaces engine branding ("SearXNG Web" -> "Web Search", "SearXNG Cross-Search" -> "Web Search (Tor)")
+// 1. Replaces engine branding ("SearXNG Web" -> "Web News", "SearXNG Cross-Search" -> "Tor / Onion")
 // 2. Strips specific account names/handles e.g. "(piyokango / JPCERT)"
 // 3. Sanitizes boolean query leaks e.g. "WebSearch:(..."
 func SanitizeSourceName(sourceType SourceType, name string) string {
@@ -199,24 +313,24 @@ func SanitizeSourceName(sourceType SourceType, name string) string {
 		case SourceTypeTelegram:
 			return "Telegram CTI Feed"
 		case SourceTypeDarkwebOnion:
-			return "Web Search (Tor)"
+			return "Tor / Onion"
 		case SourceTypeRansomwareTracker:
 			return "Ransomware Tracker"
 		case SourceTypeXMonitor:
 			return "X / SNS: 国内セキュリティ速報"
 		case SourceTypeWebSearch:
-			return "Web Search"
+			return "Web News"
 		default:
 			return "Threat Intelligence Source"
 		}
 	}
 
-	// Replace SearXNG references with Web Search
-	s = strings.ReplaceAll(s, "SearXNG Web:", "Web Search:")
-	s = strings.ReplaceAll(s, "SearXNG Cross-Search:", "Web Search (Tor):")
-	s = strings.ReplaceAll(s, "SearXNG Web", "Web Search")
-	s = strings.ReplaceAll(s, "SearXNG Cross-Search", "Web Search (Tor)")
-	s = strings.ReplaceAll(s, "SearXNG", "Web Search")
+	// Replace SearXNG references with clean semantic names
+	s = strings.ReplaceAll(s, "SearXNG Web:", "Web News:")
+	s = strings.ReplaceAll(s, "SearXNG Cross-Search:", "Tor / Onion:")
+	s = strings.ReplaceAll(s, "SearXNG Web", "Web News")
+	s = strings.ReplaceAll(s, "SearXNG Cross-Search", "Tor / Onion")
+	s = strings.ReplaceAll(s, "SearXNG", "Web Source")
 
 	// Strip specific account handles in parentheses e.g. "(piyokango / JPCERT)"
 	s = accountHandleRegex.ReplaceAllString(s, "")
@@ -230,9 +344,9 @@ func SanitizeSourceName(sourceType SourceType, name string) string {
 		case SourceTypeXMonitor:
 			s = "X: 国内セキュリティ速報"
 		case SourceTypeDarkwebOnion:
-			s = "Web Search (Tor): 脅威探索"
+			s = "Tor / Onion: 脅威探索"
 		default:
-			s = "Web Search: 国内脅威速報"
+			s = "Web News: 国内脅威速報"
 		}
 	}
 
@@ -257,7 +371,7 @@ func NewThreatItem(
 	cleanTitle := strings.TrimSpace(title)
 	normURL := NormalizeURL(rawURL)
 	cleanSummary := strings.TrimSpace(summary)
-	cleanSourceName := SanitizeSourceName(sourceType, sourceName)
+	cleanSourceName := SanitizeSourceNameWithURL(sourceType, sourceName, normURL)
 
 	var identifier string
 	if normURL != "" && !isGenericURL(normURL) {
@@ -284,6 +398,12 @@ func NewThreatItem(
 	cleanRaw := strings.TrimSpace(rawContent)
 	if cleanRaw == "" {
 		cleanRaw = cleanSummary
+	} else {
+		// Strip any internal search query leaks
+		cleanRaw = strings.TrimSpace(SearXNGQueryRegex.ReplaceAllString(cleanRaw, ""))
+		if cleanRaw == "" {
+			cleanRaw = cleanSummary
+		}
 	}
 
 	item := ThreatItem{
