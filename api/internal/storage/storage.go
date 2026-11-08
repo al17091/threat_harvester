@@ -340,7 +340,7 @@ func (s *SQLStore) initSchema() error {
 // 1. Replaces search engine branding (e.g. "SearXNG Web") in threat_items.source_name and incidents.sources_detail with the actual publisher/domain.
 // 2. Removes internal search query metadata leaks (e.g. "[SearXNG Query: ...]") from raw_content.
 func (s *SQLStore) remediateSearXNGSourcesAndSnippets() {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	// 1. Remediate threat_items
@@ -372,15 +372,35 @@ func (s *SQLStore) remediateSearXNGSourcesAndSnippets() {
 		rows.Close()
 
 		if len(updates) > 0 {
-			for _, u := range updates {
+			tx, tErr := s.db.BeginTx(ctx, nil)
+			if tErr == nil {
+				var stmt *sql.Stmt
+				var pErr error
 				if s.isSQLite {
-					_, _ = s.db.ExecContext(ctx, "UPDATE threat_items SET source_name = ?, raw_content = ? WHERE id = ?", u.sourceName, u.rawContent, u.id)
+					stmt, pErr = tx.PrepareContext(ctx, "UPDATE threat_items SET source_name = ?, raw_content = ? WHERE id = ?")
 				} else {
-					_, _ = s.db.ExecContext(ctx, "UPDATE threat_items SET source_name = $1, raw_content = $2 WHERE id = $3", u.sourceName, u.rawContent, u.id)
+					stmt, pErr = tx.PrepareContext(ctx, "UPDATE threat_items SET source_name = $1, raw_content = $2 WHERE id = $3")
 				}
+				if pErr == nil {
+					for _, u := range updates {
+						_, _ = stmt.ExecContext(ctx, u.sourceName, u.rawContent, u.id)
+					}
+					stmt.Close()
+					if cErr := tx.Commit(); cErr != nil {
+						log.Printf("[SQLStore] Failed to commit threat_items remediation: %v", cErr)
+					} else {
+						log.Printf("[SQLStore] Remediated %d threat_items: replaced SearXNG references with actual publisher names and cleaned query snippets", len(updates))
+					}
+				} else {
+					_ = tx.Rollback()
+					log.Printf("[SQLStore] Failed to prepare threat_items remediation statement: %v", pErr)
+				}
+			} else {
+				log.Printf("[SQLStore] Failed to begin transaction for threat_items remediation: %v", tErr)
 			}
-			log.Printf("[SQLStore] Remediated %d threat_items: replaced SearXNG references with actual publisher names and cleaned query snippets", len(updates))
 		}
+	} else {
+		log.Printf("[SQLStore] Failed to query threat_items for remediation: %v", err)
 	}
 
 	// 2. Remediate incidents
@@ -427,15 +447,35 @@ func (s *SQLStore) remediateSearXNGSourcesAndSnippets() {
 		iRows.Close()
 
 		if len(incUpdates) > 0 {
-			for _, u := range incUpdates {
+			tx, tErr := s.db.BeginTx(ctx, nil)
+			if tErr == nil {
+				var stmt *sql.Stmt
+				var pErr error
 				if s.isSQLite {
-					_, _ = s.db.ExecContext(ctx, "UPDATE incidents SET sources_detail = ?, raw_content = ? WHERE id = ?", u.sourcesDetail, u.rawContent, u.id)
+					stmt, pErr = tx.PrepareContext(ctx, "UPDATE incidents SET sources_detail = ?, raw_content = ? WHERE id = ?")
 				} else {
-					_, _ = s.db.ExecContext(ctx, "UPDATE incidents SET sources_detail = $1, raw_content = $2 WHERE id = $3", u.sourcesDetail, u.rawContent, u.id)
+					stmt, pErr = tx.PrepareContext(ctx, "UPDATE incidents SET sources_detail = $1, raw_content = $2 WHERE id = $3")
 				}
+				if pErr == nil {
+					for _, u := range incUpdates {
+						_, _ = stmt.ExecContext(ctx, u.sourcesDetail, u.rawContent, u.id)
+					}
+					stmt.Close()
+					if cErr := tx.Commit(); cErr != nil {
+						log.Printf("[SQLStore] Failed to commit incidents remediation: %v", cErr)
+					} else {
+						log.Printf("[SQLStore] Remediated %d incidents: replaced SearXNG references with actual publisher names and cleaned query snippets", len(incUpdates))
+					}
+				} else {
+					_ = tx.Rollback()
+					log.Printf("[SQLStore] Failed to prepare incidents remediation statement: %v", pErr)
+				}
+			} else {
+				log.Printf("[SQLStore] Failed to begin transaction for incidents remediation: %v", tErr)
 			}
-			log.Printf("[SQLStore] Remediated %d incidents: replaced SearXNG references with actual publisher names and cleaned query snippets", len(incUpdates))
 		}
+	} else {
+		log.Printf("[SQLStore] Failed to query incidents for remediation: %v", iErr)
 	}
 }
 
