@@ -184,7 +184,7 @@ func isGenericURL(uStr string) bool {
 var (
 	accountHandleRegex  = regexp.MustCompile(`(?i)\s*\(@?[A-Za-z0-9_]+(?:\s*[\/&,]\s*@?[A-Za-z0-9_]+)*\)`)
 	rawSearchQueryRegex = regexp.MustCompile(`(?i)^(?:WebSearch|X|XMonitor|DarkWeb):\s*[\(\[].*`)
-	SearXNGQueryRegex   = regexp.MustCompile(`(?s)\n*\s*\[SearXNG Query:[^\]]*\]\s*(\n\s*\[Engine:[^\]]*\])?\s*(\n\s*\[URL:[^\]]*\])?`)
+	SearXNGQueryRegex   = regexp.MustCompile(`(?m)^\s*\[(?:SearXNG Query|Engine|URL):[^\r\n]*\]\s*$`)
 
 	knownPublishers = map[string]string{
 		"scan.netsecurity.ne.jp":   "ScanNetSecurity",

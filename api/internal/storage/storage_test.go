@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,5 +200,67 @@ func TestStorageOperations(t *testing.T) {
 	}
 	if incUnnotified {
 		t.Fatal("expected IsIncidentRecentlyNotified to be false for unknown incident")
+	}
+}
+
+func TestRemediateSearXNG(t *testing.T) {
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	sqlStore, ok := store.(*SQLStore)
+	if !ok {
+		t.Fatal("expected SQLStore")
+	}
+
+	// Insert threat item with SearXNG branding and query leak
+	_, err = sqlStore.db.Exec(`
+		INSERT INTO threat_items (id, source_type, source_name, title, url, raw_content, harvested_at)
+		VALUES ('item-searxng-1', 'web_search', 'SearXNG Web: 国内ランサムウェア速報', 'Title', 'https://scan.netsecurity.ne.jp/article/2026/01.html', ?, '2026-11-08T00:00:00Z')
+	`, "Article body\n\n[SearXNG Query: test query]\n[Engine: google]")
+	if err != nil {
+		t.Fatalf("failed to insert test item: %v", err)
+	}
+
+	// Run remediation
+	sqlStore.remediateSearXNGSourcesAndSnippets()
+
+	// Verify
+	var srcName, rawContent string
+	err = sqlStore.db.QueryRow("SELECT source_name, raw_content FROM threat_items WHERE id = 'item-searxng-1'").Scan(&srcName, &rawContent)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if srcName != "ScanNetSecurity" {
+		t.Errorf("expected source_name 'ScanNetSecurity', got '%s'", srcName)
+	}
+	if rawContent != "Article body" {
+		t.Errorf("expected raw_content 'Article body', got '%s'", rawContent)
+	}
+
+	// Insert incident with SearXNG in sources_detail
+	_, err = sqlStore.db.Exec(`
+		INSERT INTO incidents (id, title, victim_org, affected_product, attack_type, severity, japan_relevance, first_seen_at, last_seen_at, created_at, updated_at, sources_detail, raw_content)
+		VALUES ('inc-searxng-1', 'Incident Title', 'Victim', 'Product', 'Ransomware', 'High', 'Direct', '2026-11-08T00:00:00Z', '2026-11-08T00:00:00Z', '2026-11-08T00:00:00Z', '2026-11-08T00:00:00Z', '[{"source_type":"web_search","source_name":"SearXNG Web: 国内速報","url":"https://scan.netsecurity.ne.jp/article/1"}]', ?)
+	`, "Incident body\n\n[SearXNG Query: test query]\n[Engine: google]")
+	if err != nil {
+		t.Fatalf("failed to insert test incident: %v", err)
+	}
+
+	// Run remediation again
+	sqlStore.remediateSearXNGSourcesAndSnippets()
+
+	var incDetail, incRaw string
+	err = sqlStore.db.QueryRow("SELECT sources_detail, raw_content FROM incidents WHERE id = 'inc-searxng-1'").Scan(&incDetail, &incRaw)
+	if err != nil {
+		t.Fatalf("query incident failed: %v", err)
+	}
+	if incRaw != "Incident body" {
+		t.Errorf("expected inc raw_content 'Incident body', got '%s'", incRaw)
+	}
+	if !strings.Contains(incDetail, "ScanNetSecurity") || strings.Contains(incDetail, "SearXNG") {
+		t.Errorf("expected clean sources_detail containing ScanNetSecurity without SearXNG, got: %s", incDetail)
 	}
 }
