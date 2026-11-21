@@ -122,17 +122,25 @@ func (m *ScraperManager) ReEnrich(ctx context.Context, windowDays int, limit int
 
 			// Re-analyze with AI if enabled
 			if m.cfg.AutoReAnalyze && m.analyzer != nil {
-				reCtx, reCancel := context.WithTimeout(ctx, 45*time.Second)
+				reCtx, reCancel := context.WithTimeout(ctx, 180*time.Second)
 				defer reCancel()
 
 				item.RawContent = trimmed
 				enriched, aErr := m.analyzer.Analyze(reCtx, item)
-				if aErr == nil && enriched != nil {
+				if aErr != nil {
+					log.Printf("[ReEnrich] [%d/%d] AI re-analysis failed for %s: %v", itemNum+1, len(items), item.Title, aErr)
+				} else if enriched != nil {
 					models.NormalizeEnrichedThreat(item, enriched)
-					if _, incErr := m.store.FindOrCreateIncident(ctx, item, enriched, 30); incErr == nil {
+					if inc, incErr := m.store.FindOrCreateIncident(ctx, item, enriched, 30); incErr != nil {
+						log.Printf("[ReEnrich] [%d/%d] FindOrCreateIncident failed for %s: %v", itemNum+1, len(items), item.Title, incErr)
+					} else {
 						atomic.AddInt64(&incidentsUpdatedCount, 1)
-						log.Printf("[ReEnrich] [%d/%d] Re-analyzed incident for %s (Severity: %s, Japan: %s)",
-							itemNum+1, len(items), item.Title, enriched.Severity, enriched.JapanRelevance)
+						incIDStr := ""
+						if inc != nil {
+							incIDStr = inc.ID
+						}
+						log.Printf("[ReEnrich] [%d/%d] Re-analyzed incident %s for %s (Severity: %s, Japan: %s)",
+							itemNum+1, len(items), incIDStr, item.Title, enriched.Severity, enriched.JapanRelevance)
 					}
 				}
 			}
