@@ -64,6 +64,7 @@ sinks:
 
 network:
   tor_proxy_url: "${TOR_PROXY_URL:-socks5h://127.0.0.1:9050}"
+  http_proxy: "${HTTP_PROXY:-}"
   request_timeout: 25
 
 scraper:
@@ -74,10 +75,12 @@ scraper:
   tor_concurrency: 2
   clearnet_timeout_seconds: 15
   tor_timeout_seconds: 45
+  browserless_url: "${BROWSERLESS_URL:-}"
+  browserless_timeout_sec: 25
   worker_interval_seconds: 10
   batch_size: 20
   max_attempts: 2
-  auto_re_analyze: false
+  auto_re_analyze: true
 
 pipeline:
   check_interval_hours: 1

@@ -242,6 +242,7 @@ type SinksConfig struct {
 
 type NetworkConfig struct {
 	TorProxyURL    string `yaml:"tor_proxy_url" json:"tor_proxy_url"`
+	HTTPProxy      string `yaml:"http_proxy" json:"http_proxy"`
 	RequestTimeout int    `yaml:"request_timeout" json:"request_timeout"`
 }
 
@@ -584,6 +585,11 @@ func (s *SettingsManager) applyEnvOverrides() {
 	}
 	if v := os.Getenv("BROWSERLESS_URL"); v != "" {
 		s.Config.Scraper.BrowserlessURL = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("HTTP_PROXY"); v != "" {
+		s.Config.Network.HTTPProxy = strings.TrimSpace(v)
+	} else if v := os.Getenv("HTTPS_PROXY"); v != "" {
+		s.Config.Network.HTTPProxy = strings.TrimSpace(v)
 	}
 	if v := os.Getenv("CACHE_DB_PATH"); v != "" {
 		s.Config.Database.SQLitePath = v

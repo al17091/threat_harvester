@@ -209,4 +209,97 @@ func TestFetchOnionArticleContentValidation(t *testing.T) {
 	}
 }
 
+func TestExtractArticleTextWithTablesAndLists(t *testing.T) {
+	htmlWithTable := `
+<!doctype html>
+<html>
+<body>
+  <article class="news-body">
+    <h1>Cisco IOS XEの脆弱性（CVE-2024-1234）に関する注意喚起</h1>
+    <p>JPCERT/CCはCisco IOS XEにおける未認証の遠隔コード実行脆弱性について情報を公開しました。</p>
+    <table>
+      <thead>
+        <tr><th>項目</th><th>詳細情報</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>CVE識別番号</td><td>CVE-2024-1234</td></tr>
+        <tr><td>CVSS基本値</td><td>9.8 (Critical)</td></tr>
+        <tr><td>影響を受けるバージョン</td><td>17.3以前の全バージョン</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li>暫定対策: 不要なHTTPサーバー機能を無効化すること</li>
+      <li>恒久対策: ベンダーが提供する修正済みファームウェアを適用すること</li>
+    </ul>
+  </article>
+</body>
+</html>`
+
+	text, err := ExtractArticleTextFromHTML(htmlWithTable)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(text, "CVE識別番号 | CVE-2024-1234") {
+		t.Errorf("expected table row to be extracted with pipe separator, got:\n%s", text)
+	}
+	if !strings.Contains(text, "CVSS基本値 | 9.8 (Critical)") {
+		t.Errorf("expected CVSS row to be extracted, got:\n%s", text)
+	}
+	if !strings.Contains(text, "不要なHTTPサーバー機能を無効化すること") {
+		t.Errorf("expected list item to be extracted, got:\n%s", text)
+	}
+}
+
+func TestNewClearnetTransportProxy(t *testing.T) {
+	// 1. Without proxy
+	tr1 := NewClearnetTransport("")
+	if tr1.Proxy == nil {
+		t.Error("expected default ProxyFromEnvironment")
+	}
+
+	// 2. With proxy
+	tr2 := NewClearnetTransport("http://100.64.0.12:8888")
+	req, _ := http.NewRequest("GET", "https://example.com", nil)
+	proxyURL, err := tr2.Proxy(req)
+	if err != nil || proxyURL == nil {
+		t.Fatalf("expected proxy URL, got error: %v", err)
+	}
+	if proxyURL.String() != "http://100.64.0.12:8888" {
+		t.Errorf("expected proxy URL http://100.64.0.12:8888, got: %s", proxyURL.String())
+	}
+}
+
+
+func TestLiveRealSitesScraping(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live scrape test in short mode")
+	}
+
+	urls := []struct {
+		name string
+		url  string
+	}{
+		{"JPCERT Alert", "https://www.jpcert.or.jp/at/2026/at260033.html"},
+		{"Security Next News", "https://www.security-next.com/193141"},
+	}
+
+	ctx := context.Background()
+	for _, target := range urls {
+		t.Run(target.name, func(t *testing.T) {
+			text, err := FetchArticleContentWithTimeout(ctx, target.url, 15)
+			if err != nil {
+				t.Fatalf("failed to fetch live article %s: %v", target.url, err)
+			}
+			runes := len([]rune(text))
+			t.Logf("[%s] Successfully extracted %d runes. Preview:\n%s\n---", target.name, runes, strings.Split(text, "\n")[0])
+			if runes < 100 {
+				t.Errorf("expected >100 runes, got %d", runes)
+			}
+		})
+	}
+}
+
+
+
 

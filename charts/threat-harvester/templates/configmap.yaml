@@ -37,6 +37,10 @@ data:
   BROWSERLESS_URL: {{ .Values.config.browserlessUrl | quote }}
   {{- end }}
   REQUEST_TIMEOUT: {{ .Values.config.requestTimeout | quote }}
+  {{- if .Values.config.httpProxy }}
+  HTTP_PROXY: {{ .Values.config.httpProxy | quote }}
+  HTTPS_PROXY: {{ .Values.config.httpProxy | quote }}
+  {{- end }}
   DB_TYPE: {{ .Values.database.type | quote }}
   DB_HOST: {{ .Values.database.host | quote }}
   DB_PORT: {{ .Values.database.port | quote }}

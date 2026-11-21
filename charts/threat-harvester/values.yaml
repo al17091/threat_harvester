@@ -179,6 +179,7 @@ config:
   circuitBreakerMaxAlerts: 5
   notifyDryRun: false
   browserlessUrl: ""
+  httpProxy: ""
   requestTimeout: 25
 
 # Standalone scheduled harvester CronJob

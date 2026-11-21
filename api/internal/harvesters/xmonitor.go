@@ -61,8 +61,10 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 		if provider == "" {
 			if strings.Contains(qCfg.URL, "searxng") {
 				provider = "searxng"
-			} else {
+			} else if apiKey != "" {
 				provider = "gemini"
+			} else {
+				provider = "searxng"
 			}
 		}
 

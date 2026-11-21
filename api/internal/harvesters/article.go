@@ -16,20 +16,57 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/html/charset"
 	"golang.org/x/net/proxy"
 
 	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/models"
 )
 
+const (
+	// Modern realistic browser User-Agent to bypass standard CDN/WAF bot filters
+	defaultBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+// NewClearnetTransport returns an http.Transport configured with relaxed TLS and proxy routing if configured.
+func NewClearnetTransport(proxyURL string) *http.Transport {
+	t := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // handles SAN / host mismatches on public news portals
+		},
+		Proxy: http.ProxyFromEnvironment,
+	}
+
+	trimmedProxy := strings.TrimSpace(proxyURL)
+	if trimmedProxy != "" {
+		if u, err := url.Parse(trimmedProxy); err == nil {
+			t.Proxy = http.ProxyURL(u)
+		}
+	}
+	return t
+}
+
+// GetClearnetHTTPClient returns a configured HTTP client respecting configured proxy and timeout.
+func GetClearnetHTTPClient(timeoutSec int) *http.Client {
+	if timeoutSec <= 0 {
+		timeoutSec = 15
+	}
+	cfg := config.GetSettings().GetConfig()
+	return &http.Client{
+		Timeout:   time.Duration(timeoutSec) * time.Second,
+		Transport: NewClearnetTransport(cfg.Network.HTTPProxy),
+	}
+}
+
 var (
-	// Default HTTP client with relaxed TLS and 10s timeout for public news scraping
+	// Default HTTP client with relaxed TLS and 15s timeout for public news scraping
 	articleHTTPClient = &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // handles SAN / host mismatches on certs like news portals
+				InsecureSkipVerify: true,
 			},
+			Proxy: http.ProxyFromEnvironment,
 		},
 	}
 
@@ -64,17 +101,7 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	if timeoutSec <= 0 {
-		timeoutSec = 15
-	}
-	client := &http.Client{
-		Timeout: time.Duration(timeoutSec) * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-	}
+	client := GetClearnetHTTPClient(timeoutSec)
 
 	cfg := config.GetSettings().GetConfig()
 	browserlessURL := cfg.Scraper.BrowserlessURL
@@ -119,14 +146,18 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 }
 
 func isLikelySPAShell(htmlStr string, extractedText string) bool {
-	if len(strings.TrimSpace(extractedText)) < 150 {
+	if len(strings.TrimSpace(extractedText)) < 200 {
 		lower := strings.ToLower(htmlStr)
 		if strings.Contains(lower, `id="root"`) ||
 			strings.Contains(lower, `id="__next"`) ||
 			strings.Contains(lower, `id="app"`) ||
 			strings.Contains(lower, `id="__nuxt"`) ||
 			strings.Contains(lower, `javascript is required`) ||
-			strings.Contains(lower, `enable javascript`) {
+			strings.Contains(lower, `enable javascript`) ||
+			strings.Contains(lower, `turnstile`) ||
+			strings.Contains(lower, `cf-browser-verification`) ||
+			strings.Contains(lower, `just a moment...`) ||
+			strings.Contains(lower, `please wait...`) {
 			return true
 		}
 	}
@@ -237,15 +268,26 @@ func FetchOnionArticleContent(ctx context.Context, targetURL string, proxyURLStr
 	return ExtractArticleTextFromHTML(body)
 }
 
+func setBrowserHeaders(req *http.Request) {
+	req.Header.Set("User-Agent", defaultBrowserUserAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
+	req.Header.Set("Sec-Ch-Ua", `"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+}
+
 func doFetchHTMLWithClient(ctx context.Context, client *http.Client, reqURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", err
 	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 ThreatHarvester/1.0")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9,ja;q=0.8")
+	setBrowserHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -257,7 +299,13 @@ func doFetchHTMLWithClient(ctx context.Context, client *http.Client, reqURL stri
 		return "", fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	// Auto-detect character encoding (e.g., Shift_JIS, EUC-JP) and decode to UTF-8
+	utf8Reader, err := charset.NewReader(resp.Body, resp.Header.Get("Content-Type"))
+	if err != nil {
+		utf8Reader = resp.Body
+	}
+
+	doc, err := goquery.NewDocumentFromReader(utf8Reader)
 	if err != nil {
 		return "", err
 	}
@@ -285,7 +333,12 @@ func doFetchHTMLWithTorClient(ctx context.Context, client *http.Client, reqURL s
 		return "", fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	utf8Reader, err := charset.NewReader(resp.Body, resp.Header.Get("Content-Type"))
+	if err != nil {
+		utf8Reader = resp.Body
+	}
+
+	doc, err := goquery.NewDocumentFromReader(utf8Reader)
 	if err != nil {
 		return "", err
 	}
@@ -298,12 +351,10 @@ func doFetchHTML(ctx context.Context, reqURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	setBrowserHeaders(req)
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 ThreatHarvester/1.0")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "ja,en-US;q=0.9,en;q=0.8")
-
-	resp, err := articleHTTPClient.Do(req)
+	client := GetClearnetHTTPClient(15)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -313,7 +364,12 @@ func doFetchHTML(ctx context.Context, reqURL string) (string, error) {
 		return "", fmt.Errorf("HTTP status %d", resp.StatusCode)
 	}
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	utf8Reader, err := charset.NewReader(resp.Body, resp.Header.Get("Content-Type"))
+	if err != nil {
+		utf8Reader = resp.Body
+	}
+
+	doc, err := goquery.NewDocumentFromReader(utf8Reader)
 	if err != nil {
 		return "", err
 	}
@@ -373,8 +429,24 @@ func ExtractArticleTextFromHTML(htmlStr string) (string, error) {
 	}
 
 	var paras []string
-	if articleSel != nil {
-		articleSel.Find("p, h2, h3, h4, li, blockquote, pre").Each(func(i int, s *goquery.Selection) {
+	extractBlockText := func(container *goquery.Selection) {
+		container.Find("p, h1, h2, h3, h4, h5, h6, li, dt, dd, blockquote, pre, code, tr").Each(func(i int, s *goquery.Selection) {
+			if s.Is("tr") {
+				var cells []string
+				s.Find("th, td").Each(func(_ int, cell *goquery.Selection) {
+					cText := strings.TrimSpace(cell.Text())
+					if cText != "" {
+						cells = append(cells, cText)
+					}
+				})
+				if len(cells) > 0 {
+					rowText := strings.Join(cells, " | ")
+					if isMeaningfulParagraph(rowText) {
+						paras = append(paras, rowText)
+					}
+				}
+				return
+			}
 			t := strings.TrimSpace(s.Text())
 			if isMeaningfulParagraph(t) {
 				paras = append(paras, t)
@@ -382,14 +454,13 @@ func ExtractArticleTextFromHTML(htmlStr string) (string, error) {
 		})
 	}
 
-	// 2. Fallback to all <p> in doc if container was not found or yielded too few paragraphs
+	if articleSel != nil {
+		extractBlockText(articleSel)
+	}
+
+	// 2. Fallback to all structured elements in doc if container was not found or yielded too few paragraphs
 	if len(paras) == 0 {
-		doc.Find("p").Each(func(i int, s *goquery.Selection) {
-			t := strings.TrimSpace(s.Text())
-			if isMeaningfulParagraph(t) {
-				paras = append(paras, t)
-			}
-		})
+		extractBlockText(doc.Selection)
 	}
 
 	// 3. Fallback to meta description if still empty
@@ -420,7 +491,7 @@ func ExtractArticleTextFromHTML(htmlStr string) (string, error) {
 
 func isMeaningfulParagraph(t string) bool {
 	rLen := len([]rune(t))
-	if rLen < 8 {
+	if rLen < 5 {
 		return false
 	}
 	lower := strings.ToLower(t)

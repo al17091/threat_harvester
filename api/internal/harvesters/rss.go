@@ -23,9 +23,7 @@ type VendorRSSHarvester struct {
 
 func NewVendorRSSHarvester() *VendorRSSHarvester {
 	return &VendorRSSHarvester{
-		client: &http.Client{
-			Timeout: 25 * time.Second,
-		},
+		client: GetClearnetHTTPClient(25),
 		parser: gofeed.NewParser(),
 	}
 }
@@ -149,10 +147,10 @@ func (h *VendorRSSHarvester) Harvest(ctx context.Context, since *time.Time) ([]m
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				fetchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+				fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 				defer cancel()
 
-				articleText, err := FetchArticleContent(fetchCtx, items[idx].URL)
+				articleText, err := FetchArticleContentWithTimeout(fetchCtx, items[idx].URL, 15)
 				if err == nil && len(strings.TrimSpace(articleText)) > 0 {
 					items[idx].RawContent = articleText
 					if items[idx].Summary == "" {

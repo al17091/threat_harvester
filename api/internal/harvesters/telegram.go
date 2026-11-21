@@ -20,9 +20,7 @@ type TelegramHarvester struct {
 
 func NewTelegramHarvester() *TelegramHarvester {
 	return &TelegramHarvester{
-		client: &http.Client{
-			Timeout: 25 * time.Second,
-		},
+		client: GetClearnetHTTPClient(25),
 	}
 }
 

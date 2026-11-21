@@ -26,9 +26,7 @@ type WebSearchHarvester struct {
 
 func NewWebSearchHarvester() *WebSearchHarvester {
 	return &WebSearchHarvester{
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client:     GetClearnetHTTPClient(60),
 		analyzer:   analyzer.NewDefaultThreatAnalyzer(),
 		lastRunMap: make(map[string]time.Time),
 	}
@@ -281,10 +279,10 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				fetchCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+				fetchCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
 				defer cancel()
 
-				content, err := FetchArticleContentWithTimeout(fetchCtx, targetURL, 10)
+				content, err := FetchArticleContentWithTimeout(fetchCtx, targetURL, 15)
 				if err == nil && len([]rune(strings.TrimSpace(content))) >= 80 {
 					docs[idx] = fetchedDoc{
 						content: content,
