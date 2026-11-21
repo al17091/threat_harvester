@@ -65,6 +65,8 @@ func main() {
 		runTestNotify(ctx)
 	case "test-notion":
 		runTestNotion(ctx)
+	case "re-enrich", "reenrich":
+		runReEnrich(ctx, store)
 	default:
 		fmt.Printf("Unknown command: %s\n\n", command)
 		printUsage()
@@ -88,6 +90,7 @@ Commands:
   show <id>      Display full details of a specific incident
   test-notify    Dispatch a test alert to configured Webhook channels
   test-notion    Create a test incident page in the Notion database
+  re-enrich      Bulk re-scrape and re-analyze past articles to improve incident intelligence
 `)
 }
 
@@ -354,3 +357,43 @@ type stubResponseWriter struct {
 func (w *stubResponseWriter) Header() http.Header        { return w.header }
 func (w *stubResponseWriter) Write(b []byte) (int, error) { w.body = append(w.body, b...); return len(b), nil }
 func (w *stubResponseWriter) WriteHeader(code int)        { w.code = code }
+
+func runReEnrich(ctx context.Context, store storage.Store) {
+	fs := flag.NewFlagSet("re-enrich", flag.ExitOnError)
+	days := fs.Int("days", 7, "Past days to look back for re-enrichment (default: 7)")
+	limit := fs.Int("limit", 0, "Max items to process (0 = all)")
+	force := fs.Bool("force", true, "Force re-scraping even if raw_content exists")
+	concurrency := fs.Int("concurrency", 5, "Number of concurrent scrapers")
+	timeout := fs.Int("timeout", 20, "Scrape timeout seconds")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg := config.GetSettings().GetConfig()
+	scraperCfg := cfg.Scraper
+	scraperCfg.Enabled = true
+	scraperCfg.ClearnetEnabled = true
+	scraperCfg.AutoReAnalyze = true
+	if *concurrency > 0 {
+		scraperCfg.ClearnetConcurrency = *concurrency
+	}
+	if *timeout > 0 {
+		scraperCfg.ClearnetTimeoutSeconds = *timeout
+	}
+
+	aiAnalyzer := analyzer.NewDefaultThreatAnalyzer()
+	mgr := scraper.NewScraperManager(store, aiAnalyzer, scraperCfg, cfg.Network)
+
+	summary, err := mgr.ReEnrich(ctx, *days, *limit, *force)
+	if err != nil {
+		log.Printf("Re-enrich failed: %v", err)
+		return
+	}
+
+	fmt.Printf("\n=== Re-enrichment Completed ===\n")
+	fmt.Printf("Window Days      : %d days\n", summary.WindowDays)
+	fmt.Printf("Total Candidates : %d\n", summary.TotalCandidates)
+	fmt.Printf("Processed        : %d\n", summary.Processed)
+	fmt.Printf("Scraped Success  : %d\n", summary.ScrapedSuccess)
+	fmt.Printf("Scraped Failed   : %d\n", summary.ScrapedFailed)
+	fmt.Printf("Content Enriched : %d\n", summary.ContentEnriched)
+	fmt.Printf("Incidents Updated: %d\n", summary.IncidentsUpdated)
+}

@@ -72,5 +72,11 @@ func TestCLICommands(t *testing.T) {
 	cancelHarvest() // cancel immediately
 	os.Args = []string{"harvester", "run", "-lookback=1", "-direct-only=true"}
 	runHarvest(harvestCtx, store)
+
+	// 11. runReEnrich with pre-cancelled context
+	reCtx, cancelRe := context.WithCancel(context.Background())
+	cancelRe()
+	os.Args = []string{"harvester", "re-enrich", "-days=1", "-limit=5"}
+	runReEnrich(reCtx, store)
 }
 

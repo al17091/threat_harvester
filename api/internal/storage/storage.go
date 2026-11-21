@@ -58,6 +58,7 @@ type Store interface {
 	GetQueueBacklogStats(ctx context.Context) (models.QueueBacklogStats, error)
 
 	GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error)
+	GetItemsForReEnrich(ctx context.Context, windowDays int, limit int, forceAll bool) ([]models.ThreatItem, error)
 	UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error
 
 	Close() error
@@ -908,6 +909,10 @@ func (s *SQLStore) IsRecentlyNotified(ctx context.Context, victimOrgs []string, 
 
 func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriched *models.EnrichedThreat, notified bool) error {
 	nowStr := time.Now().UTC().Format(time.RFC3339)
+	harvStr := nowStr
+	if !item.HarvestedAt.IsZero() {
+		harvStr = item.HarvestedAt.UTC().Format(time.RFC3339)
+	}
 	var pubStr *string
 	if item.PublishedAt != nil {
 		formatted := item.PublishedAt.UTC().Format(time.RFC3339)
@@ -1000,7 +1005,7 @@ func (s *SQLStore) MarkSeen(ctx context.Context, item models.ThreatItem, enriche
 		item.Summary,
 		rawStr,
 		pubStr,
-		nowStr,
+		harvStr,
 		severityStr,
 		japanRelStr,
 		notifiedStr,
@@ -1535,6 +1540,125 @@ func (s *SQLStore) UpdateFetchStatus(ctx context.Context, itemID string, status 
 
 func (s *SQLStore) Close() error {
 	return s.db.Close()
+}
+
+func (s *SQLStore) GetItemsForReEnrich(ctx context.Context, windowDays int, limit int, forceAll bool) ([]models.ThreatItem, error) {
+	if windowDays <= 0 {
+		windowDays = 7
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -windowDays).Format(time.RFC3339)
+
+	var query string
+	var args []interface{}
+
+	if s.isSQLite {
+		query = `
+		SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+		       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+		FROM threat_items
+		WHERE harvested_at >= ?
+		  AND url IS NOT NULL AND url != ''
+		  AND url NOT LIKE '%.onion%'
+		`
+		args = append(args, cutoff)
+		if !forceAll {
+			query += " AND (raw_content IS NULL OR LENGTH(TRIM(raw_content)) < 300 OR fetch_status IN ('pending', 'failed'))"
+		}
+		query += " ORDER BY harvested_at DESC"
+		if limit > 0 {
+			query += " LIMIT ?"
+			args = append(args, limit)
+		}
+	} else {
+		query = `
+		SELECT id, source_type, source_name, title, url, summary, raw_content, published_at, harvested_at,
+		       fetch_status, fetch_attempts, fetch_error, fetched_at, incident_id
+		FROM threat_items
+		WHERE harvested_at >= $1
+		  AND url IS NOT NULL AND url != ''
+		  AND url NOT LIKE '%.onion%'
+		`
+		args = append(args, cutoff)
+		argIdx := 2
+		if !forceAll {
+			query += " AND (raw_content IS NULL OR LENGTH(TRIM(raw_content)) < 300 OR fetch_status IN ('pending', 'failed'))"
+		}
+		query += " ORDER BY harvested_at DESC"
+		if limit > 0 {
+			query += fmt.Sprintf(" LIMIT $%d", argIdx)
+			args = append(args, limit)
+		}
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.ThreatItem
+	for rows.Next() {
+		var (
+			id, sourceType, sourceName, title string
+			url, summary, rawContent          sql.NullString
+			pubAt, harvAt                     sql.NullString
+			fetchStatus                       sql.NullString
+			fetchAttempts                     int
+			fetchError, fetchedAt             sql.NullString
+			incidentID                        sql.NullString
+		)
+
+		if err := rows.Scan(
+			&id, &sourceType, &sourceName, &title,
+			&url, &summary, &rawContent, &pubAt, &harvAt,
+			&fetchStatus, &fetchAttempts, &fetchError, &fetchedAt, &incidentID,
+		); err != nil {
+			return nil, err
+		}
+
+		var parsedPub *time.Time
+		if pubAt.Valid && pubAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, pubAt.String); err == nil {
+				parsedPub = &t
+			}
+		}
+
+		var parsedHarv time.Time
+		if harvAt.Valid && harvAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, harvAt.String); err == nil {
+				parsedHarv = t
+			}
+		}
+		if parsedHarv.IsZero() {
+			parsedHarv = time.Now().UTC()
+		}
+
+		var parsedFetched *time.Time
+		if fetchedAt.Valid && fetchedAt.String != "" {
+			if t, err := time.Parse(time.RFC3339, fetchedAt.String); err == nil {
+				parsedFetched = &t
+			}
+		}
+
+		it := models.ThreatItem{
+			ID:            id,
+			SourceType:    models.SourceType(sourceType),
+			SourceName:    sourceName,
+			Title:         title,
+			URL:           url.String,
+			Summary:       summary.String,
+			RawContent:    rawContent.String,
+			PublishedAt:   parsedPub,
+			HarvestedAt:   parsedHarv,
+			FetchStatus:   fetchStatus.String,
+			FetchAttempts: fetchAttempts,
+			FetchError:    fetchError.String,
+			FetchedAt:     parsedFetched,
+			IncidentID:    incidentID.String,
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
 }
 
 func nullStringVal(ns sql.NullString) interface{} {

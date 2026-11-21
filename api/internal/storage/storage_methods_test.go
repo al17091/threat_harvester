@@ -524,3 +524,78 @@ func TestJapaneseRemediationStorage(t *testing.T) {
 	}
 }
 
+func TestGetItemsForReEnrich(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore("", ":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create memory store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC()
+	oldTime := now.AddDate(0, 0, -10) // 10 days ago
+
+	// Item 1: within 7 days, needs scraping (raw_content is empty)
+	item1 := models.ThreatItem{
+		ID:          "item-re-1",
+		SourceType:  models.SourceTypeVendorRSS,
+		SourceName:  "JPCERT",
+		Title:       "Recent Item 1",
+		URL:         "https://example.com/item-1",
+		HarvestedAt: now,
+		FetchStatus: "pending",
+	}
+	// Item 2: within 7 days, already has long raw_content
+	item2 := models.ThreatItem{
+		ID:          "item-re-2",
+		SourceType:  models.SourceTypeWebSearch,
+		SourceName:  "Search",
+		Title:       "Recent Item 2",
+		URL:         "https://example.com/item-2",
+		RawContent:  strings.Repeat("Long article content about threats and vulnerabilities. ", 20),
+		HarvestedAt: now,
+		FetchStatus: "completed",
+	}
+	// Item 3: 10 days ago (outside 7 days window)
+	item3 := models.ThreatItem{
+		ID:          "item-re-3",
+		SourceType:  models.SourceTypeVendorRSS,
+		SourceName:  "IPA",
+		Title:       "Old Item 3",
+		URL:         "https://example.com/item-3",
+		HarvestedAt: oldTime,
+		FetchStatus: "pending",
+	}
+
+	_ = store.MarkSeen(ctx, item1, nil, false)
+	_ = store.MarkSeen(ctx, item2, nil, false)
+	_ = store.MarkSeen(ctx, item3, nil, false)
+
+	// 1. Query past 7 days, forceAll = false -> only item1
+	items, err := store.GetItemsForReEnrich(ctx, 7, 10, false)
+	if err != nil {
+		t.Fatalf("GetItemsForReEnrich failed: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "item-re-1" {
+		t.Errorf("Expected only item-re-1, got %v", items)
+	}
+
+	// 2. Query past 7 days, forceAll = true -> item1 and item2
+	itemsAll, err := store.GetItemsForReEnrich(ctx, 7, 10, true)
+	if err != nil {
+		t.Fatalf("GetItemsForReEnrich with forceAll failed: %v", err)
+	}
+	if len(itemsAll) != 2 {
+		t.Errorf("Expected 2 items for 7 days forceAll, got %d", len(itemsAll))
+	}
+
+	// 3. Query past 14 days, forceAll = true -> all 3 items
+	items14d, err := store.GetItemsForReEnrich(ctx, 14, 10, true)
+	if err != nil {
+		t.Fatalf("GetItemsForReEnrich 14d failed: %v", err)
+	}
+	if len(items14d) != 3 {
+		t.Errorf("Expected 3 items for 14 days forceAll, got %d", len(items14d))
+	}
+}
+

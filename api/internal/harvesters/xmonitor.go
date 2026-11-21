@@ -61,10 +61,8 @@ func (h *XMonitorHarvester) Harvest(ctx context.Context, since *time.Time) ([]mo
 		if provider == "" {
 			if strings.Contains(qCfg.URL, "searxng") {
 				provider = "searxng"
-			} else if apiKey != "" {
-				provider = "gemini"
 			} else {
-				provider = "searxng"
+				provider = "gemini"
 			}
 		}
 
@@ -320,9 +318,12 @@ func (h *XMonitorHarvester) harvestSearXNGX(ctx context.Context, qCfg config.Que
 		timeoutSec = 30
 	}
 
-	client := &http.Client{
-		Transport: defaultSearxngTransport,
-		Timeout:   time.Duration(timeoutSec) * time.Second,
+	client := h.client
+	if client == nil {
+		client = &http.Client{
+			Transport: defaultSearxngTransport,
+			Timeout:   time.Duration(timeoutSec) * time.Second,
+		}
 	}
 
 	categories := qCfg.Categories
