@@ -41,6 +41,7 @@ secrets/
 data/
 *.sqlite3
 *.log
+uv.lock
 
 # Node.js & Next.js
 node_modules/
