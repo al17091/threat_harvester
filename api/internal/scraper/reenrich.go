@@ -122,7 +122,7 @@ func (m *ScraperManager) ReEnrich(ctx context.Context, windowDays int, limit int
 
 			// Re-analyze with AI if enabled
 			if m.cfg.AutoReAnalyze && m.analyzer != nil {
-				reCtx, reCancel := context.WithTimeout(ctx, 180*time.Second)
+				reCtx, reCancel := context.WithTimeout(ctx, 300*time.Second)
 				defer reCancel()
 
 				item.RawContent = trimmed

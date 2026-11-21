@@ -38,7 +38,8 @@ export class CTIAgentService {
       process.env.LITELLM_MODEL ||
       "lab/qwen2.5-3b-instruct";
 
-    this.maxLoopTurns = config?.maxLoopTurns || 3;
+    const envTurns = process.env.AGENT_MAX_LOOP_TURNS ? parseInt(process.env.AGENT_MAX_LOOP_TURNS, 10) : 1;
+    this.maxLoopTurns = config?.maxLoopTurns || envTurns;
     this.translator = new PLaMoTranslator({
       plamoBaseUrl:
         config?.plamoBaseUrl ||
