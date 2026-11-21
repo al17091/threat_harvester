@@ -40,6 +40,8 @@ data:
   {{- if .Values.config.httpProxy }}
   HTTP_PROXY: {{ .Values.config.httpProxy | quote }}
   HTTPS_PROXY: {{ .Values.config.httpProxy | quote }}
+  NO_PROXY: {{ .Values.config.noProxy | default "localhost,127.0.0.1,10.0.0.0/8,10.42.0.0/16,10.43.0.0/16,.svc,.cluster.local,.lab.internal,.lab.local" | quote }}
+  no_proxy: {{ .Values.config.noProxy | default "localhost,127.0.0.1,10.0.0.0/8,10.42.0.0/16,10.43.0.0/16,.svc,.cluster.local,.lab.internal,.lab.local" | quote }}
   {{- end }}
   DB_TYPE: {{ .Values.database.type | quote }}
   DB_HOST: {{ .Values.database.host | quote }}

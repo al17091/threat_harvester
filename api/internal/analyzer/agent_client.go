@@ -31,6 +31,9 @@ func NewAgentClientAnalyzer(endpoint string, timeoutSec int) *AgentClientAnalyze
 		endpoint: endpoint,
 		client: &http.Client{
 			Timeout: time.Duration(timeoutSec) * time.Second,
+			Transport: &http.Transport{
+				Proxy: nil, // bypass proxy for internal agent service communication
+			},
 		},
 	}
 }

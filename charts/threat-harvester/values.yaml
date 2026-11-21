@@ -180,6 +180,7 @@ config:
   notifyDryRun: false
   browserlessUrl: ""
   httpProxy: ""
+  noProxy: "localhost,127.0.0.1,10.0.0.0/8,10.42.0.0/16,10.43.0.0/16,.svc,.cluster.local,.lab.internal,.lab.local"
   requestTimeout: 25
 
 # Standalone scheduled harvester CronJob

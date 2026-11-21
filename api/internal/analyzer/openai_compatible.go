@@ -67,6 +67,11 @@ func NewOpenAICompatibleAnalyzer(endpoint, model, apiKey string, temperature flo
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecureSkipVerify},
+		Proxy:           http.ProxyFromEnvironment,
+	}
+	// For cluster-local endpoints, bypass proxy completely
+	if strings.Contains(endpoint, "cluster.local") || strings.Contains(endpoint, "127.0.0.1") || strings.Contains(endpoint, "localhost") {
+		transport.Proxy = nil
 	}
 
 	return &OpenAICompatibleAnalyzer{
