@@ -24,8 +24,8 @@ func NewAgentClientAnalyzer(endpoint string, timeoutSec int) *AgentClientAnalyze
 	if endpoint == "" {
 		endpoint = "http://threat-harvester-agent:8002"
 	}
-	if timeoutSec <= 0 {
-		timeoutSec = 180
+	if timeoutSec <= 0 || timeoutSec < 600 {
+		timeoutSec = 600
 	}
 	return &AgentClientAnalyzer{
 		endpoint: endpoint,

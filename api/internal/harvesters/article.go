@@ -82,23 +82,29 @@ func FetchArticleContent(ctx context.Context, targetURL string) (string, error) 
 
 // FetchArticleContentWithTimeout fetches the given article URL with custom timeout and extracts its main body text.
 func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeoutSec int) (string, error) {
+	content, _, err := FetchArticleDetailsWithTimeout(ctx, targetURL, timeoutSec)
+	return content, err
+}
+
+// FetchArticleDetailsWithTimeout fetches the given article URL and extracts both its clean body text and publication date.
+func FetchArticleDetailsWithTimeout(ctx context.Context, targetURL string, timeoutSec int) (string, *time.Time, error) {
 	trimmedURL := strings.TrimSpace(targetURL)
 	if trimmedURL == "" {
-		return "", fmt.Errorf("empty URL")
+		return "", nil, fmt.Errorf("empty URL")
 	}
 
 	// Never scrape onion URLs via standard clearnet client
 	if strings.Contains(trimmedURL, ".onion") {
-		return "", fmt.Errorf("onion URLs must use Tor harvester")
+		return "", nil, fmt.Errorf("onion URLs must use Tor harvester")
 	}
 
 	if !strings.HasPrefix(trimmedURL, "http://") && !strings.HasPrefix(trimmedURL, "https://") {
-		return "", fmt.Errorf("invalid URL scheme: %s", trimmedURL)
+		return "", nil, fmt.Errorf("invalid URL scheme: %s", trimmedURL)
 	}
 
 	u, err := url.Parse(trimmedURL)
 	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("invalid URL: %w", err)
+		return "", nil, fmt.Errorf("invalid URL: %w", err)
 	}
 
 	client := GetClearnetHTTPClient(timeoutSec)
@@ -121,8 +127,11 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 
 	var extracted string
 	var extractErr error
+	var pubDate *time.Time
+
 	if err == nil {
 		extracted, extractErr = ExtractArticleTextFromHTML(body)
+		pubDate = ExtractArticleDateFromHTML(body)
 	}
 
 	// Dynamic fallback for JS/SPA rendered pages or HTTP fetch blocks
@@ -130,19 +139,23 @@ func FetchArticleContentWithTimeout(ctx context.Context, targetURL string, timeo
 	if needsBrowserless && browserlessURL != "" {
 		if renderedHTML, bErr := fetchHTMLWithBrowserless(ctx, browserlessURL, trimmedURL, bTimeout); bErr == nil && len(renderedHTML) > 0 {
 			if bExtracted, bExtractErr := ExtractArticleTextFromHTML(renderedHTML); bExtractErr == nil && len(strings.TrimSpace(bExtracted)) > len(strings.TrimSpace(extracted)) {
-				return bExtracted, nil
+				bDate := ExtractArticleDateFromHTML(renderedHTML)
+				if bDate != nil {
+					pubDate = bDate
+				}
+				return bExtracted, pubDate, nil
 			}
 		}
 	}
 
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if extractErr != nil {
-		return "", extractErr
+		return "", nil, extractErr
 	}
 
-	return extracted, nil
+	return extracted, pubDate, nil
 }
 
 func isLikelySPAShell(htmlStr string, extractedText string) bool {
@@ -712,4 +725,138 @@ func FollowAndScrapeLinkedArticles(ctx context.Context, initialURLs []string, ma
 
 	return strings.Join(scrapedBlocks, "\n\n"), visitedURLs
 }
+
+// ExtractArticleDateFromHTML extracts publication timestamp from HTML meta tags, JSON-LD, time tags, or header text.
+func ExtractArticleDateFromHTML(htmlStr string) *time.Time {
+	if strings.TrimSpace(htmlStr) == "" {
+		return nil
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlStr))
+	if err != nil {
+		return nil
+	}
+
+	// 1. Meta tag inspection
+	metaSelectors := []string{
+		`meta[property="article:published_time"]`,
+		`meta[property="og:published_time"]`,
+		`meta[property="og:article:published_time"]`,
+		`meta[name="pubdate"]`,
+		`meta[name="publishdate"]`,
+		`meta[name="date"]`,
+		`meta[name="dc.date"]`,
+		`meta[name="dc.date.issued"]`,
+		`meta[name="sailthru.date"]`,
+		`meta[name="parsely-pub-date"]`,
+		`meta[itemprop="datePublished"]`,
+	}
+	for _, sel := range metaSelectors {
+		var found *time.Time
+		doc.Find(sel).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+			if val, exists := s.Attr("content"); exists && strings.TrimSpace(val) != "" {
+				if t, ok := models.ParseFlexibleTime(val); ok {
+					found = &t
+					return false
+				}
+			}
+			return true
+		})
+		if found != nil {
+			return found
+		}
+	}
+
+	// 2. JSON-LD parsing
+	var jsonLdDate *time.Time
+	doc.Find(`script[type="application/ld+json"]`).EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		raw := strings.TrimSpace(s.Text())
+		if raw == "" {
+			return true
+		}
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			return true
+		}
+		if t := extractDateFromJSONLD(parsed); t != nil {
+			jsonLdDate = t
+			return false
+		}
+		return true
+	})
+	if jsonLdDate != nil {
+		return jsonLdDate
+	}
+
+	// 3. <time> tag inspection
+	var timeTagDate *time.Time
+	doc.Find("time").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		if dt, exists := s.Attr("datetime"); exists && strings.TrimSpace(dt) != "" {
+			if t, ok := models.ParseFlexibleTime(dt); ok {
+				timeTagDate = &t
+				return false
+			}
+		}
+		txt := strings.TrimSpace(s.Text())
+		if txt != "" {
+			if t, ok := models.ParseFlexibleTime(txt); ok {
+				timeTagDate = &t
+				return false
+			}
+		}
+		return true
+	})
+	if timeTagDate != nil {
+		return timeTagDate
+	}
+
+	// 4. Fallback: Search top text or byline for Japanese / ISO date patterns
+	// e.g. 2026年11月22日, 2025/10/15, 2024-08-01
+	datePattern := regexp.MustCompile(`(201\d|202\d)[年/-](\d{1,2})[月/-](\d{1,2})日?`)
+	bodyText := doc.Find("body").Text()
+	bodyRunes := []rune(bodyText)
+	if len(bodyRunes) > 2000 {
+		bodyRunes = bodyRunes[:2000]
+	}
+	matches := datePattern.FindStringSubmatch(string(bodyRunes))
+	if len(matches) == 4 {
+		year := matches[1]
+		month := matches[2]
+		day := matches[3]
+		dateStr := fmt.Sprintf("%s-%02s-%02s", year, month, day)
+		if t, ok := models.ParseFlexibleTime(dateStr); ok {
+			return &t
+		}
+	}
+
+	return nil
+}
+
+func extractDateFromJSONLD(v interface{}) *time.Time {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		for _, key := range []string{"datePublished", "dateCreated", "uploadDate", "dateModified"} {
+			if d, ok := val[key].(string); ok && strings.TrimSpace(d) != "" {
+				if t, ok := models.ParseFlexibleTime(d); ok {
+					return &t
+				}
+			}
+		}
+		if graph, ok := val["@graph"].([]interface{}); ok {
+			for _, item := range graph {
+				if t := extractDateFromJSONLD(item); t != nil {
+					return t
+				}
+			}
+		}
+	case []interface{}:
+		for _, item := range val {
+			if t := extractDateFromJSONLD(item); t != nil {
+				return t
+			}
+		}
+	}
+	return nil
+}
+
 

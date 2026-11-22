@@ -60,6 +60,7 @@ type Store interface {
 	GetPendingFetchItems(ctx context.Context, limit int, maxAttempts int, torOnly bool) ([]models.ThreatItem, error)
 	GetItemsForReEnrich(ctx context.Context, windowDays int, limit int, forceAll bool) ([]models.ThreatItem, error)
 	UpdateFetchStatus(ctx context.Context, itemID string, status string, attempts int, fetchError string, rawContent string) error
+	UpdateItemPublishedAt(ctx context.Context, itemID string, publishedAt time.Time) error
 
 	Close() error
 }
@@ -1534,6 +1535,31 @@ func (s *SQLStore) UpdateFetchStatus(ctx context.Context, itemID string, status 
 	_, err := s.db.ExecContext(ctx, query, status, attempts, fetchError, rawContent, fetchedAtStr, itemID)
 	if err != nil {
 		log.Printf("[SQLStore] UpdateFetchStatus failed for item %s: %v", itemID, err)
+	}
+	return err
+}
+
+func (s *SQLStore) UpdateItemPublishedAt(ctx context.Context, itemID string, publishedAt time.Time) error {
+	pubStr := publishedAt.UTC().Format(time.RFC3339)
+	var query string
+	if s.isSQLite {
+		query = `
+		UPDATE threat_items
+		SET published_at = ?
+		WHERE id = ? AND (published_at IS NULL OR published_at = '')
+		`
+		_, err := s.db.ExecContext(ctx, query, pubStr, itemID)
+		return err
+	}
+
+	query = `
+	UPDATE threat_items
+	SET published_at = $1
+	WHERE id = $2 AND (published_at IS NULL OR published_at = '')
+	`
+	_, err := s.db.ExecContext(ctx, query, pubStr, itemID)
+	if err != nil {
+		log.Printf("[SQLStore] UpdateItemPublishedAt failed for item %s: %v", itemID, err)
 	}
 	return err
 }

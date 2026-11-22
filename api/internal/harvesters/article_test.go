@@ -300,6 +300,53 @@ func TestLiveRealSitesScraping(t *testing.T) {
 	}
 }
 
+func TestExtractArticleDateFromHTML(t *testing.T) {
+	tests := []struct {
+		name     string
+		html     string
+		expected string
+	}{
+		{
+			name:     "Meta article:published_time",
+			html:     `<html><head><meta property="article:published_time" content="2026-11-20T10:15:30Z"></head><body><p>Article</p></body></html>`,
+			expected: "2026-11-20",
+		},
+		{
+			name:     "Meta og:published_time",
+			html:     `<html><head><meta property="og:published_time" content="2025-10-05T08:00:00+09:00"></head><body><p>Article</p></body></html>`,
+			expected: "2025-10-04", // UTC
+		},
+		{
+			name: "JSON-LD datePublished",
+			html: `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"NewsArticle","datePublished":"2026-04-12T12:00:00Z"}</script></head><body><p>Article</p></body></html>`,
+			expected: "2026-04-12",
+		},
+		{
+			name:     "Time tag datetime",
+			html:     `<html><body><time datetime="2025-06-30">June 30, 2025</time><p>Article content</p></body></html>`,
+			expected: "2025-06-30",
+		},
+		{
+			name:     "Japanese text in header",
+			html:     `<html><body><header>公開日：2025年12月15日</header><main><p>過去の事例まとめ...</p></main></body></html>`,
+			expected: "2025-12-15",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := ExtractArticleDateFromHTML(tc.html)
+			if d == nil {
+				t.Fatalf("expected date %s, got nil", tc.expected)
+			}
+			if d.Format("2006-01-02") != tc.expected {
+				t.Errorf("expected %s, got %s", tc.expected, d.Format("2006-01-02"))
+			}
+		})
+	}
+}
+
+
 
 
 

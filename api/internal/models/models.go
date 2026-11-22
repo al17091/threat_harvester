@@ -476,6 +476,8 @@ type EnrichedThreat struct {
 var flexibleTimeLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
+	"2006-01-02T15:04:05Z07:00",
+	"2006-01-02T15:04:05-07:00",
 	"2006-01-02 15:04:05.999999999Z07:00",
 	"2006-01-02 15:04:05Z07:00",
 	"2006-01-02 15:04:05.999999999-0700",
@@ -484,6 +486,19 @@ var flexibleTimeLayouts = []string{
 	"2006-01-02T15:04:05",
 	"2006-01-02 15:04:05.999999999",
 	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
+	"2006-01-02",
+	"2006/01/02 15:04:05",
+	"2006/01/02 15:04",
+	"2006/01/02",
+	time.RFC1123Z,
+	time.RFC1123,
+	time.RFC822Z,
+	time.RFC822,
+	"2006年01月02日 15:04",
+	"2006年01月02日",
+	"2006年1月2日",
+	"2006年1月2日 15:04",
 }
 
 // ParseFlexibleTime parses RFC3339 as well as Python str(datetime) space-separated timestamps.

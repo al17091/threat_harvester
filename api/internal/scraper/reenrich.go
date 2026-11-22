@@ -90,7 +90,7 @@ func (m *ScraperManager) ReEnrich(ctx context.Context, windowDays int, limit int
 			fetchCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 			defer cancel()
 
-			content, fetchErr := harvesters.FetchArticleContentWithTimeout(fetchCtx, item.URL, timeoutSec)
+			content, pubDate, fetchErr := harvesters.FetchArticleDetailsWithTimeout(fetchCtx, item.URL, timeoutSec)
 			if fetchErr != nil {
 				atomic.AddInt64(&scrapedFailedCount, 1)
 				_ = m.store.UpdateFetchStatus(ctx, item.ID, "failed", item.FetchAttempts+1, fetchErr.Error(), "")
@@ -103,6 +103,11 @@ func (m *ScraperManager) ReEnrich(ctx context.Context, windowDays int, limit int
 				atomic.AddInt64(&scrapedFailedCount, 1)
 				_ = m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "empty content extracted", "")
 				return
+			}
+
+			if pubDate != nil && (item.PublishedAt == nil || item.PublishedAt.IsZero()) {
+				item.PublishedAt = pubDate
+				_ = m.store.UpdateItemPublishedAt(ctx, item.ID, *pubDate)
 			}
 
 			atomic.AddInt64(&scrapedSuccessCount, 1)
@@ -120,9 +125,21 @@ func (m *ScraperManager) ReEnrich(ctx context.Context, windowDays int, limit int
 			log.Printf("[ReEnrich] [%d/%d] Successfully scraped article for %s (%d runes, prev: %d runes)",
 				itemNum+1, len(items), item.Title, newRunes, prevRunes)
 
+			// Drop / skip AI re-analysis if article is old (>30 days) or historical retrospective
+			if item.PublishedAt != nil && time.Since(*item.PublishedAt) > 30*24*time.Hour {
+				log.Printf("[ReEnrich] [%d/%d] Skipping AI re-analysis for old article (%s): %s",
+					itemNum+1, len(items), item.PublishedAt.Format("2006-01-02"), item.Title)
+				return
+			}
+			if models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, trimmed) {
+				log.Printf("[ReEnrich] [%d/%d] Skipping AI re-analysis for historical retrospective: %s",
+					itemNum+1, len(items), item.Title)
+				return
+			}
+
 			// Re-analyze with AI if enabled
 			if m.cfg.AutoReAnalyze && m.analyzer != nil {
-				reCtx, reCancel := context.WithTimeout(ctx, 300*time.Second)
+				reCtx, reCancel := context.WithTimeout(ctx, 600*time.Second)
 				defer reCancel()
 
 				item.RawContent = trimmed

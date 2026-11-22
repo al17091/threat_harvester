@@ -335,6 +335,39 @@ func TestIsServiceReleaseOrNonThreat(t *testing.T) {
 	if !IsServiceReleaseOrNonThreat(itemInfo, enrichedInfo) {
 		t.Errorf("expected item with SeverityInfo to be identified as non-threat")
 	}
+
+	// Historical / retrospective summary
+	itemHistorical := ThreatItem{
+		Title:   "【2025年】サイバー攻撃の事例まとめ｜企業の被害・侵入経路と対策",
+		Summary: "過去の事例をまとめたレポート",
+	}
+	if !IsServiceReleaseOrNonThreat(itemHistorical, nil) {
+		t.Errorf("expected 2025 summary to be identified as non-threat")
+	}
+}
+
+func TestIsHistoricalOrRetrospectiveNotice(t *testing.T) {
+	cases := []struct {
+		title    string
+		expected bool
+	}{
+		{"2025年の情報漏洩・不正アクセス・ランサムウェア事案一覧(11件)", true},
+		{"【2025年】サイバー攻撃の事例まとめ｜企業の被害・侵入経路と", true},
+		{"サイバー被害の統計 (2024〜2026年)｜ランサムウェア件数", true},
+		{"Critical Security Incident Summary (2020-2025)", true},
+		{"Domestic Ransomware Attacks: Case Studies from 2024-2025", true},
+		{"統合報告書 2025 - インソース", true},
+		{"アサヒグループ、2025年サイバー攻撃下の出荷作戦～その時、物流", true},
+		{"【速報】某社にランサムウェア攻撃発生、2026年最新の被害状況", false},
+		{"Cisco SD-WANに深刻な脆弱性 CVE-2026-20127 が発見される", false},
+	}
+
+	for _, c := range cases {
+		got := IsHistoricalOrRetrospectiveNotice(c.title)
+		if got != c.expected {
+			t.Errorf("IsHistoricalOrRetrospectiveNotice(%q) = %v; want %v", c.title, got, c.expected)
+		}
+	}
 }
 
 func TestIsPureVulnerabilityAdvisory(t *testing.T) {

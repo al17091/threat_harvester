@@ -1169,13 +1169,80 @@ func IsCorporatePRNotice(texts ...string) bool {
 	return false
 }
 
+// IsHistoricalOrRetrospectiveNotice determines if an item is a retrospective review,
+// multi-year statistical survey, annual report, case study of past years, or general historical digest
+// that must not be handled as an active current cyber threat incident.
+func IsHistoricalOrRetrospectiveNotice(texts ...string) bool {
+	combined := strings.ToLower(strings.Join(texts, " "))
+	if strings.TrimSpace(combined) == "" {
+		return false
+	}
+
+	currentYear := time.Now().UTC().Year()
+
+	// 1. Explicit retrospective summary phrases
+	retrospectivePhrases := []string{
+		"事例まとめ", "事案まとめ", "事例一覧", "事案一覧", "事例集", "事案集",
+		"振り返り", "傾向分析", "被害の統計", "統計分析", "動向分析",
+		"年次報告", "年次レポート", "年度報告", "年次セキュリティ", "年鑑",
+		"統合報告書", "白書", "年報", "アニュアルレポート", "年次まとめ", "年間のまとめ",
+		"サイバー攻撃の事例まとめ", "情報漏洩・不正アクセス事案一覧", "サイバー被害の統計",
+		"annual report", "case studies", "year in review", "threat report", "annual threat report",
+		"security review", "past incidents", "historical analysis", "retrospective", "case study summary",
+	}
+	for _, phrase := range retrospectivePhrases {
+		if strings.Contains(combined, phrase) {
+			return true
+		}
+	}
+
+	// 2. Explicit past year mentions in Title / Header (e.g. "【2025年】", "2025年の情報漏洩", "2024年サイバー攻撃")
+	// If it explicitly references a past year and doesn't mention current year or "速報"/"最新", it's historical.
+	hasCurrentYear := strings.Contains(combined, fmt.Sprintf("%d", currentYear))
+	isFlashNews := strings.Contains(combined, "速報") || strings.Contains(combined, "緊急") || strings.Contains(combined, "ゼロデイ") || strings.Contains(combined, "in-the-wild")
+
+	for yr := currentYear - 1; yr >= 2018; yr-- {
+		yrStr := fmt.Sprintf("%d", yr)
+		if strings.Contains(combined, yrStr+"年の") ||
+			strings.Contains(combined, "【"+yrStr+"年】") ||
+			strings.Contains(combined, "【"+yrStr+"】") ||
+			strings.Contains(combined, yrStr+"年度") ||
+			strings.Contains(combined, yrStr+"年サイバー") ||
+			strings.Contains(combined, yrStr+"年事件") ||
+			strings.Contains(combined, yrStr+"年事案") ||
+			strings.Contains(combined, yrStr+"年事例") {
+			if !hasCurrentYear && !isFlashNews {
+				return true
+			}
+		}
+	}
+
+	// 3. Multi-year spans (e.g., 2024〜2026, 2020-2025, 2024-2025)
+	// Strip CVE identifiers so strings like CVE-2026-20127 or CVE-2024-5555 are not confused with multi-year ranges
+	cvePattern := regexp.MustCompile(`(?i)cve-\d{4}-\d+`)
+	cleanText := cvePattern.ReplaceAllString(combined, "")
+
+	multiYearPattern := regexp.MustCompile(`\b(201\d|202\d)\s*[-〜~]\s*(201\d|202\d)\b`)
+	if multiYearPattern.MatchString(cleanText) {
+		return true
+	}
+
+	return false
+}
+
 // IsServiceReleaseOrNonThreat detects service releases, PR announcements, marketing, or general non-threat content.
 func IsServiceReleaseOrNonThreat(item ThreatItem, enriched *EnrichedThreat) bool {
 	if IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
 		return true
 	}
+	if IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, item.RawContent) {
+		return true
+	}
 	if enriched != nil {
 		if IsCorporatePRNotice(enriched.Title, enriched.TitleJa, enriched.Summary, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
+			return true
+		}
+		if IsHistoricalOrRetrospectiveNotice(enriched.Title, enriched.TitleJa, enriched.Summary, enriched.SummaryJa, enriched.ImpactAnalysisJa) {
 			return true
 		}
 		if enriched.Severity == SeverityInfo {

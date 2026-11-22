@@ -265,6 +265,7 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 		// Perform actual web access (実アクセス) concurrently across valid search results
 		type fetchedDoc struct {
 			content string
+			pubDate *time.Time
 			status  string
 			errMsg  string
 		}
@@ -282,10 +283,11 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 				fetchCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
 				defer cancel()
 
-				content, err := FetchArticleContentWithTimeout(fetchCtx, targetURL, 15)
+				content, scrapedDate, err := FetchArticleDetailsWithTimeout(fetchCtx, targetURL, 15)
 				if err == nil && len([]rune(strings.TrimSpace(content))) >= 80 {
 					docs[idx] = fetchedDoc{
 						content: content,
+						pubDate: scrapedDate,
 						status:  "completed",
 					}
 					log.Printf("[WebSearch] Actually fetched article for '%s' (%d runes)", targetURL, len([]rune(content)))
@@ -308,6 +310,21 @@ func (h *WebSearchHarvester) harvestSearXNGWeb(ctx context.Context, qCfg config.
 		for i, res := range validResults {
 			doc := docs[i]
 			pubDate := validPubDates[i]
+			if pubDate == nil && doc.pubDate != nil {
+				pubDate = doc.pubDate
+			}
+
+			// Drop if publication date was extracted and is older than since
+			if since != nil && pubDate != nil && pubDate.Before(*since) {
+				log.Printf("[WebSearch] Dropping old article published at %s (< %s): %s", pubDate.Format("2006-01-02"), since.Format("2006-01-02"), res.Title)
+				continue
+			}
+
+			// Drop if historical retrospective notice detected with full scraped content
+			if models.IsHistoricalOrRetrospectiveNotice(res.Title, res.Content, doc.content) {
+				log.Printf("[WebSearch] Dropping historical/retrospective article: %s", res.Title)
+				continue
+			}
 
 			// Determine true information source from the publisher URL, never SearXNG
 			sourceName := models.ExtractSourceFromURL(res.URL)
@@ -553,22 +570,5 @@ func (h *WebSearchHarvester) TestConnection(ctx context.Context) bool {
 }
 
 func isHistoricalArticle(title, content string) bool {
-	combined := strings.ToLower(title + " " + content)
-	currentYear := time.Now().UTC().Year()
-	currYearStr := fmt.Sprintf("%d", currentYear)
-	prevYearStr := fmt.Sprintf("%d", currentYear-1)
-
-	// If it contains references to current or previous year, consider it active
-	if strings.Contains(combined, currYearStr) || strings.Contains(combined, prevYearStr) {
-		return false
-	}
-
-	// Check for explicit historical years in title or content
-	historicalYears := []string{"2024", "2023", "2022", "2021", "2020", "2019", "2018"}
-	for _, yr := range historicalYears {
-		if strings.Contains(combined, yr+"年") || strings.Contains(combined, yr+"/") || strings.Contains(combined, yr+"-") || strings.Contains(combined, "in "+yr) || strings.Contains(combined, yr+" ") {
-			return true
-		}
-	}
-	return false
+	return models.IsHistoricalOrRetrospectiveNotice(title, content)
 }

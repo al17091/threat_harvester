@@ -68,11 +68,13 @@ Evaluation Criteria:
    - RULE 1: If japan_relevance != "Direct", severity MUST NOT be "Critical" (Maximum "High").
    - RULE 2: Vulnerability advisories, security patches, PoC releases, or vulnerability observation reports without a confirmed compromised organization MUST be "Medium" or lower ("Low", "Info"). NEVER "Critical" or "High".
    - RULE 3: General summaries, weekly digests, or FAQs without specific victim organizations MUST be "Medium" or lower.
+   - RULE 4 (Historical / Retrospective Reports & Annual Summaries):
+     If the report is a retrospective review, annual report, multi-year statistical survey, case study summary, or primarily discusses past incidents from prior years (e.g. 2025, 2024 or earlier) rather than a new live incident, severity MUST be "Info" (or "Low" if general advisory). NEVER "Critical" or "High".
    - "Critical": japan_relevance == "Direct" AND severe confirmed damage (ransomware encryption, major data breach, critical system outage).
    - "High": Confirmed breach of enterprise/government, or actively exploited (In-the-wild) zero-day against confirmed targets.
    - "Medium": Vulnerability advisory, minor incident, or generic summary.
    - "Low": Routine patch, low severity bug fix.
-   - "Info": PR announcements, product launches, corporate notices.
+   - "Info": PR announcements, product launches, corporate notices, historical retrospective summaries, and annual reviews.
 
 3. victim_orgs (Strict Invariant):
    - A victim is STRICTLY a real enterprise, government agency, educational institution, or healthcare facility that suffered a confirmed breach, ransomware encryption, or unauthorized data access.
@@ -135,6 +137,21 @@ ${rawContent}`
       const violations: string[] = [];
       if (parsed.japan_relevance !== "Direct" && parsed.severity === "Critical") {
         violations.push("Violation: Severity cannot be 'Critical' when japan_relevance is not 'Direct'. Lower severity to 'High'.");
+      }
+
+      // Automatically demote historical/retrospective reviews and annual reports to Info
+      const titleLower = (item.title || "").toLowerCase();
+      if (
+        titleLower.includes("事例まとめ") ||
+        titleLower.includes("事案一覧") ||
+        titleLower.includes("事例一覧") ||
+        titleLower.includes("統合報告書") ||
+        titleLower.includes("年次報告") ||
+        titleLower.includes("annual report") ||
+        titleLower.includes("year in review") ||
+        titleLower.includes("case studies")
+      ) {
+        parsed.severity = "Info";
       }
 
       if (violations.length > 0) {
@@ -279,10 +296,13 @@ ${rawContent}`
       const res = await request(this.generalLlmEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        headersTimeout: 300000,
+        bodyTimeout: 300000,
         body: JSON.stringify({
           model: this.generalLlmModel,
           messages: messages,
           temperature: 0.1,
+          max_tokens: 1500,
           response_format: { type: "json_object" }
         })
       });
@@ -302,7 +322,11 @@ ${rawContent}`
   private cleanAndParseJSON(raw: string): any | null {
     try {
       const cleaned = raw.replace(/```json\s*|\s*```/g, "").trim();
-      return JSON.parse(cleaned);
+      const obj = JSON.parse(cleaned);
+      if (!obj || typeof obj !== "object" || Object.keys(obj).length === 0) {
+        return null;
+      }
+      return obj;
     } catch {
       return null;
     }

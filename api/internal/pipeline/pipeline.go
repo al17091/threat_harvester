@@ -214,11 +214,13 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 		uniqueBatch = append(uniqueBatch, item)
 	}
 
-	// Persistent store deduplication & corporate PR notice filtering
+	// Persistent store deduplication & corporate PR / historical retrospective filtering
 	var newItems []models.ThreatItem
 	for _, item := range uniqueBatch {
-		if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
-			log.Printf("[Pipeline] Discarding corporate PR notice: %s (%s)", item.Title, item.URL)
+		if models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) ||
+			models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, item.RawContent) ||
+			(item.PublishedAt != nil && !item.PublishedAt.IsZero() && time.Since(*item.PublishedAt) > 30*24*time.Hour) {
+			log.Printf("[Pipeline] Discarding corporate PR / historical / old item: %s (%s)", item.Title, item.URL)
 			_ = p.store.MarkSeen(ctx, item, &models.EnrichedThreat{
 				Severity:       models.SeverityInfo,
 				JapanRelevance: models.JapanRelevanceNone,
@@ -335,6 +337,9 @@ func (p *Pipeline) RunAll(ctx context.Context, lookbackHours int, notifyDirectOn
 				if item.PublishedAt != nil && time.Since(*item.PublishedAt) > 7*24*time.Hour {
 					log.Printf("[Pipeline] Suppressing notification for older incident (published %s): %s",
 						item.PublishedAt.Format("2006-01-02"), enriched.TitleJa)
+					shouldNotify = false
+				} else if models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, item.RawContent) {
+					log.Printf("[Pipeline] Suppressing notification for historical retrospective incident: %s", enriched.TitleJa)
 					shouldNotify = false
 				} else if item.PublishedAt == nil && !item.HarvestedAt.IsZero() && time.Since(item.HarvestedAt) > 7*24*time.Hour {
 					log.Printf("[Pipeline] Suppressing notification for older incident (harvested %s): %s",

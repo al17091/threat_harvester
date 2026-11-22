@@ -150,7 +150,7 @@ func (m *ScraperManager) processClearnetQueue(ctx context.Context) {
 			fetchCtx, cancel := context.WithTimeout(ctx, time.Duration(m.cfg.ClearnetTimeoutSeconds)*time.Second)
 			defer cancel()
 
-			content, fetchErr := harvesters.FetchArticleContentWithTimeout(fetchCtx, item.URL, m.cfg.ClearnetTimeoutSeconds)
+			content, pubDate, fetchErr := harvesters.FetchArticleDetailsWithTimeout(fetchCtx, item.URL, m.cfg.ClearnetTimeoutSeconds)
 			if fetchErr != nil {
 				log.Printf("[ScraperManager] Clearnet fetch failed for %s (%s): %v", item.Title, item.URL, fetchErr)
 				_ = m.store.UpdateFetchStatus(ctx, item.ID, "failed", item.FetchAttempts+1, fetchErr.Error(), "")
@@ -162,12 +162,27 @@ func (m *ScraperManager) processClearnetQueue(ctx context.Context) {
 				return
 			}
 
+			if pubDate != nil && (item.PublishedAt == nil || item.PublishedAt.IsZero()) {
+				item.PublishedAt = pubDate
+				_ = m.store.UpdateItemPublishedAt(ctx, item.ID, *pubDate)
+			}
+
 			// Save scraped raw content
 			if err := m.store.UpdateFetchStatus(ctx, item.ID, "completed", item.FetchAttempts+1, "", content); err != nil {
 				log.Printf("[ScraperManager] Failed to update completed fetch status for %s: %v", item.ID, err)
 				return
 			}
 			log.Printf("[ScraperManager] Successfully scraped Clearnet article for %s (%d runes)", item.Title, len([]rune(content)))
+
+			// Skip auto re-analysis if item is old (> 30 days) or historical retrospective
+			if item.PublishedAt != nil && time.Since(*item.PublishedAt) > 30*24*time.Hour {
+				log.Printf("[ScraperManager] Skipping auto re-analysis for old article (%s): %s", item.PublishedAt.Format("2006-01-02"), item.Title)
+				return
+			}
+			if models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, content) {
+				log.Printf("[ScraperManager] Skipping auto re-analysis for historical retrospective: %s", item.Title)
+				return
+			}
 
 			m.postProcessEnrichment(ctx, item, content)
 		}(it)

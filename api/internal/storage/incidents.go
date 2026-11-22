@@ -172,6 +172,9 @@ func (s *SQLStore) FindOrCreateIncident(
 	if item.PublishedAt != nil && !item.PublishedAt.IsZero() {
 		itemTime = item.PublishedAt.UTC()
 	} else if !item.HarvestedAt.IsZero() {
+		if models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, item.RawContent) {
+			return nil, nil
+		}
 		itemTime = item.HarvestedAt.UTC()
 	}
 
@@ -195,6 +198,7 @@ func (s *SQLStore) FindOrCreateIncident(
 	// Non-threat content, service releases, PR announcements, corporate PR notices, and Info-level reports MUST NOT be treated as STIX cyber threat incidents.
 	if (enriched != nil && enriched.Severity == models.SeverityInfo) ||
 		models.IsServiceReleaseOrNonThreat(item, enriched) ||
+		models.IsHistoricalOrRetrospectiveNotice(item.Title, item.Summary, item.RawContent) ||
 		models.IsCorporatePRNotice(item.Title, item.Summary, item.RawContent) {
 		return nil, nil
 	}
