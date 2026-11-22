@@ -17,6 +17,22 @@ export interface AgentConfig {
  * Autonomous CTI Agent orchestrating extraction with General LLM,
  * entity resolution tools, and translation with Japanese Specialized Model.
  */
+function cleanIncidentTitle(rawTitle: string): string {
+  if (!rawTitle) return "";
+  let t = rawTitle.trim();
+  // Strip X / Twitter quote prefix: e.g. 'Someone on X: "..."', 'Someone (@handle) on X: "..."'
+  t = t.replace(/^.+?(\s+on\s+X:\s*["“]?|\s*\(@[^\)]+\)\s+on\s+X:\s*["“]?)/i, "");
+  // Strip trailing quote and / X
+  t = t.replace(/["”]?\s*(\/\s*X)?$/i, "");
+  // Strip news media suffixes: e.g. ' - 日本経済新聞', ' | NHKニュース', ' (毎日新聞)', ': Security NEXT'
+  t = t.replace(/\s*[-|｜]\s*[\w\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef\u4e00-\u9faf\s]+(ニュース|新聞|オンライン|ブログ|Media|NEXT).*$/i, "");
+  t = t.replace(/\s*\([\w\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef\u4e00-\u9faf\s]+(ニュース|新聞|オンライン)\)$/i, "");
+  // Strip sensational clickbait prefixes: '【速報】', '【独自】', '【緊急】'
+  t = t.replace(/^【(速報|独自|緊急|注目|重要|注目記事)】\s*/g, "");
+  t = t.replace(/^["'“”]/, "").replace(/["'“”]$/, "").trim();
+  return t;
+}
+
 export class CTIAgentService {
   private generalLlmEndpoint: string;
   private generalLlmModel: string;
@@ -90,11 +106,26 @@ Evaluation Criteria:
    - For vulnerability advisories or observation reports that lack concrete breach reports or specific attack attribution, threat_actors MUST be empty [].
    - NEVER guess or output vague terms like "Chinese APT", "Cybercriminals", "Attackers".
 
+5. title and title_ja (Incident Title Rules):
+   - You MUST generate an objective, concise, incident-focused title based on the verified security event, NOT the raw webpage or tweet headline.
+   - NEVER copy social media commentary, reporter account names, or informal quotes (e.g. NEVER '<Author> on X: ...', NEVER '@handle', NEVER quotes).
+   - NEVER include news publisher names or clickbait words (e.g. NEVER '(毎日新聞)', NEVER '| NHKニュース', NEVER '【独自】', NEVER '【速報】', NEVER 'ってすごいな').
+   - Standard format for 'title_ja':
+     - Unauthorized Access / Data Leak: "【不正アクセス】<被害組織>における情報流出事案" または "【情報漏洩】<被害組織>における顧客情報漏洩"
+     - Ransomware: "【ランサムウェア】<被害組織>に対する<攻撃者名>による攻撃" (攻撃者名が不明な場合は組織名のみ)
+     - Vulnerability: "【脆弱性】<対象製品名>における<影響/脆弱性内容> (<CVE番号>)"
+     - DDoS: "【DDoS攻撃】<被害組織>におけるサービス停止事案"
+     - If no specific victim/product is confirmed: "【サイバー攻撃】<観測された具体的な脅威事象>"
+   - Standard format for 'title':
+     - Same structure in technical English:
+       e.g., "[Unauthorized Access] Data Breach Incident at XYZ Corp", "[Ransomware] XYZ Corp Targeted by Qilin Gang", "[Vulnerability] Remote Code Execution in Apache HTTP Server (CVE-2026-XXXX)".
+
 Output pure JSON matching this exact schema:
 {
   "severity": "Critical" | "High" | "Medium" | "Low" | "Info",
   "japan_relevance": "Direct" | "Indirect" | "None",
-  "title": "Concise factual English incident title",
+  "title": "Concise factual English incident title based on content",
+  "title_ja": "客観的な事実に基づく正確な日本語インシデントタイトル",
   "summary": "Objective facts: victim, entry vector, compromised data (NO security advice/preaching)",
   "impact_analysis": "Confirmed scope of damage, affected versions, or exploitability (NO preaching)",
   "victim_orgs": ["Organization names mentioned in text"],
@@ -257,11 +288,52 @@ ${rawContent}`
       if (prod && prod.trim()) entityGlossary[prod.trim()] = prod.trim();
     }
 
-    // === Final Stage: PLaMo 3 Translation with Native PFML3 Glossary (Sequential to maximize CPU throughput) ===
-    const titleJa = await this.translator.translateToJapanese(
-      structuredOutput.title || item.title,
-      entityGlossary
-    );
+    // === Final Stage: Title Resolution & PLaMo 3 Translation with Native PFML3 Glossary ===
+    let cleanTitleEn = cleanIncidentTitle(structuredOutput.title || "");
+    let cleanTitleJa = cleanIncidentTitle(structuredOutput.title_ja || "");
+
+    let titleJa = cleanTitleJa;
+    if (!titleJa) {
+      if (cleanTitleEn) {
+        titleJa = await this.translator.translateToJapanese(cleanTitleEn, entityGlossary);
+      } else {
+        titleJa = cleanIncidentTitle(item.title);
+      }
+    }
+
+    // Synthesize fallback titles if noisy or still informal
+    if (!titleJa || /^(@|〜って|ってすごいな|信頼できなくな|なんか|結局|草|w{2,})/i.test(titleJa) || titleJa.length < 6) {
+      if (resolvedVictimOrgs.length > 0) {
+        if (structuredOutput.attack_type === "Ransomware") {
+          titleJa = `【ランサムウェア】${resolvedVictimOrgs[0]}に対する攻撃被害`;
+        } else if (structuredOutput.attack_type === "Data Breach") {
+          titleJa = `【不正アクセス】${resolvedVictimOrgs[0]}における情報流出事案`;
+        } else {
+          titleJa = `【サイバー攻撃】${resolvedVictimOrgs[0]}におけるセキュリティインシデント`;
+        }
+      } else if (structuredOutput.affected_products && structuredOutput.affected_products.length > 0) {
+        const cveStr = (structuredOutput.cves || []).length > 0 ? ` (${structuredOutput.cves.join(", ")})` : "";
+        titleJa = `【脆弱性】${structuredOutput.affected_products[0]}における脆弱性${cveStr}`;
+      } else if (structuredOutput.attack_type === "Vulnerability" && (structuredOutput.cves || []).length > 0) {
+        titleJa = `【脆弱性】${structuredOutput.cves.join(", ")}に関するセキュリティアドバイザリ`;
+      }
+    }
+
+    if (!cleanTitleEn || /^(@|someone on X)/i.test(cleanTitleEn) || cleanTitleEn.length < 6) {
+      if (resolvedVictimOrgs.length > 0) {
+        if (structuredOutput.attack_type === "Ransomware") {
+          cleanTitleEn = `[Ransomware] ${resolvedVictimOrgs[0]} Hit by Ransomware Attack`;
+        } else if (structuredOutput.attack_type === "Data Breach") {
+          cleanTitleEn = `[Data Breach] Unauthorized Access and Potential Data Breach at ${resolvedVictimOrgs[0]}`;
+        } else {
+          cleanTitleEn = `[Cyber Threat] Security Incident at ${resolvedVictimOrgs[0]}`;
+        }
+      } else if (structuredOutput.affected_products && structuredOutput.affected_products.length > 0) {
+        const cveStr = (structuredOutput.cves || []).length > 0 ? ` (${structuredOutput.cves.join(", ")})` : "";
+        cleanTitleEn = `[Vulnerability] Security Vulnerability in ${structuredOutput.affected_products[0]}${cveStr}`;
+      }
+    }
+
     const summaryJa = await this.translator.translateToJapanese(
       structuredOutput.summary || item.summary,
       entityGlossary
@@ -274,7 +346,7 @@ ${rawContent}`
       item_id: item.id,
       severity: structuredOutput.severity || "Info",
       japan_relevance: structuredOutput.japan_relevance || "None",
-      title: structuredOutput.title || item.title,
+      title: cleanTitleEn || structuredOutput.title || item.title,
       summary: structuredOutput.summary || "",
       impact_analysis: structuredOutput.impact_analysis || "",
       title_ja: titleJa || item.title,

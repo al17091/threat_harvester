@@ -557,10 +557,10 @@ func (s *SQLStore) FindOrCreateIncident(
 			// If EQUAL severity, fill in empty fields only.
 			if newSevScore > oldSevScore {
 				if enriched.Title != "" {
-					matched.Title = enriched.Title
+					matched.Title = models.CleanRawIncidentTitle(enriched.Title)
 				}
 				if enriched.TitleJa != "" {
-					matched.TitleJa = enriched.TitleJa
+					matched.TitleJa = models.CleanRawIncidentTitle(enriched.TitleJa)
 				}
 				if enriched.Summary != "" {
 					matched.Summary = enriched.Summary
@@ -580,13 +580,25 @@ func (s *SQLStore) FindOrCreateIncident(
 			} else {
 				// Equal or lower severity: only fill in missing fields, never overwrite existing higher/equal
 				if matched.Title == "" && enriched.Title != "" {
-					matched.Title = enriched.Title
+					matched.Title = models.CleanRawIncidentTitle(enriched.Title)
 				} else if isJapaneseText(matched.Title) && enriched.Title != "" && !isJapaneseText(enriched.Title) {
 					// Prefer English canonical title for matched.Title if previously assigned Japanese text
-					matched.Title = enriched.Title
+					matched.Title = models.CleanRawIncidentTitle(enriched.Title)
 				}
 				if matched.TitleJa == "" && enriched.TitleJa != "" {
-					matched.TitleJa = enriched.TitleJa
+					matched.TitleJa = models.CleanRawIncidentTitle(enriched.TitleJa)
+				}
+			}
+
+			// Clean existing noisy titles (e.g. from X/Twitter or conversational snippets)
+			if models.IsNoisySocialMediaTitle(matched.Title) || strings.Contains(matched.Title, " on X:") ||
+				models.IsNoisySocialMediaTitle(matched.TitleJa) || strings.Contains(matched.TitleJa, " on X:") {
+				synthEn, synthJa := models.SynthesizeIncidentTitles(item, enriched, normVictim, normProduct, cves, matched.AttackType, matched.ThreatActors)
+				if synthEn != "" {
+					matched.Title = synthEn
+				}
+				if synthJa != "" {
+					matched.TitleJa = synthJa
 				}
 				if matched.Summary == "" && enriched.Summary != "" {
 					matched.Summary = enriched.Summary
@@ -743,6 +755,10 @@ func (s *SQLStore) buildNewIncident(
 		vOrg = ""
 		normVictim = ""
 	}
+
+	synthEn, synthJa := models.SynthesizeIncidentTitles(item, enriched, vOrg, cleanProduct, cves, attackType, threatActors)
+	title = synthEn
+	titleJa = synthJa
 
 	rawContent := strings.TrimSpace(item.RawContent)
 	if rawContent == "" {

@@ -354,6 +354,8 @@ func BuildEnrichedThreatFromOutput(item models.ThreatItem, out AnalysisOutput) *
 		impactJa = impact
 	}
 
+	title = models.CleanRawIncidentTitle(title)
+	titleJa = models.CleanRawIncidentTitle(titleJa)
 	title = CleanChineseCTITerms(title, false)
 	titleJa = CleanChineseCTITerms(titleJa, true)
 	summary = CleanChineseCTITerms(summary, false)
