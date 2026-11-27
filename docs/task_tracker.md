@@ -90,6 +90,10 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 - [x] **Autonomous CTI Agent (`agent/`)**:
   - TypeScript microservice coordinating entity resolution (`entity_resolver`), General LLM extraction, and PLaMo translation.
   - Built pytest suite for Python harvesters, notifiers, models, and analyzers (24/24 passing, 72% coverage).
+- [x] **Agent Primary-Extraction Guardrails (`agent/`)**:
+  - Removed unused `@earendil-works/pi-coding-agent` (runtime image 340.5 MB -> 201.3 MB).
+  - Smart CTI-aware 4,000-char excerpting, deterministic severity rules (no discarded extractions), Go-aligned victim/actor lexicons, defensive-org separation, CVE verification/rescue, and actor source grounding.
+  - Vitest regression suite (48 tests, offline with mocked LLM/PLaMo/SearXNG).
 - [x] **Web (`web/`) Node.js Testing**:
   - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
 

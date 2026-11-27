@@ -1,4 +1,5 @@
-import { lookupJapanOrgAlias } from "./org_dictionary.js";
+import { isDefensiveOrAdvisoryOrg, lookupJapanOrgAlias } from "./org_dictionary.js";
+import { isGenericVictimOrg } from "../guardrails/sanitizer.js";
 import { request } from "undici";
 
 export interface EntityResolutionResult {
@@ -7,6 +8,8 @@ export interface EntityResolutionResult {
   confidence: "high" | "medium" | "low";
   source: "dictionary" | "search" | "none";
 }
+
+export type OfficialNameSearcher = (query: string) => Promise<string | null>;
 
 /**
  * Searches SearXNG for Japanese official company/organization name if not found in dictionary.
@@ -52,10 +55,14 @@ export async function searchOfficialName(
 /**
  * Resolves an entity string to its official Japanese representation.
  */
-export async function resolveJapaneseEntity(rawName: string): Promise<EntityResolutionResult> {
+export async function resolveJapaneseEntity(
+  rawName: string,
+  search: OfficialNameSearcher = searchOfficialName
+): Promise<EntityResolutionResult> {
   const trimmed = (rawName || "").trim();
-  const genericVictimPattern = /(?:中小企業|中小事業者|小規模事業者|中小|国内企業|日本企業|複数企業|各社|sme|small\s+and\s+medium|enterprise|organization|company|user|customer|vulnerability|advisory|patch|cve-\d+)/i;
-  if (!trimmed || genericVictimPattern.test(trimmed)) {
+  // Generic placeholders and defensive/advisory organizations (JPCERT/CC, IPA, NISC, CISA, ...)
+  // are never resolved as victims, so they can never elevate japan_relevance.
+  if (!trimmed || isGenericVictimOrg(trimmed) || isDefensiveOrAdvisoryOrg(trimmed)) {
     return {
       officialNameJa: null,
       isJapaneseEntity: false,
@@ -86,7 +93,7 @@ export async function resolveJapaneseEntity(rawName: string): Promise<EntityReso
   }
 
   // Try SearXNG fallback for unknown English corporate names
-  const searchMatch = await searchOfficialName(rawName);
+  const searchMatch = await search(trimmed);
   if (searchMatch) {
     return {
       officialNameJa: searchMatch,

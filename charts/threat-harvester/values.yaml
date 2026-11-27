@@ -52,7 +52,7 @@ worker:
       cpu: 100m
       memory: 128Mi
 
-# Autonomous CTI Agent Service (TypeScript + Pi Core + PLaMo 3 Translate)
+# Autonomous CTI Agent Service (TypeScript + deterministic guardrails + PLaMo 3 Translate)
 agent:
   enabled: true
   replicas: 1
