@@ -117,9 +117,21 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 - [x] **Backend API Credential Redaction (`api/`)**:
   - Removed the unmasked database URL from `GET /api/status`; redacted credentials in status, config, and raw config responses.
   - Configuration export is masked unless `mask_secrets=false` is passed.
-- [ ] **Backend API Access Control (`api/`)**:
-  - Add authentication or network restrictions for the Go API and narrow its CORS policy.
-- [ ] **Login Rate Limiting (`web/` or ingress)**.
+- [x] **Backend API Access Control (`api/`)**:
+  - Protected routes require `Authorization: Bearer` with `INTERNAL_API_TOKEN` and fail closed when it is unset; probes use `/healthz`.
+  - CORS is disabled unless `CORS_ALLOWED_ORIGINS` lists explicit origins.
+  - `GET /api/status` no longer reports internal service addresses.
+  - Retired the legacy Python API (`worker/api.py`).
+- [x] **Login Rate Limiting & Logout Revocation (`web/`)**:
+  - Per-client and global failure limits with `Retry-After`; logout revokes the session token (in memory, single replica).
+- [x] **Subpath Handling (`web/server-lib/`)**:
+  - Only the configured `BASE_PATH` is served as a subpath; length-prefixed RSC rows are never modified.
+- [x] **Organization Alias Precision (`agent/`)**:
+  - Japanese organization aliases match whole names only.
+- [ ] **Staging Verification of Access Control**:
+  - Provision `INTERNAL_API_TOKEN`, tighten network policy, and verify admin operations and login limiting behind the ingress.
+- [ ] **Feed Link Base URL (`api/`)**:
+  - RSS channel and self links are derived from the request host, which is the internal service name behind the proxy.
 - [ ] **Automated Security Scan Verification**:
   - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions (not yet executed).
 
