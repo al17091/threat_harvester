@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Main entrypoint for Threat Information Harvester (API and Batch runner)."""
+"""Main entrypoint for the Threat Information Harvester batch runner."""
 
 import logging
 import os
 import sys
-
-import uvicorn
 
 # Configure root logging
 logging.basicConfig(
@@ -30,27 +28,14 @@ def run_batch():
     logger.info(f"Batch execution finished successfully: {summary}")
 
 
-def run_api():
-    """Run FastAPI REST API server."""
-    port = int(os.getenv("PORT", "8000"))
-    host = os.getenv("HOST", "0.0.0.0")
-    logger.info(f"Starting Threat Information Harvester API on http://{host}:{port}")
-    uvicorn.run(
-        "worker.api:app",
-        host=host,
-        port=port,
-        reload=False,
-        log_level="info",
-        access_log=True,
-    )
-
-
 def main():
-    mode = os.getenv("MODE", "api").lower()
-    if mode == "batch" or "--batch" in sys.argv:
-        run_batch()
-    else:
-        run_api()
+    mode = os.getenv("MODE", "batch").lower()
+    if mode != "batch" and "--batch" not in sys.argv:
+        logger.error(
+            f"MODE={mode} is not supported: the Python API was retired. Use the Go API (api/) instead."
+        )
+        sys.exit(2)
+    run_batch()
 
 
 if __name__ == "__main__":

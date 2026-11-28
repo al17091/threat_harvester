@@ -310,16 +310,5 @@ def test_notion_command():
         click.echo("[!] Failed to create page in Notion. Check API key and database permissions.", err=True)
 
 
-@cli.command("serve")
-@click.option("--host", default="0.0.0.0", help="Bind host address")
-@click.option("--port", default=8080, type=int, help="Port to listen on")
-def serve_command(host: str, port: int):
-    """Launch the Threat Harvester Web Dashboard."""
-    import uvicorn
-
-    click.echo(f"[*] Launching Threat Harvester Dashboard on http://{host}:{port} ...")
-    uvicorn.run("worker.api:app", host=host, port=port, log_level="info")
-
-
 if __name__ == "__main__":
     cli()
