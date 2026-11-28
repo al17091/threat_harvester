@@ -143,7 +143,11 @@ secrets:
   # Existing secret name if managed externally (e.g. sealed-secrets / vault)
   existingSecret: ""
   # Or provide values directly here
-  adminPassword: "harvester2026"
+  # Dashboard admin login stays disabled while adminPassword is empty
+  adminPassword: ""
+  # Optional signing key for admin sessions (32+ random characters). When empty, a per-process
+  # key is generated, so sessions end on restart; set it when running multiple dashboard replicas
+  sessionSecret: ""
   aiApiKey: ""
   geminiApiKey: ""
   discordWebhookUrl: ""
