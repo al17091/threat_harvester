@@ -2,6 +2,7 @@
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9_.:-]+$/;
 
+// Keep in sync with the public routes in api/internal/api/server.go.
 const PUBLIC_READ_PATHS: readonly RegExp[] = [
   /^status$/,
   /^stats\/entities$/,

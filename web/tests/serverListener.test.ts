@@ -17,6 +17,11 @@ async function fakeHandle(req: http.IncomingMessage, res: http.ServerResponse) {
     res.end("1");
     return;
   }
+  if (url.startsWith("/api/headers")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ client: req.headers["x-harvester-client-ip"] }));
+    return;
+  }
   if (url.startsWith("/api/")) {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ csp: req.headers["content-security-policy"] ?? null }));
@@ -42,7 +47,7 @@ async function fakeHandle(req: http.IncomingMessage, res: http.ServerResponse) {
 }
 
 let origin = "";
-const server = http.createServer(createRequestListener({ handle: fakeHandle }));
+const server = http.createServer(createRequestListener({ handle: fakeHandle, configuredBasePath: "/threat" }));
 
 test.before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -119,7 +124,6 @@ test("subpath documents are rewritten with a nonce-bearing bootstrap first in he
     assert.equal(res.status, 200);
     assertNonces(res);
     assert.match(res.body, /<head><script nonce="[^"]+">window\.__RUNTIME_BASE_PATH__="\/threat";/);
-    assert.ok(res.body.includes('href="/threat/en"'));
     assert.ok(res.body.includes('src="/threat/_next/static/a.js"'));
     assert.ok(res.body.includes("日本語"));
     assert.equal(Number(res.headers["content-length"]), res.bytes);
@@ -152,7 +156,18 @@ test("static assets keep immutable caching and redirects stay under the subpath"
 test("encoded bodies pass through and HEAD reports no rewritten length", async () => {
   const encoded = await request("/threat/ja/encoded");
   assert.equal(encoded.body, '<head></head><a href="/en">');
+  const unknown = await request("/foo/ja", { "x-forwarded-prefix": "/foo" });
+  assert.doesNotMatch(unknown.body, /__RUNTIME_BASE_PATH__/);
   const head = await request("/threat/ja", {}, "HEAD");
   assert.equal(head.status, 200);
   assert.equal(head.headers["content-length"], undefined);
+});
+
+test("the client address header is always set by this server", async () => {
+  const res = await request("/api/headers", {
+    "x-harvester-client-ip": "203.0.113.9",
+    "x-forwarded-for": "198.51.100.7",
+  });
+  // No proxy is trusted here, so the socket address wins over both headers.
+  assert.equal(JSON.parse(res.body).client, "127.0.0.1");
 });

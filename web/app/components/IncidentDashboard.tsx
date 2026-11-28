@@ -166,7 +166,6 @@ interface SystemStatus {
     notified_items?: number;
     japan_direct_items?: number;
     backend?: string;
-    database_url?: string;
   };
   compliance?: {
     mode: string;
@@ -175,7 +174,6 @@ interface SystemStatus {
   };
   tor_proxy: {
     online: boolean;
-    url: string;
   };
   ai: {
     configured: boolean;
@@ -184,17 +182,14 @@ interface SystemStatus {
     general_llm?: {
       online?: boolean;
       model?: string;
-      endpoint?: string;
     };
     japanese_specialized?: {
       online?: boolean;
       model?: string;
-      endpoint?: string;
     };
     local_llm?: {
       online?: boolean;
       model?: string;
-      endpoint?: string;
     };
   };
   sinks: {
@@ -248,6 +243,7 @@ interface ConfigData {
   compliance?: ComplianceConfig;
   database?: {
     type?: string;
+    url?: string;
     host?: string;
     port?: number;
     name?: string;
@@ -255,6 +251,7 @@ interface ConfigData {
     sqlite_path?: string;
   };
   ai?: {
+    endpoint?: string;
     gemini_api_key?: string;
     gemini_model?: string;
   };
@@ -690,14 +687,8 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const [mounted, setMounted] = useState<boolean>(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const activePathname = mounted && typeof window !== "undefined" ? window.location.pathname : pathname;
-  const enHref = isAdmin ? "#" : withBasePath("/en", activePathname);
-  const jaHref = isAdmin ? "#" : withBasePath("/ja", activePathname);
+  const enHref = isAdmin ? "#" : withBasePath("/en");
+  const jaHref = isAdmin ? "#" : withBasePath("/ja");
 
   // Admin Authentication State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
@@ -753,7 +744,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const fetchEntityStats = async () => {
     setLoadingEntityStats(true);
     try {
-      const res = await fetch(withBasePath(`/api/stats/entities?limit=30`, pathname));
+      const res = await fetch(withBasePath(`/api/stats/entities?limit=30`));
       if (res.ok) {
         const data = await res.json();
         setEntityStats(data);
@@ -768,7 +759,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const fetchAllEntities = async () => {
     setLoadingAllEntities(true);
     try {
-      const res = await fetch(withBasePath(`/api/stats/entities?limit=500`, pathname));
+      const res = await fetch(withBasePath(`/api/stats/entities?limit=500`));
       if (res.ok) {
         const data = await res.json();
         setAllEntityStats(data);
@@ -781,7 +772,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   useEffect(() => {
-    fetch(withBasePath("/api/auth/verify", pathname))
+    fetch(withBasePath("/api/auth/verify"))
       .then((res) => res.json())
       .then((data) => {
         if (data.authenticated) {
@@ -797,7 +788,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setAuthLoading(true);
     setAuthError("");
     try {
-      const res = await fetch(withBasePath("/api/auth/verify", pathname), {
+      const res = await fetch(withBasePath("/api/auth/verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: adminPasswordInput }),
@@ -817,7 +808,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   };
 
   const handleAdminLogout = async () => {
-    await fetch(withBasePath("/api/auth/verify", pathname), { method: "DELETE" });
+    await fetch(withBasePath("/api/auth/verify"), { method: "DELETE" });
     setIsAdminAuthenticated(false);
     setAdminPasswordInput("");
     showToast("Logged out from Admin Console");
@@ -831,7 +822,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setSelectedIncident(item);
     setShowRawInModal(false);
     try {
-      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(item.id)}?lang=${currentLang}`, pathname));
+      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(item.id)}?lang=${currentLang}`));
       if (res.ok) {
         const full = await res.json();
         setSelectedIncident(full);
@@ -885,7 +876,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     if (!selectedIncident) return;
     setSavingLabels(true);
     try {
-      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(selectedIncident.id)}/update`, pathname), {
+      const res = await fetch(withBasePath(`/api/incidents/${encodeURIComponent(selectedIncident.id)}/update`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1013,7 +1004,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
     setGeneratingQueries(true);
     try {
-      const res = await fetch(withBasePath("/api/ai/generate-queries", pathname), {
+      const res = await fetch(withBasePath("/api/ai/generate-queries"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ directive, target_type: targetType, count: 3 }),
@@ -1048,7 +1039,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const fetchStatus = async () => {
     try {
-      const res = await fetch(withBasePath("/api/status", pathname));
+      const res = await fetch(withBasePath("/api/status"));
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -1078,7 +1069,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     if (!isAdmin || !isAdminAuthenticated) return;
     let es: EventSource | null = null;
     try {
-      es = new EventSource(withBasePath("/api/pipeline/stream", pathname));
+      es = new EventSource(withBasePath("/api/pipeline/stream"));
       es.addEventListener("stage", (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
@@ -1113,7 +1104,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch(withBasePath("/api/config", pathname));
+      const res = await fetch(withBasePath("/api/config"));
       if (res.ok) {
         const data = await res.json();
         setConfig(data);
@@ -1203,7 +1194,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
       params.append("offset", offset.toString());
       params.append("lang", currentLang);
 
-      const res = await fetch(withBasePath(`/api/incidents?${params.toString()}`, pathname));
+      const res = await fetch(withBasePath(`/api/incidents?${params.toString()}`));
       if (res.ok) {
         const data = await res.json();
         const items = data.items || [];
@@ -1259,7 +1250,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     setTerminalOpen(true);
     showToast("Threat intelligence harvest started.");
     try {
-      const res = await fetch(withBasePath("/api/pipeline/run", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/pipeline/run"), { method: "POST" });
       const data = await res.json();
       if (data.status !== "started") {
         showToast(data.message || "A job is already running", "error");
@@ -1273,7 +1264,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleToggleSource = async (sourceType: string, identifier: string, enabled: boolean) => {
     try {
-      const res = await fetch(withBasePath("/api/config/sources", pathname), {
+      const res = await fetch(withBasePath("/api/config/sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: sourceType, action: "toggle", identifier, enabled }),
@@ -1291,7 +1282,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleDeleteSource = async (sourceType: string, identifier: string) => {
     if (!window.confirm(`Delete source (${identifier})?`)) return;
     try {
-      const res = await fetch(withBasePath("/api/config/sources", pathname), {
+      const res = await fetch(withBasePath("/api/config/sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: sourceType, action: "delete", identifier }),
@@ -1308,7 +1299,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleSetComplianceMode = async (mode: string) => {
     try {
-      const res = await fetch(withBasePath("/api/config/compliance", pathname), {
+      const res = await fetch(withBasePath("/api/config/compliance"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
@@ -1328,7 +1319,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleToggleComplianceTier = async (tier: string, enabled: boolean) => {
     try {
-      const res = await fetch(withBasePath("/api/config/sources", pathname), {
+      const res = await fetch(withBasePath("/api/config/sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "toggle_compliance_tier", identifier: tier, enabled }),
@@ -1494,7 +1485,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
 
     try {
-      const res = await fetch(withBasePath("/api/config/sources", pathname), {
+      const res = await fetch(withBasePath("/api/config/sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ source_type: type, action: "add", data }),
@@ -1561,7 +1552,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
 
     try {
-      const res = await fetch(withBasePath("/api/config/sources", pathname), {
+      const res = await fetch(withBasePath("/api/config/sources"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1587,7 +1578,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
   const handleSaveConfig = async () => {
     try {
-      const res = await fetch(withBasePath("/api/config/save", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/config/save"), { method: "POST" });
       if (res.ok) {
         showToast("Configuration saved to config.yaml");
       } else {
@@ -1601,7 +1592,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleTestNotify = async () => {
     setTestingNotify(true);
     try {
-      const res = await fetch(withBasePath("/api/test/notify", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/test/notify"), { method: "POST" });
       if (res.ok) {
         showToast("Test alert dispatched to configured Webhooks.");
       }
@@ -1615,7 +1606,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleTestNotion = async () => {
     setTestingNotion(true);
     try {
-      const res = await fetch(withBasePath("/api/test/notion", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/test/notion"), { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         showToast(`Notion page created successfully (ID: ${data.page_id.slice(0, 8)}...)`);
@@ -1632,7 +1623,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleTranslateIncidents = async () => {
     showToast("Starting incident translation batch...");
     try {
-      const res = await fetch(withBasePath("/api/pipeline/translate-incidents", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/pipeline/translate-incidents"), { method: "POST" });
       const data = await res.json();
       showToast(data.message || `Translated ${data.translated || 0} incidents`);
       await fetchStatus();
@@ -1645,7 +1636,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleBackfillIncidents = async () => {
     showToast("Re-clustering parent incidents...");
     try {
-      const res = await fetch(withBasePath("/api/pipeline/backfill-incidents", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/pipeline/backfill-incidents"), { method: "POST" });
       const data = await res.json();
       showToast(data.message || `Clustered ${data.clustered || 0} incidents`);
       await fetchStatus();
@@ -1658,7 +1649,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   const handleBackfillArticles = async () => {
     showToast("Scraping article contents in background...");
     try {
-      const res = await fetch(withBasePath("/api/pipeline/backfill-articles", pathname), { method: "POST" });
+      const res = await fetch(withBasePath("/api/pipeline/backfill-articles"), { method: "POST" });
       const data = await res.json();
       showToast(data.message || "Article content backfill started");
       await fetchStatus();
@@ -1742,7 +1733,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
           <div className="mt-6 pt-6 border-t border-slate-800 text-center">
             <a
-              href="/"
+              href={withBasePath("/")}
               className="inline-flex items-center text-xs text-slate-400 hover:text-cyan-400 transition"
             >
               <ChevronLeft className="w-3.5 h-3.5 mr-1" />
@@ -1803,7 +1794,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
                       e.preventDefault();
                       setCurrentLang("en");
-                      const target = withBasePath("/en", typeof window !== "undefined" ? window.location.pathname : pathname);
+                      const target = withBasePath("/en");
                       if (typeof window !== "undefined" && window.location.pathname !== target) {
                         window.history.pushState({}, "", target);
                       }
@@ -1830,7 +1821,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                     if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey && e.button === 0) {
                       e.preventDefault();
                       setCurrentLang("ja");
-                      const target = withBasePath("/ja", typeof window !== "undefined" ? window.location.pathname : pathname);
+                      const target = withBasePath("/ja");
                       if (typeof window !== "undefined" && window.location.pathname !== target) {
                         window.history.pushState({}, "", target);
                       }
@@ -1850,7 +1841,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
 
             {/* RSS Feed is available to both Public and Admin */}
             <a
-              href={withBasePath(`/api/feed.xml?lang=${currentLang}`, pathname)}
+              href={withBasePath(`/api/feed.xml?lang=${currentLang}`)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition cursor-pointer"
@@ -1881,7 +1872,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </button>
 
                 <a
-                  href={withBasePath("/api/config/export", pathname)}
+                  href={withBasePath("/api/config/export")}
                   download="config.yaml"
                   className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
                 >
@@ -1908,7 +1899,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </button>
 
                 <a
-                  href="/"
+                  href={withBasePath("/")}
                   className="inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
                   title="Return to Public Threat Feed"
                 >
@@ -3196,7 +3187,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 </button>
 
                 <a
-                  href={withBasePath("/api/config/export", pathname)}
+                  href={withBasePath("/api/config/export")}
                   download="config.yaml"
                   className="inline-flex items-center px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
                 >
@@ -4036,14 +4027,14 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
               </div>
               <div className="flex space-x-2">
                 <a
-                  href={withBasePath("/api/config/export?mask_secrets=true", pathname)}
+                  href={withBasePath("/api/config/export?mask_secrets=true")}
                   download="config.yaml"
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
                 >
                   Download with Masked Secrets
                 </a>
                 <a
-                  href={withBasePath("/api/config/export?mask_secrets=false", pathname)}
+                  href={withBasePath("/api/config/export?mask_secrets=false")}
                   download="config.yaml"
                   className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow transition"
                 >
@@ -4096,7 +4087,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       Database Engine ({status?.database?.backend === "postgresql" ? "PostgreSQL" : "SQLite"})
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-sm">
-                      {status?.database?.database_url}
+                      {config?.database?.url || (config?.database?.type === "postgres" ? config?.database?.host : config?.database?.sqlite_path)}
                     </div>
                   </div>
                   <span className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -4107,7 +4098,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                 <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-semibold text-slate-200">Tor SOCKS5 Onion Proxy</div>
-                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{status?.tor_proxy?.url}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono">{config?.network?.tor_proxy_url}</div>
                   </div>
                   <span
                     className={`px-2.5 py-1 rounded text-xs font-semibold flex items-center ${
@@ -4131,7 +4122,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       Local LLM Engine (k3s / LiteLLM)
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-xs">
-                      {status?.ai?.local_llm?.model || "qwen2.5-3b-instruct"} ({status?.ai?.local_llm?.endpoint || "LiteLLM"})
+                      {status?.ai?.local_llm?.model || "qwen2.5-3b-instruct"} ({config?.ai?.endpoint || "LiteLLM"})
                     </div>
                   </div>
                   <span

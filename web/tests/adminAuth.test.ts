@@ -4,6 +4,8 @@ import {
   SESSION_TTL_SECONDS,
   createSessionToken,
   getAdminPassword,
+  revokeSessionToken,
+  revokedSessionCount,
   verifyPassword,
   verifySessionToken,
 } from "../app/security/adminAuth.ts";
@@ -67,5 +69,26 @@ test("a per-process secret is used when SESSION_SECRET is unset", () => {
   const ephemeral = { ADMIN_PASSWORD: env.ADMIN_PASSWORD };
   const token = createSessionToken(ephemeral, now)!;
   assert.equal(verifySessionToken(token, ephemeral, now), true);
+  assert.equal(verifySessionToken(token, env, now), false);
+});
+
+test("logout revokes only that session, until it would have expired", () => {
+  const [first, second] = [createSessionToken(env, now)!, createSessionToken(env, now)!];
+  revokeSessionToken(first, env, now);
+  assert.equal(verifySessionToken(first, env, now), false);
+  assert.equal(verifySessionToken(second, env, now), true);
+
+  const before = revokedSessionCount();
+  for (const junk of [undefined, "", "authenticated", `${second}x`]) revokeSessionToken(junk, env, now);
+  assert.equal(revokedSessionCount(), before);
+
+  revokeSessionToken(undefined, env, now + SESSION_TTL_SECONDS * 1000);
+  assert.equal(revokedSessionCount(), 0);
+});
+
+test("revocations are shared between separately loaded module instances", async () => {
+  const copy = await import(`../app/security/adminAuth.ts?copy=${Date.now()}`);
+  const token = createSessionToken(env, now)!;
+  copy.revokeSessionToken(token, env, now);
   assert.equal(verifySessionToken(token, env, now), false);
 });

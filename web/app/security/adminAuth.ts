@@ -66,5 +66,35 @@ export function verifySessionToken(
   const wanted = Buffer.from(expected.toString("base64url"));
   if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) return false;
 
-  return Number(expires) > Math.floor(now / 1000);
+  return Number(expires) > Math.floor(now / 1000) && !revokedSessions().has(id);
+}
+
+/**
+ * Revoked session ids with their expiry. The list lives in this process: a restart clears it and
+ * other replicas do not see it. It is on globalThis because route bundles may not share modules.
+ */
+function revokedSessions(): Map<string, number> {
+  const store = globalThis as typeof globalThis & { __adminRevokedSessions?: Map<string, number> };
+  store.__adminRevokedSessions ??= new Map();
+  return store.__adminRevokedSessions;
+}
+
+/** Invalidates a session before its expiry. Only valid tokens are stored. */
+export function revokeSessionToken(
+  token: string | undefined,
+  env: Env = process.env,
+  now: number = Date.now()
+): void {
+  const revoked = revokedSessions();
+  // Expired tokens are rejected anyway, so their entries can go.
+  for (const [id, expires] of revoked) {
+    if (expires <= Math.floor(now / 1000)) revoked.delete(id);
+  }
+  if (!token || !verifySessionToken(token, env, now)) return;
+  const [, expires, id] = token.split(".");
+  revoked.set(id, Number(expires));
+}
+
+export function revokedSessionCount(): number {
+  return revokedSessions().size;
 }

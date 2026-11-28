@@ -1,26 +1,13 @@
 // Pure security helpers for the custom Next.js server. CommonJS so that server.js can require it
 // and the node:test suite can import it without a build step.
 const crypto = require("crypto");
+const { createFlightRewriter } = require("./flight");
 
 // Subpath prefixes end up inside HTML attributes and inline script, so only plain segments pass.
 const SAFE_PREFIX_RE = /^(?:\/[A-Za-z0-9_-]+)+$/;
 const MAX_PREFIX_LENGTH = 64;
 
 const DOCUMENT_CACHE_CONTROL = "private, no-store, max-age=0";
-
-const ROOT_SEGMENTS = new Set([
-  "",
-  "en",
-  "ja",
-  "admin",
-  "api",
-  "rss",
-  "feed.xml",
-  "_next",
-  "icon.svg",
-  "favicon.ico",
-  "apple-touch-icon.png",
-]);
 
 function generateNonce() {
   return crypto.randomBytes(16).toString("base64");
@@ -34,22 +21,15 @@ function normalizePrefix(raw) {
   return collapsed;
 }
 
-/** Resolves the subpath prefix from the proxy header, configuration, or request path. */
+/**
+ * Resolves whether a request is served under the configured subpath. Only that prefix is ever
+ * used: either the path carries it, or a proxy that strips it names it in X-Forwarded-Prefix.
+ */
 function detectSubpathPrefix(headers, pathname, configuredBasePath) {
-  const headerPrefix = normalizePrefix(headers["x-forwarded-prefix"]);
-  if (headerPrefix) return headerPrefix;
-
-  if (
-    configuredBasePath &&
-    (pathname === configuredBasePath || pathname.startsWith(`${configuredBasePath}/`))
-  ) {
-    return configuredBasePath;
-  }
-
-  const parts = (pathname || "").split("/").filter(Boolean);
-  const rootIdx = parts.findIndex((p) => ROOT_SEGMENTS.has(p));
-  if (rootIdx === 0 || parts.length === 0) return "";
-  return normalizePrefix((rootIdx > 0 ? parts.slice(0, rootIdx) : parts).join("/"));
+  const base = normalizePrefix(configuredBasePath);
+  if (!base) return "";
+  if (pathname === base || pathname.startsWith(`${base}/`)) return base;
+  return normalizePrefix(headers["x-forwarded-prefix"]) === base ? base : "";
 }
 
 function buildCsp(nonce, { dev = false } = {}) {
@@ -96,18 +76,50 @@ function buildBootstrapScript(prefix, nonce) {
   );
 }
 
+// The inline scripts through which Next.js streams the RSC payload into HTML.
+const FLIGHT_PUSH_RE =
+  /(<script[^>]*>self\.__next_f\.push\()\[([13]),("[^"\\]*(?:\\.[^"\\]*)*")\](\)<\/script>)/g;
+
+/** Rewrites the payload chunks as one stream, because rows may span several scripts. */
+function rewriteInlineFlight(html, prefix) {
+  const matches = [...html.matchAll(FLIGHT_PUSH_RE)];
+  if (!matches.length) return html;
+
+  const rewriter = createFlightRewriter(prefix);
+  // Type 1 chunks are text, type 3 chunks are base64-encoded binary.
+  const encodingOf = (match) => (match[2] === "1" ? "utf8" : "base64");
+  const chunks = matches.map((m) => rewriter.push(Buffer.from(JSON.parse(m[3]), encodingOf(m))));
+  chunks[chunks.length - 1] = Buffer.concat([chunks[chunks.length - 1], rewriter.flush()]);
+
+  let out = "";
+  let last = 0;
+  matches.forEach((m, i) => {
+    const payload = scriptJson(chunks[i].toString(encodingOf(m)));
+    out += `${html.slice(last, m.index)}${m[1]}[${m[2]},${payload}]${m[4]}`;
+    last = m.index + m[0].length;
+  });
+  return out + html.slice(last);
+}
+
 function rewriteHtmlAssets(body, prefix, nonce) {
   if (!prefix) return body;
-  // Function replacers: "$" sequences are never expanded in the inserted text.
-  const addPrefix = (_match, open, path, close) => `${open}${prefix}/${path}${close}`;
-  return body
-    .replace(/(["'])\/_next\//g, (_match, quote) => `${quote}${prefix}/_next/`)
-    .replace(/\\\/_next\\\//g, () => `\\${prefix}\\/_next\\/`)
-    .replace(/(href=["'])\/(icon\.svg|favicon\.ico[^\s"'>]*|apple-touch-icon\.png)(["'])/g, addPrefix)
-    .replace(/(href=["'])\/(en|ja|admin|api\/[^\s"'>]+|rss|feed\.xml)(["'])/g, addPrefix)
-    .replace(/(\\"href\\":\s*\\")\/(en|ja|admin|api\/[^"\\\s]+|rss|feed\.xml)(\\")/g, addPrefix)
-    .replace(/("href":\s*")\/(en|ja|admin|api\/[^"\s]+|rss|feed\.xml)(")/g, addPrefix)
+  // Only asset attributes are touched: page links are already built with the prefix, and the
+  // quotes of any text content are entity-encoded. Function replacers never expand "$".
+  return rewriteInlineFlight(body, prefix)
+    .replace(
+      /\b(href|src)=(["'])\/(_next\/|icon\.svg|favicon\.ico|apple-touch-icon\.png)/g,
+      (_match, attribute, quote, path) => `${attribute}=${quote}${prefix}/${path}`
+    )
     .replace("<head>", () => `<head>${buildBootstrapScript(prefix, nonce)}`);
+}
+
+/** Rewrites a complete HTML or RSC response body for the subpath. */
+function rewriteDocument(body, contentType, prefix, nonce) {
+  if (String(contentType).includes("text/x-component")) {
+    const rewriter = createFlightRewriter(prefix);
+    return Buffer.concat([rewriter.push(body), rewriter.flush()]);
+  }
+  return Buffer.from(rewriteHtmlAssets(body.toString("utf8"), prefix, nonce), "utf8");
 }
 
 function isStaticOrApiPath(path) {
@@ -138,6 +150,7 @@ module.exports = {
   scriptJson,
   buildBootstrapScript,
   rewriteHtmlAssets,
+  rewriteDocument,
   isStaticOrApiPath,
   isDocumentContentType,
 };

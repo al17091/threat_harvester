@@ -1,5 +1,8 @@
 const { parse } = require("url");
 const security = require("./security");
+const { resolveClientIp } = require("./clientIp");
+
+const CLIENT_IP_HEADER = "x-harvester-client-ip";
 
 /** Moves headers passed to writeHead onto the response so they can be inspected and amended. */
 function absorbHeaders(res, headers) {
@@ -84,7 +87,7 @@ function bufferAndRewrite(req, res, prefix, nonce) {
         // The unrewritten length would be wrong for the corresponding GET.
         res.removeHeader("content-length");
       } else {
-        body = Buffer.from(security.rewriteHtmlAssets(body.toString("utf8"), prefix, nonce), "utf8");
+        body = security.rewriteDocument(body, res.getHeader("content-type"), prefix, nonce);
         res.removeHeader("transfer-encoding");
         res.setHeader("content-length", body.length);
       }
@@ -103,7 +106,10 @@ function bufferAndRewrite(req, res, prefix, nonce) {
  * Wraps the Next.js request handler with security headers, per-request CSP nonces and dynamic
  * subpath support.
  */
-function createRequestListener({ handle, dev = false, configuredBasePath = "" }) {
+function createRequestListener({ handle, dev = false, configuredBasePath = "", trustedProxyHops = 0 }) {
+  // Tells route handlers in this process that the client address header comes from this server.
+  globalThis.__harvesterClientIpTrusted = true;
+
   return async function listener(req, res) {
     let discardBuffered = null;
     try {
@@ -113,6 +119,9 @@ function createRequestListener({ handle, dev = false, configuredBasePath = "" })
       // Next.js reads the nonce from the request's CSP header, so client-supplied values must go.
       delete req.headers["content-security-policy"];
       delete req.headers["content-security-policy-report-only"];
+      delete req.headers[CLIENT_IP_HEADER];
+      const clientIp = resolveClientIp(req.socket.remoteAddress, req.headers["x-forwarded-for"], trustedProxyHops);
+      if (clientIp) req.headers[CLIENT_IP_HEADER] = clientIp;
 
       const parsedUrl = parse(req.url || "/", true);
       const pathname = parsedUrl.pathname || "/";

@@ -63,16 +63,27 @@ test("normalizePrefix accepts plain path segments only", () => {
   }
 });
 
-test("detectSubpathPrefix never returns an unsafe prefix", () => {
-  const hostile = { "x-forwarded-prefix": '/x";alert(1)//' };
-  assert.equal(detectSubpathPrefix(hostile, "/ja", ""), "");
-  assert.equal(detectSubpathPrefix(hostile, "/threat/ja", ""), "/threat");
-  assert.equal(detectSubpathPrefix({}, '/a"><img/src/onerror=alert(1)>/ja', ""), "");
-  assert.equal(detectSubpathPrefix({}, '/a"><svg>', ""), "");
-  assert.equal(detectSubpathPrefix({ "x-forwarded-prefix": "/threat" }, "/ja", ""), "/threat");
+test("detectSubpathPrefix only ever returns the configured prefix", () => {
+  const header = (value: string) => ({ "x-forwarded-prefix": value });
   assert.equal(detectSubpathPrefix({}, "/threat", "/threat"), "/threat");
-  assert.equal(detectSubpathPrefix({}, "/ja", ""), "");
-  assert.equal(detectSubpathPrefix({}, "/", ""), "");
+  assert.equal(detectSubpathPrefix({}, "/threat/ja", "/threat"), "/threat");
+  // A proxy that strips the prefix names it in the header.
+  assert.equal(detectSubpathPrefix(header("/threat"), "/ja", "/threat"), "/threat");
+  assert.equal(detectSubpathPrefix(header("/threat/"), "/ja", "/threat"), "/threat");
+  for (const [headers, path] of [
+    [{}, "/ja"],
+    [{}, "/"],
+    [{}, "/nope"],
+    [{}, "/foo/ja"],
+    [{}, "/threatening/ja"],
+    [header("/other"), "/ja"],
+    [header('/x";alert(1)//'), "/ja"],
+    [{}, '/a"><img/src/onerror=alert(1)>/ja'],
+  ] as const) {
+    assert.equal(detectSubpathPrefix(headers, path, "/threat"), "", path);
+  }
+  // Without a configured prefix there is no subpath mode at all.
+  assert.equal(detectSubpathPrefix(header("/threat"), "/threat/ja", ""), "");
 });
 
 test("inline bootstrap script cannot be broken out of", () => {
@@ -84,13 +95,16 @@ test("inline bootstrap script cannot be broken out of", () => {
   );
 });
 
-test("rewriteHtmlAssets prefixes assets and injects one nonce-bearing bootstrap", () => {
-  const html = '<html><head><link href="/icon.svg"></head><body><a href="/en">en</a><script src="/_next/a.js"></script><head></body></html>';
+test("rewriteHtmlAssets prefixes asset attributes and injects one nonce-bearing bootstrap", () => {
+  const text = 'a href=&quot;/_next/x&quot; "/_next/y" href="/en"';
+  const html = `<html><head><link href="/icon.svg"></head><body><a href="/en">en</a><script src="/_next/a.js"></script><p>${text}</p><head></body></html>`;
   const out = rewriteHtmlAssets(html, "/threat", "n0nce");
   assert.match(out, /^<html><head><script nonce="n0nce">/);
   assert.equal(out.match(/__RUNTIME_BASE_PATH__/g)?.length, 1);
   assert.ok(out.includes('href="/threat/icon.svg"'));
-  assert.ok(out.includes('href="/threat/en"'));
   assert.ok(out.includes('src="/threat/_next/a.js"'));
+  // Page links are built with the prefix by the app, and text content is never touched.
+  assert.ok(out.includes('<a href="/en">'));
+  assert.ok(out.includes(`<p>${text}</p>`));
   assert.equal(rewriteHtmlAssets(html, "", "n0nce"), html);
 });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "../../security/adminAuth";
 import { canonicalApiPath, isPublicApiRequest } from "../../security/apiPolicy";
+import { buildBackendHeaders } from "../../security/proxyHeaders";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,8 @@ async function handleProxy(
   const targetUrl = `${getBackendUrl()}/api/${path}${search}`;
 
   // Deny by default: only the listed read endpoints are available without an admin session
-  if (!isPublicApiRequest(req.method, path)) {
+  const privileged = !isPublicApiRequest(req.method, path);
+  if (privileged) {
     if (!verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value)) {
       return NextResponse.json(
         { error: "Unauthorized: Administrator authentication required" },
@@ -30,10 +32,8 @@ async function handleProxy(
     }
   }
 
-  const headers = new Headers(req.headers);
-  headers.delete("host");
-  // The backend does not use browser credentials, so the session token stays in this service
-  headers.delete("cookie");
+  // Past the check above, a privileged request has a verified administrator session
+  const headers = buildBackendHeaders(req.headers, { privileged, token: process.env.INTERNAL_API_TOKEN });
 
   try {
     const init: RequestInit = {
@@ -63,7 +63,8 @@ async function handleProxy(
   } catch (error) {
     console.error(`[API Proxy Error] Failed to proxy to ${targetUrl}:`, error);
     return NextResponse.json(
-      { error: "Backend service unreachable", detail: String(error) },
+      // The error detail names the internal service host, so it is only logged
+      { error: "Backend service unreachable" },
       { status: 502 }
     );
   }
