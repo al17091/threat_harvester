@@ -20,6 +20,7 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.mjs ./
 COPY --from=builder /app/server.js ./
+COPY --from=builder /app/server-lib ./server-lib
 
 EXPOSE 3000
 

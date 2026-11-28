@@ -1,17 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // HTML carries a per-request CSP nonce, so it must not be revalidated against an ETag.
+  generateEtags: false,
+  poweredByHeader: false,
+  // Security headers and document caching are applied per request in server-lib/listener.js.
   async headers() {
+    const revalidate = [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }];
     return [
-      {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=0, must-revalidate",
-          },
-        ],
-      },
+      { source: "/rss", headers: revalidate },
+      { source: "/feed.xml", headers: revalidate },
       {
         source: "/api/:path*",
         headers: [
