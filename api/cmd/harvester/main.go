@@ -107,6 +107,9 @@ func runWeb(ctx context.Context, store storage.Store) {
 		}
 	}
 
+	if err := api.ValidateSecurityEnv(); err != nil {
+		log.Fatalf("Invalid security configuration: %v", err)
+	}
 	srv := api.NewServer(store)
 	srv.StartScheduler(ctx)
 
@@ -336,7 +339,7 @@ func runTestNotify(ctx context.Context) {
 	srv := api.NewServer(nil)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/test/notify", nil)
 	rr := &stubResponseWriter{header: make(http.Header)}
-	srv.ServeHTTP(rr, req)
+	srv.ServeTestNotify(rr, req)
 	fmt.Println(string(rr.body))
 }
 
@@ -344,7 +347,7 @@ func runTestNotion(ctx context.Context) {
 	srv := api.NewServer(nil)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "/api/test/notion", nil)
 	rr := &stubResponseWriter{header: make(http.Header)}
-	srv.ServeHTTP(rr, req)
+	srv.ServeTestNotion(rr, req)
 	fmt.Println(string(rr.body))
 }
 

@@ -50,6 +50,8 @@ type Server struct {
 	llmMu        sync.Mutex
 	lastLLMCheck time.Time
 	lastLLMState bool
+
+	auth AuthConfig
 }
 
 func (s *Server) broadcastSSEStage(data []byte) {
@@ -67,7 +69,13 @@ func NewServer(store storage.Store) *Server {
 	logger.InitGlobalLogger()
 	cfg := config.GetSettings().GetConfig()
 	pipe := pipeline.NewPipeline(store)
+	auth, err := AuthConfigFromEnv()
+	if err != nil {
+		log.Printf("[Auth] ERROR: %v", err)
+	}
+	auth.logStatus()
 	s := &Server{
+		auth:                auth,
 		store:               store,
 		pipeline:            pipe,
 		scraperMgr:          scraper.NewScraperManager(store, pipe.Analyzer(), cfg.Scraper, cfg.Network),
@@ -98,23 +106,28 @@ func (s *Server) setupRoutes() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// Browsers reach the API through the web proxy, so CORS is off unless origins are listed.
+	if origins, err := CORSOriginsFromEnv(); err != nil {
+		log.Printf("[Auth] ERROR: CORS disabled: %v", err)
+	} else if len(origins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins: origins,
+			AllowedMethods: []string{"GET", "HEAD", "POST", "OPTIONS"},
+			AllowedHeaders: []string{"Accept", "Authorization", "Content-Type"},
+			MaxAge:         300,
+		}))
+	}
 
 	r.Get("/", s.handleRoot)
 	r.Head("/", s.handleRoot)
+	r.Get("/healthz", s.handleHealthz)
 	r.Get("/rss", s.handleRSSFeed)
 	r.Get("/rss/{lang}", s.handleRSSFeed)
 	r.Get("/feed.xml", s.handleRSSFeed)
 	r.Get("/feed.xml/{lang}", s.handleRSSFeed)
 
 	r.Route("/api", func(r chi.Router) {
+		// Public read-only routes. Keep in sync with web/app/security/apiPolicy.ts.
 		r.Get("/rss", s.handleRSSFeed)
 		r.Get("/rss/{lang}", s.handleRSSFeed)
 		r.Get("/feed.xml", s.handleRSSFeed)
@@ -123,28 +136,57 @@ func (s *Server) setupRoutes() {
 		r.Get("/stats/entities", s.handleGetEntityStats)
 		r.Get("/incidents", s.handleListIncidents)
 		r.Get("/incidents/{id}", s.handleGetIncident)
-		r.Post("/incidents/{id}/update", s.handleUpdateIncidentLabels)
 
-		r.Get("/config", s.handleGetConfig)
-		r.Get("/config/raw", s.handleGetRawConfig)
-		r.Get("/config/export", s.handleExportConfig)
-		r.Post("/config/save", s.handleSaveConfig)
-		r.Post("/config/sources", s.handleManageSources)
-		r.Post("/config/compliance", s.handleUpdateCompliance)
+		// Everything else requires the internal service token. Add new routes here by default.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireInternalToken)
 
-		r.Post("/pipeline/run", s.handleTriggerPipeline)
-		r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
-		r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
-		r.Post("/pipeline/translate-incidents", s.handleTranslateIncidents)
-		r.Post("/pipeline/remediate-japanese", s.handleRemediateJapanese)
-		r.Get("/pipeline/stage", s.handleGetPipelineStage)
-		r.Get("/pipeline/stream", s.handlePipelineStream)
-		r.Get("/pipeline/logs", s.handleGetPipelineLogs)
-		r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
-		r.Post("/test/notify", s.handleTestNotify)
-		r.Post("/test/notion", s.handleTestNotion)
-		r.Post("/ai/generate-queries", s.handleGenerateQueries)
+			r.Post("/incidents/{id}/update", s.handleUpdateIncidentLabels)
+
+			r.Get("/config", s.handleGetConfig)
+			r.Get("/config/raw", s.handleGetRawConfig)
+			r.Get("/config/export", s.handleExportConfig)
+			r.Post("/config/save", s.handleSaveConfig)
+			r.Post("/config/sources", s.handleManageSources)
+			r.Post("/config/compliance", s.handleUpdateCompliance)
+
+			r.Post("/pipeline/run", s.handleTriggerPipeline)
+			r.Post("/pipeline/backfill-incidents", s.handleBackfillIncidents)
+			r.Post("/pipeline/backfill-articles", s.handleBackfillArticles)
+			r.Post("/pipeline/translate-incidents", s.handleTranslateIncidents)
+			r.Post("/pipeline/remediate-japanese", s.handleRemediateJapanese)
+			r.Get("/pipeline/stage", s.handleGetPipelineStage)
+			r.Get("/pipeline/stream", s.handlePipelineStream)
+			r.Get("/pipeline/logs", s.handleGetPipelineLogs)
+			r.Post("/pipeline/logs/clear", s.handleClearPipelineLogs)
+			r.Post("/test/notify", s.handleTestNotify)
+			r.Post("/test/notion", s.handleTestNotion)
+			r.Post("/ai/generate-queries", s.handleGenerateQueries)
+		})
 	})
+}
+
+// handleHealthz is the liveness and readiness probe: no authentication, no dependencies.
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	jsonResponse(w, http.StatusOK, map[string]string{"status": "healthy"})
+}
+
+// ServeTestNotify and ServeTestNotion let the CLI run the notification tests in-process,
+// without going through the authenticated HTTP routes.
+func (s *Server) ServeTestNotify(w http.ResponseWriter, r *http.Request) { s.handleTestNotify(w, r) }
+
+// ServeTestNotion is the Notion counterpart of ServeTestNotify.
+func (s *Server) ServeTestNotion(w http.ResponseWriter, r *http.Request) { s.handleTestNotion(w, r) }
+
+// publicDatabaseStats selects the counters that the anonymous status endpoint may report.
+func publicDatabaseStats(stats map[string]interface{}) map[string]interface{} {
+	public := map[string]interface{}{}
+	for _, key := range []string{"total_items", "total_incidents", "notified_items", "japan_direct_items", "backend"} {
+		if value, ok := stats[key]; ok {
+			public[key] = value
+		}
+	}
+	return public
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +257,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	dbStats, err := s.store.GetStats(ctx)
 	if err != nil {
-		dbStats = map[string]interface{}{"error": err.Error()}
+		// Driver errors name the database host, so only the log gets the detail.
+		log.Printf("[Status] Database statistics unavailable: %v", err)
+		dbStats = nil
 	}
 
 	s.triggerAsyncHealthChecks(cfg)
@@ -304,11 +348,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	res := map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"database":  dbStats,
+		"database":  publicDatabaseStats(dbStats),
 		"compliance": mgr.GetComplianceSummary(),
 		"tor_proxy": map[string]interface{}{
 			"online": torOnline,
-			"url":    config.RedactURL(cfg.Network.TorProxyURL),
 		},
 		"ai": map[string]interface{}{
 			"configured":       true,
@@ -316,17 +359,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"general_llm": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    cfg.AI.Model,
-				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 			"japanese_specialized": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    "lab/plamo-3-translate",
-				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 			"local_llm": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    cfg.AI.Model,
-				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 		},
 		"sinks": map[string]interface{}{
@@ -1252,7 +1292,7 @@ func (s *Server) RunHarvestJob(triggerSource string) (bool, error) {
 		s.lastPipeRunAt = &now
 		if err != nil {
 			log.Printf("[%s] Harvest job completed with error: %v", triggerSource, err)
-			s.lastPipeSummary = map[string]string{"error": err.Error()}
+			s.lastPipeSummary = map[string]string{"error": "harvest failed; see server logs"}
 		} else {
 			log.Printf("[%s] Harvest job completed successfully", triggerSource)
 			s.lastPipeSummary = summary
