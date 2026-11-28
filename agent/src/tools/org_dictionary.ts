@@ -13,6 +13,7 @@ export const JAPAN_ORGANIZATION_ALIASES: Record<string, string> = {
   "kddi": "KDDI株式会社",
   "softbank": "ソフトバンク株式会社",
   "rakuten": "楽天グループ株式会社",
+  "rakuten group": "楽天グループ株式会社",
   "line": "LINEヤフー株式会社",
   "line yahoo": "LINEヤフー株式会社",
   "ly corporation": "LINEヤフー株式会社",
@@ -28,17 +29,26 @@ export const JAPAN_ORGANIZATION_ALIASES: Record<string, string> = {
   "mitsui sumitomo insurance": "三井住友海上火災保険株式会社",
   "aioi nissay dowa": "あいおいニッセイ同和損害保険株式会社",
   "sompo": "SOMPOホールディングス株式会社",
+  "sompo holdings": "SOMPOホールディングス株式会社",
   "tokio marine": "東京海上日動火災保険株式会社",
   "mufg": "株式会社三菱UFJフィナンシャル・グループ",
+  "mitsubishi ufj financial group": "株式会社三菱UFJフィナンシャル・グループ",
   "smbc": "株式会社三井住友フィナンシャルグループ",
+  "sumitomo mitsui financial group": "株式会社三井住友フィナンシャルグループ",
   "mizuho": "株式会社みずほフィナンシャルグループ",
+  "mizuho financial group": "株式会社みずほフィナンシャルグループ",
 
   // Manufacturing, Auto & Electronics
   "toyota": "トヨタ自動車株式会社",
+  "toyota motor": "トヨタ自動車株式会社",
   "honda": "本田技研工業株式会社",
+  "honda motor": "本田技研工業株式会社",
   "nissan": "日産自動車株式会社",
+  "nissan motor": "日産自動車株式会社",
   "sony": "ソニーグループ株式会社",
+  "sony group": "ソニーグループ株式会社",
   "panasonic": "パナソニック ホールディングス株式会社",
+  "panasonic holdings": "パナソニック ホールディングス株式会社",
   "hitachi": "株式会社日立製作所",
   "mitsubishi electric": "三菱電機株式会社",
   "fujitsu": "富士通株式会社",
@@ -51,7 +61,9 @@ export const JAPAN_ORGANIZATION_ALIASES: Record<string, string> = {
   "tepco": "東京電力ホールディングス株式会社",
   "kepco": "関西電力株式会社",
   "ana": "全日本空輸株式会社 (ANA)",
+  "all nippon airways": "全日本空輸株式会社 (ANA)",
   "jal": "日本航空株式会社 (JAL)",
+  "japan airlines": "日本航空株式会社 (JAL)",
   "jr east": "東日本旅客鉄道株式会社 (JR東日本)",
   "jr west": "西日本旅客鉄道株式会社 (JR西日本)",
   "digital agency": "デジタル庁"
@@ -116,20 +128,31 @@ export function isDefensiveOrAdvisoryOrg(rawName: string): boolean {
   return /\bjpcert\b/.test(clean);
 }
 
+// Legal-form words that do not change which organization a name denotes. "Group" and "Holdings"
+// are deliberately absent: they often name a different legal entity, so they need explicit aliases.
+const LEGAL_SUFFIX = /\s+(?:co|company|corp|corporation|inc|incorporated|ltd|limited|kk|plc|llc)$/;
+
 /**
- * Normalizes query string and resolves known Japanese entity names.
+ * Resolves a name to a known Japanese organization. The whole name must equal an alias, apart
+ * from punctuation, a trailing parenthetical and legal-form suffixes; partial matches would map
+ * unrelated names (e.g. "... Line") to Japanese companies.
  */
 export function lookupJapanOrgAlias(rawName: string): string | null {
-  if (!rawName) return null;
-  const clean = rawName.trim().toLowerCase().replace(/[\r\n\t]+/g, " ");
-  if (JAPAN_ORGANIZATION_ALIASES[clean]) {
-    return JAPAN_ORGANIZATION_ALIASES[clean];
-  }
-  for (const [key, val] of Object.entries(JAPAN_ORGANIZATION_ALIASES)) {
-    if (clean === key || clean.startsWith(key + " ") || clean.endsWith(" " + key)) {
-      return val;
+  let name = normalizeOrgKey(rawName)
+    .replace(/\s*\([^()]*\)$/, "")
+    .replace(/\./g, "")
+    .replace(/,/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^the /, "");
+
+  while (name) {
+    if (Object.hasOwn(JAPAN_ORGANIZATION_ALIASES, name)) {
+      return JAPAN_ORGANIZATION_ALIASES[name];
     }
+    const shorter = name.replace(LEGAL_SUFFIX, "");
+    if (shorter === name) break;
+    name = shorter;
   }
   return null;
 }
-

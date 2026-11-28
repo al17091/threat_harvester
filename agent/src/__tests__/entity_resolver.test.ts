@@ -29,6 +29,40 @@ describe("org dictionary (defect 4)", () => {
   });
 });
 
+describe("lookupJapanOrgAlias boundaries", () => {
+  it("rejects unrelated names that merely contain an alias", () => {
+    for (const name of [
+      "Delta Line", "Maersk Line", "Line Dynamics", "Red Line Group", "Santa Ana", "Ana Maria Foundation",
+      "Canon City School District", "Olympus Medical Staffing", "Honda of Ruritania Dealers",
+      "SoftBank Group", "Sony Pictures", "NEC Laboratories Europe", "Group Docomo",
+      "constructor", "__proto__", ""
+    ]) {
+      expect(lookupJapanOrgAlias(name), name).toBeNull();
+    }
+  });
+
+  it("matches aliases exactly, ignoring punctuation and legal suffixes", () => {
+    const cases: Array<[string, string]> = [
+      ["LINE", "LINEヤフー株式会社"],
+      ["Line Corporation", "LINEヤフー株式会社"],
+      ["LY Corporation", "LINEヤフー株式会社"],
+      ["Toyota Motor Corporation", "トヨタ自動車株式会社"],
+      ["Honda Motor Co., Ltd.", "本田技研工業株式会社"],
+      ["The Sony Group Corp.", "ソニーグループ株式会社"],
+      ["Canon Inc.", "キヤノン株式会社"],
+      ["Hitachi, Ltd.", "株式会社日立製作所"],
+      ["Fujitsu Limited", "富士通株式会社"],
+      ["NTT (Nippon Telegraph and Telephone)", "日本電信電話株式会社 (NTT)"],
+      ["  ntt   docomo ", "株式会社NTTドコモ"],
+      ["Japan Airlines Co., Ltd.", "日本航空株式会社 (JAL)"],
+      ["MS&AD", "MS&ADインシュアランスグループホールディングス株式会社"]
+    ];
+    for (const [name, expected] of cases) {
+      expect(lookupJapanOrgAlias(name), name).toBe(expected);
+    }
+  });
+});
+
 describe("resolveJapaneseEntity", () => {
   it("never resolves defensive orgs and never calls search for them", async () => {
     const search = vi.fn(async () => "株式会社なにか");
