@@ -6,9 +6,9 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 ---
 
 ## Current Status
-- **Current Version**: `v0.2.2`
-- **Current Phase**: Phase 11 Completed (Remediate Information Sources & Enable Direct Web Content Fetching) / Planning Phase 8-B (Strict Security Hardening & CSP)
-- **Last Updated**: 2026-11-08
+- **Current Version**: `v0.2.6-rc.1` (Staging) / `v0.2.5` (Production)
+- **Current Phase**: Phase 8-B (Strict Security Hardening & CSP) implemented / Pending Staging verification and OWASP ZAP baseline scan
+- **Last Updated**: 2026-11-27
 
 ---
 
@@ -97,22 +97,21 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
 - [x] **Web (`web/`) Node.js Testing**:
   - Built unit tests for Next.js path resolution and basePath routing (6/6 passing).
 
-### Phase 8: Strict Security Hardening & CSP Implementation (Scheduled: Next Week)
-- [ ] **Strict Content Security Policy (CSP) Implementation (`web/`)**:
-  - Configure strict CSP in `web/next.config.mjs` (or custom server / middleware):
-    - Strict `script-src` and `style-src` (evaluate nonce / strict-dynamic vs hash-based enforcement for Next.js and Tailwind CSS; minimize or eliminate unsafe directives).
-    - Restrict `default-src 'self'`, `connect-src 'self'`, `img-src 'self' data:`, `font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`.
-  - Add baseline defense-in-depth headers:
-    - `Cross-Origin-Opener-Policy: same-origin`
-    - `Cross-Origin-Resource-Policy: same-origin`
-    - `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`
-    - `X-Content-Type-Options: nosniff`
-    - `X-Frame-Options: DENY`
-- [ ] **Subpath & Reverse-Proxy Compatibility Verification**:
-  - Verify that strict CSP operates cleanly under `/threat` subpath prefix behind Traefik and CloudFront.
-  - Test bilingual language toggling (`/en`, `/ja`), STIX 2.1 bundle export, RSS feeds (`/rss`), and dark mode theme switching without CSP console violations.
+### Phase 8-B: Strict Security Hardening & CSP Implementation
+- [x] **Strict Content Security Policy (CSP) Implementation (`web/`)**:
+  - Per-request nonce with `strict-dynamic` applied by the custom server (`web/server-lib/`); no `unsafe-inline` or `unsafe-eval` in production.
+  - `style-src 'self'`, with custom 404 and global error pages replacing the inline-styled Next.js defaults.
+  - Baseline headers (COOP, CORP, `Permissions-Policy`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`).
+  - HTML/RSC served `private, no-store`; `/_next/static` stays immutable.
+  - Subpath prefixes strictly validated, closing reflected XSS through the request path and `X-Forwarded-Prefix`.
+- [x] **Local Subpath & CSP Verification**:
+  - Headless Chromium run against the production image (root and `/threat`): language toggle, search, pagination, incident detail, and admin tabs with no CSP violations.
+- [ ] **Live Subpath & Reverse-Proxy Verification**:
+  - Verify `/threat` behind Traefik and CloudFront on Staging, including RSS feeds (`/rss`) with the real API backend.
+- [x] **Agent Entity Resolver Hardening (`agent/`)**:
+  - SearXNG fallback excludes publisher boilerplate and requires the legal name to be tied to the queried entity.
 - [ ] **Automated Security Scan Verification**:
-  - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions.
+  - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions (not yet executed).
 
 ### Phase 9: Multi-Tier Caching & Feed Performance Optimization (`v0.2.0-rc.3`)
 - [x] **Tier 1: Client-Side In-Memory Feed Cache (`IncidentDashboard.tsx`)**:
