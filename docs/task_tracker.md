@@ -110,6 +110,13 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Verify `/threat` behind Traefik and CloudFront on Staging, including RSS feeds (`/rss`) with the real API backend.
 - [x] **Agent Entity Resolver Hardening (`agent/`)**:
   - SearXNG fallback excludes publisher boilerplate and requires the legal name to be tied to the queried entity.
+- [x] **Admin Session Hardening (`web/`)**:
+  - Static `admin_session=authenticated` cookie replaced with expiring (12h) HMAC-signed, `HttpOnly`, `SameSite=Strict` session tokens.
+  - Hardcoded default admin password removed from the app, Helm chart, Compose file, and `.env.example`; login is disabled while `ADMIN_PASSWORD` is unset.
+  - API proxy denies by default (public read allowlist, canonical path validation, browser cookies not forwarded to the backend).
+- [ ] **Backend API Hardening (`api/`)**:
+  - Mask webhook URLs and the Notion API key in `GET /api/config`; add authentication or network restrictions for the Go API.
+- [ ] **Login Rate Limiting (`web/` or ingress)**.
 - [ ] **Automated Security Scan Verification**:
   - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions (not yet executed).
 
