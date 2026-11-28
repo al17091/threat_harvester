@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { SESSION_COOKIE, verifySessionToken } from "../../security/adminAuth";
+import { canonicalApiPath, isPublicApiRequest } from "../../security/apiPolicy";
 
 export const dynamic = "force-dynamic";
 
@@ -11,20 +13,16 @@ async function handleProxy(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const resolvedParams = await params;
-  const path = resolvedParams.path ? resolvedParams.path.join("/") : "";
+  const path = canonicalApiPath(resolvedParams.path ?? []);
+  if (path === null) {
+    return NextResponse.json({ error: "Invalid API path" }, { status: 400 });
+  }
   const search = req.nextUrl.search;
   const targetUrl = `${getBackendUrl()}/api/${path}${search}`;
 
-  // Protect mutating requests and admin-only endpoints when deployed publicly
-  const isReadMethod = req.method === "GET" || req.method === "HEAD";
-  const isAdminOnlyGet =
-    path.startsWith("config/export") ||
-    path.startsWith("config/raw") ||
-    path.startsWith("pipeline/");
-
-  if (!isReadMethod || isAdminOnlyGet) {
-    const session = req.cookies.get("admin_session")?.value;
-    if (session !== "authenticated") {
+  // Deny by default: only the listed read endpoints are available without an admin session
+  if (!isPublicApiRequest(req.method, path)) {
+    if (!verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value)) {
       return NextResponse.json(
         { error: "Unauthorized: Administrator authentication required" },
         { status: 401 }
@@ -34,6 +32,8 @@ async function handleProxy(
 
   const headers = new Headers(req.headers);
   headers.delete("host");
+  // The backend does not use browser credentials, so the session token stays in this service
+  headers.delete("cookie");
 
   try {
     const init: RequestInit = {

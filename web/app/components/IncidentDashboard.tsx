@@ -1065,9 +1065,18 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
     }
   };
 
+  // Configuration is only readable with an administrator session
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchConfig();
+    } else {
+      setConfig(null);
+    }
+  }, [isAdminAuthenticated, currentLang, activeTab]);
+
   // Live SSE listener for real-time pipeline stage progress and backlog updates
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin || !isAdminAuthenticated) return;
     let es: EventSource | null = null;
     try {
       es = new EventSource(withBasePath("/api/pipeline/stream", pathname));
@@ -1101,7 +1110,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
         es.close();
       }
     };
-  }, [pathname, isAdmin]);
+  }, [pathname, isAdmin, isAdminAuthenticated]);
 
   const fetchConfig = async () => {
     try {
@@ -1214,7 +1223,6 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
   useEffect(() => {
     incidentsCacheRef.current.clear();
     fetchStatus();
-    fetchConfig();
     fetchEntityStats();
     if (!isAdmin || activeTab === "incidents") {
       fetchIncidents(1, pageSize);
