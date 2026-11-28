@@ -35,6 +35,8 @@ spec:
               value: "http://{{ include "threat-harvester.fullname" . }}-api:{{ (index (.Values.api | default dict) "service" | default dict).port | default (index (.Values.backend | default dict) "service" | default dict).port | default 8000 }}"
             - name: BASE_PATH
               value: {{ .Values.dashboard.basePath | default "/threat" | quote }}
+            - name: TRUSTED_PROXY_HOPS
+              value: {{ .Values.dashboard.trustedProxyHops | default 0 | quote }}
           envFrom:
             - secretRef:
                 name: {{ include "threat-harvester.secretName" . }}

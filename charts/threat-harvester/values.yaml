@@ -92,6 +92,9 @@ dashboard:
   enabled: true
   replicas: 1
   basePath: "/threat"
+  # Number of reverse proxies that append to X-Forwarded-For in front of the dashboard, used to
+  # identify clients for login rate limiting. 0 trusts no forwarded address
+  trustedProxyHops: 1
   image:
     repository: ghcr.io/al17091/threat_harvester
     tag: "web-0.1.2"
@@ -148,6 +151,9 @@ secrets:
   # Optional signing key for admin sessions (32+ random characters). When empty, a per-process
   # key is generated, so sessions end on restart; set it when running multiple dashboard replicas
   sessionSecret: ""
+  # Service-to-service token (32+ characters) shared by the dashboard and the API. While empty,
+  # the API rejects every protected (admin) request
+  internalApiToken: ""
   aiApiKey: ""
   geminiApiKey: ""
   discordWebhookUrl: ""
