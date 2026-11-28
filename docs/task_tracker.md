@@ -114,8 +114,11 @@ Status tracking and milestone roadmap for the **Threat Harvester** project.
   - Static `admin_session=authenticated` cookie replaced with expiring (12h) HMAC-signed, `HttpOnly`, `SameSite=Strict` session tokens.
   - Hardcoded default admin password removed from the app, Helm chart, Compose file, and `.env.example`; login is disabled while `ADMIN_PASSWORD` is unset.
   - API proxy denies by default (public read allowlist, canonical path validation, browser cookies not forwarded to the backend).
-- [ ] **Backend API Hardening (`api/`)**:
-  - Mask webhook URLs and the Notion API key in `GET /api/config`; add authentication or network restrictions for the Go API.
+- [x] **Backend API Credential Redaction (`api/`)**:
+  - Removed the unmasked database URL from `GET /api/status`; redacted credentials in status, config, and raw config responses.
+  - Configuration export is masked unless `mask_secrets=false` is passed.
+- [ ] **Backend API Access Control (`api/`)**:
+  - Add authentication or network restrictions for the Go API and narrow its CORS policy.
 - [ ] **Login Rate Limiting (`web/` or ingress)**.
 - [ ] **Automated Security Scan Verification**:
   - Validate against OWASP ZAP baseline scan rules to ensure zero alert regressions (not yet executed).
