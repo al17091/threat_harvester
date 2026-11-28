@@ -1,4 +1,25 @@
-import { resolveJapaneseEntity } from "./tools/entity_resolver.js";
+import { buildExcerpt } from "./context/excerpt.js";
+import {
+  applyAdvisoryCap,
+  applyRetrospectiveDemotion,
+  clampSeverityForRelevance,
+  normalizeJapanRelevance,
+  normalizeSeverity,
+} from "./guardrails/rules.js";
+import {
+  cleanAffectedProducts,
+  cleanVictimOrgs,
+  reconcileCves,
+  sanitizeThreatActors,
+} from "./guardrails/sanitizer.js";
+import {
+  cleanIncidentTitle,
+  isNoisyTitleEn,
+  isNoisyTitleJa,
+  synthesizeTitleEn,
+  synthesizeTitleJa,
+} from "./guardrails/title.js";
+import { EntityResolutionResult, resolveJapaneseEntity } from "./tools/entity_resolver.js";
 import { PLaMoTranslator } from "./translator/plamo.js";
 import { ThreatItem, EnrichedThreat } from "./types.js";
 import { request } from "undici";
@@ -13,65 +34,16 @@ export interface AgentConfig {
   extractorModel?: string;
 }
 
-/**
- * Autonomous CTI Agent orchestrating extraction with General LLM,
- * entity resolution tools, and translation with Japanese Specialized Model.
- */
-function cleanIncidentTitle(rawTitle: string): string {
-  if (!rawTitle) return "";
-  let t = rawTitle.trim();
-  // Strip X / Twitter quote prefix: e.g. 'Someone on X: "..."', 'Someone (@handle) on X: "..."'
-  t = t.replace(/^.+?(\s+on\s+X:\s*["“]?|\s*\(@[^\)]+\)\s+on\s+X:\s*["“]?)/i, "");
-  // Strip trailing quote and / X
-  t = t.replace(/["”]?\s*(\/\s*X)?$/i, "");
-  // Strip news media suffixes: e.g. ' - 日本経済新聞', ' | NHKニュース', ' (毎日新聞)', ': Security NEXT'
-  t = t.replace(/\s*[-|｜]\s*[\w\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef\u4e00-\u9faf\s]+(ニュース|新聞|オンライン|ブログ|Media|NEXT).*$/i, "");
-  t = t.replace(/\s*\([\w\u3000-\u303f\u3040-\u309f\u30a0-\u30ff\uff00-\uffef\u4e00-\u9faf\s]+(ニュース|新聞|オンライン)\)$/i, "");
-  // Strip sensational clickbait prefixes: '【速報】', '【独自】', '【緊急】'
-  t = t.replace(/^【(速報|独自|緊急|注目|重要|注目記事)】\s*/g, "");
-  t = t.replace(/^["'“”]/, "").replace(/["'“”]$/, "").trim();
-  return t;
+export type ChatMessage = { role: string; content: string };
+
+/** External collaborators, injectable for offline tests. */
+export interface AgentDeps {
+  callLLM: (messages: ChatMessage[]) => Promise<string>;
+  translate: (text: string, glossary: Record<string, string>) => Promise<string>;
+  resolveEntity: (name: string) => Promise<EntityResolutionResult>;
 }
 
-export class CTIAgentService {
-  private generalLlmEndpoint: string;
-  private generalLlmModel: string;
-  private maxLoopTurns: number;
-  private translator: PLaMoTranslator;
-
-  constructor(config?: AgentConfig) {
-    this.generalLlmEndpoint =
-      config?.generalLlmEndpoint ||
-      config?.ollamaEndpoint ||
-      process.env.GENERAL_LLM_ENDPOINT ||
-      process.env.LITELLM_ENDPOINT ||
-      "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions";
-
-    this.generalLlmModel =
-      config?.generalLlmModel ||
-      config?.extractorModel ||
-      process.env.GENERAL_LLM_MODEL ||
-      process.env.LITELLM_MODEL ||
-      "lab/qwen2.5-3b-instruct";
-
-    const envTurns = process.env.AGENT_MAX_LOOP_TURNS ? parseInt(process.env.AGENT_MAX_LOOP_TURNS, 10) : 1;
-    this.maxLoopTurns = config?.maxLoopTurns || envTurns;
-    this.translator = new PLaMoTranslator({
-      plamoBaseUrl:
-        config?.plamoBaseUrl ||
-        process.env.JAPANESE_SPECIALIZED_ENDPOINT ||
-        process.env.PLAMO_BASE_URL,
-    });
-  }
-
-  /**
-   * Main agent loop for analyzing a single threat item.
-   */
-  async analyze(item: ThreatItem): Promise<EnrichedThreat> {
-    const rawContent = (item.raw_content || item.summary || "").slice(0, 4000);
-
-    // Initial system prompt enforcing CTI rules & fact extraction
-    const systemPrompt = `You are an elite Cyber Threat Intelligence (CTI) analyst.
+export const SYSTEM_PROMPT = `You are an elite Cyber Threat Intelligence (CTI) analyst.
 Your objective: Extract strictly verified facts from the raw intelligence report and format as structured JSON.
 
 Evaluation Criteria:
@@ -136,234 +108,180 @@ Output pure JSON matching this exact schema:
   "affected_products": ["Affected software or hardware"]
 }`;
 
-    let currentMessages = [
-      { role: "system", content: systemPrompt },
+function resolveMaxLoopTurns(configured?: number): number {
+  const candidate = configured ?? (process.env.AGENT_MAX_LOOP_TURNS ? parseInt(process.env.AGENT_MAX_LOOP_TURNS, 10) : 1);
+  return Number.isFinite(candidate) && candidate >= 1 ? Math.floor(candidate) : 1;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Parses model output into a non-empty JSON object, tolerating Markdown code fences. */
+export function parseModelJSON(raw: string): Record<string, unknown> | null {
+  try {
+    const cleaned = (raw || "").replace(/```json\s*|\s*```/g, "").trim();
+    const obj = JSON.parse(cleaned);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj) || Object.keys(obj).length === 0) return null;
+    return obj as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Autonomous CTI agent: single-turn extraction with the general LLM, deterministic
+ * guardrails over the extracted keys, Japanese entity resolution, and PLaMo translation.
+ */
+export class CTIAgentService {
+  private generalLlmEndpoint: string;
+  private generalLlmModel: string;
+  private maxLoopTurns: number;
+  private deps: AgentDeps;
+
+  constructor(config?: AgentConfig, deps?: Partial<AgentDeps>) {
+    this.generalLlmEndpoint =
+      config?.generalLlmEndpoint ||
+      config?.ollamaEndpoint ||
+      process.env.GENERAL_LLM_ENDPOINT ||
+      process.env.LITELLM_ENDPOINT ||
+      "http://litellm-service.litellm.svc.cluster.local:4000/v1/chat/completions";
+
+    this.generalLlmModel =
+      config?.generalLlmModel ||
+      config?.extractorModel ||
+      process.env.GENERAL_LLM_MODEL ||
+      process.env.LITELLM_MODEL ||
+      "lab/qwen2.5-3b-instruct";
+
+    this.maxLoopTurns = resolveMaxLoopTurns(config?.maxLoopTurns);
+
+    const translator = new PLaMoTranslator({
+      plamoBaseUrl: config?.plamoBaseUrl || process.env.JAPANESE_SPECIALIZED_ENDPOINT || process.env.PLAMO_BASE_URL,
+    });
+    this.deps = {
+      callLLM: deps?.callLLM ?? ((messages) => this.callLLM(messages)),
+      translate: deps?.translate ?? ((text, glossary) => translator.translateToJapanese(text, glossary)),
+      resolveEntity: deps?.resolveEntity ?? ((name) => resolveJapaneseEntity(name)),
+    };
+  }
+
+  /**
+   * Runs extraction turns. Retries happen ONLY on JSON parse / empty-object failures;
+   * rule violations are fixed deterministically afterwards and never discard output.
+   */
+  private async extract(item: ThreatItem, excerpt: string): Promise<Record<string, unknown> | null> {
+    const messages: ChatMessage[] = [
+      { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
         content: `Source: ${item.source_type} (${item.source_name})
 Title: ${item.title}
 URL: ${item.url}
 Raw Content:
-${rawContent}`
-      }
+${excerpt}`,
+      },
     ];
 
-    let structuredOutput: any = null;
-
-    // === Agent Self-Correction & Verification Loop ===
     for (let turn = 1; turn <= this.maxLoopTurns; turn++) {
-      const responseText = await this.callLLM(currentMessages);
-      const parsed = this.cleanAndParseJSON(responseText);
-
-      if (!parsed) {
-        currentMessages.push({ role: "assistant", content: responseText });
-        currentMessages.push({
-          role: "user",
-          content: "Your response was not valid JSON. Please output strictly valid JSON matching the schema."
-        });
-        continue;
-      }
-
-      // Verification Step: Check rule violations
-      const violations: string[] = [];
-      if (parsed.japan_relevance !== "Direct" && parsed.severity === "Critical") {
-        violations.push("Violation: Severity cannot be 'Critical' when japan_relevance is not 'Direct'. Lower severity to 'High'.");
-      }
-
-      // Automatically demote historical/retrospective reviews and annual reports to Info
-      const titleLower = (item.title || "").toLowerCase();
-      if (
-        titleLower.includes("事例まとめ") ||
-        titleLower.includes("事案一覧") ||
-        titleLower.includes("事例一覧") ||
-        titleLower.includes("統合報告書") ||
-        titleLower.includes("年次報告") ||
-        titleLower.includes("annual report") ||
-        titleLower.includes("year in review") ||
-        titleLower.includes("case studies")
-      ) {
-        parsed.severity = "Info";
-      }
-
-      if (violations.length > 0) {
-        currentMessages.push({ role: "assistant", content: responseText });
-        currentMessages.push({
-          role: "user",
-          content: `Validation failed:\n${violations.join("\n")}\nPlease correct your output and return valid JSON.`
-        });
-        continue;
-      }
-
-      // All guardrails passed
-      structuredOutput = parsed;
-      break;
+      const responseText = await this.deps.callLLM(messages);
+      const parsed = parseModelJSON(responseText);
+      if (parsed) return parsed;
+      messages.push({ role: "assistant", content: responseText });
+      messages.push({
+        role: "user",
+        content: "Your response was not valid JSON. Please output strictly valid JSON matching the schema.",
+      });
     }
+    return null;
+  }
 
-    // Fallback if parsing failed across all turns
-    if (!structuredOutput) {
-      structuredOutput = {
-        severity: "Info",
-        japan_relevance: "None",
-        title: item.title,
-        summary: item.summary || item.title,
-        impact_analysis: "",
-        victim_orgs: [],
-        threat_actors: [],
-        attack_type: "None",
-        cves: [],
-        affected_products: []
-      };
+  /** Analyzes a single threat item. */
+  async analyze(item: ThreatItem): Promise<EnrichedThreat> {
+    const excerpt = buildExcerpt(item.raw_content || item.summary || "");
+    // Extraction failure falls back to the source title/summary; severity/relevance default to Info/None.
+    const extracted = (await this.extract(item, excerpt)) ?? { title: item.title, summary: item.summary || item.title };
+
+    // Full (non-excerpted) source text used for grounding and CVE rescue.
+    const sourceText = [item.title, item.summary, item.raw_content].filter(Boolean).join("\n");
+
+    // === Deterministic key sanitization ===
+    let japanRelevance = normalizeJapanRelevance(extracted.japan_relevance);
+    let severity = normalizeSeverity(extracted.severity);
+    const attackType = asString(extracted.attack_type) || "None";
+    const cves = reconcileCves(extracted.cves, sourceText);
+    const victimOrgs = cleanVictimOrgs(extracted.victim_orgs);
+    const affectedProducts = cleanAffectedProducts(extracted.affected_products);
+    let { threat_actors: threatActors, threat_actor_reasons: threatActorReasons } = sanitizeThreatActors(
+      extracted.threat_actors,
+      extracted.threat_actor_reasons,
+      sourceText
+    );
+
+    // === Deterministic severity rules ===
+    severity = applyRetrospectiveDemotion(severity, item.title);
+    const cap = applyAdvisoryCap(severity, { title: item.title, cves, attackType }, victimOrgs.length);
+    severity = cap.severity;
+    if (cap.stripActors) {
+      threatActors = [];
+      threatActorReasons = {};
     }
-
-    // === Post-Processing Guardrails ===
-    // 1. Sanitize victim_orgs: strip generic categories, products, or CVE IDs
-    const genericVictimPattern = /(?:中小企業|中小事業者|小規模事業者|中小|国内企業|日本企業|複数企業|各社|sme|small\s+and\s+medium|enterprise|organization|company|user|customer|vulnerability|advisory|patch|cve-\d+)/i;
-    const rawVictims: string[] = Array.isArray(structuredOutput.victim_orgs) ? structuredOutput.victim_orgs : [];
-    const validVictims = rawVictims.filter((v: string) => {
-      const trimmed = v.trim();
-      if (!trimmed || trimmed.length < 2) return false;
-      if (genericVictimPattern.test(trimmed)) return false;
-      if (/^cve-\d+/i.test(trimmed)) return false;
-      return true;
-    });
-
-    // 2. Sanitize threat_actors: strip reporters, security researchers, or social media handles
-    const invalidActorPattern = /(?:researcher|reporter|blogger|journalist|analyst|報告者|研究者|調査員|アナリスト|記者|投稿者|jpcert|ipa|trend\s*micro|kaspersky|google\s*tag|\bon\s+x\b|\bon\s+twitter\b|\bon\s+bluesky\b)/i;
-    let validActors: string[] = Array.isArray(structuredOutput.threat_actors) ? structuredOutput.threat_actors : [];
-    validActors = validActors.filter((a: string) => {
-      const trimmed = a.trim();
-      if (!trimmed || trimmed.length < 2) return false;
-      if (trimmed.startsWith("@")) return false; // Social media handles are never threat actors
-      if (invalidActorPattern.test(trimmed)) return false;
-      return true;
-    });
-
-    // 3. Vulnerability observation guardrail:
-    // If it's a vulnerability advisory or CVE observation without confirmed breached victim organizations,
-    // severity MUST be capped at Medium, and threat_actors MUST NOT be attached.
-    const isVulnerabilityAdvisory =
-      (structuredOutput.cves && structuredOutput.cves.length > 0) ||
-      structuredOutput.attack_type === "Vulnerability" ||
-      /vulnerability\s+advisory|脆弱性速報|脆弱性観測|cve-\d+/i.test(item.title);
-
-    if (isVulnerabilityAdvisory && validVictims.length === 0) {
-      if (structuredOutput.severity === "Critical" || structuredOutput.severity === "High") {
-        structuredOutput.severity = "Medium";
-      }
-      validActors = [];
-      structuredOutput.threat_actor_reasons = {};
-    }
-
-    structuredOutput.victim_orgs = validVictims;
-    structuredOutput.threat_actors = validActors;
+    severity = clampSeverityForRelevance(severity, japanRelevance);
 
     // === Tool Invocation: Japanese Entity Resolution ===
     const resolvedVictimOrgs: string[] = [];
     const entityGlossary: Record<string, string> = {};
-    const victimList: string[] = structuredOutput.victim_orgs;
-
-    for (const victim of victimList) {
-      const resolution = await resolveJapaneseEntity(victim);
-      if (resolution.officialNameJa) {
-        resolvedVictimOrgs.push(resolution.officialNameJa);
-        entityGlossary[victim] = resolution.officialNameJa;
-        // Elevate to Direct if official Japanese entity was confirmed
-        if (resolution.isJapaneseEntity && structuredOutput.japan_relevance === "None") {
-          structuredOutput.japan_relevance = "Direct";
-        }
-      } else {
-        resolvedVictimOrgs.push(victim);
-        entityGlossary[victim] = victim;
+    for (const victim of victimOrgs) {
+      const resolution = await this.deps.resolveEntity(victim);
+      const resolved = resolution.officialNameJa || victim;
+      if (!resolvedVictimOrgs.includes(resolved)) resolvedVictimOrgs.push(resolved);
+      entityGlossary[victim] = resolved;
+      // Only high-confidence resolutions (dictionary / native Japanese name) may elevate relevance.
+      if (resolution.isJapaneseEntity && resolution.confidence === "high" && japanRelevance === "None") {
+        japanRelevance = "Direct";
       }
     }
-
-    // Preserve threat actors, CVEs, and affected products in glossary
-    for (const actor of (structuredOutput.threat_actors || [])) {
-      if (actor && actor.trim()) entityGlossary[actor.trim()] = actor.trim();
-    }
-    for (const cve of (structuredOutput.cves || [])) {
-      if (cve && cve.trim()) entityGlossary[cve.trim()] = cve.trim();
-    }
-    for (const prod of (structuredOutput.affected_products || [])) {
-      if (prod && prod.trim()) entityGlossary[prod.trim()] = prod.trim();
+    for (const term of [...threatActors, ...cves, ...affectedProducts]) {
+      entityGlossary[term] = term;
     }
 
-    // === Final Stage: Title Resolution & PLaMo 3 Translation with Native PFML3 Glossary ===
-    let cleanTitleEn = cleanIncidentTitle(structuredOutput.title || "");
-    let cleanTitleJa = cleanIncidentTitle(structuredOutput.title_ja || "");
-
-    let titleJa = cleanTitleJa;
+    // === Titles & PLaMo 3 translation with glossary ===
+    const titleCtx = { victims: resolvedVictimOrgs, attackType, affectedProducts, cves };
+    let titleEn = cleanIncidentTitle(asString(extracted.title));
+    let titleJa = cleanIncidentTitle(asString(extracted.title_ja));
     if (!titleJa) {
-      if (cleanTitleEn) {
-        titleJa = await this.translator.translateToJapanese(cleanTitleEn, entityGlossary);
-      } else {
-        titleJa = cleanIncidentTitle(item.title);
-      }
+      titleJa = titleEn ? await this.deps.translate(titleEn, entityGlossary) : cleanIncidentTitle(item.title);
     }
+    if (isNoisyTitleJa(titleJa)) titleJa = synthesizeTitleJa(titleCtx) ?? titleJa;
+    if (isNoisyTitleEn(titleEn)) titleEn = synthesizeTitleEn(titleCtx) ?? titleEn;
 
-    // Synthesize fallback titles if noisy or still informal
-    if (!titleJa || /^(@|〜って|ってすごいな|信頼できなくな|なんか|結局|草|w{2,})/i.test(titleJa) || titleJa.length < 6) {
-      if (resolvedVictimOrgs.length > 0) {
-        if (structuredOutput.attack_type === "Ransomware") {
-          titleJa = `【ランサムウェア】${resolvedVictimOrgs[0]}に対する攻撃被害`;
-        } else if (structuredOutput.attack_type === "Data Breach") {
-          titleJa = `【不正アクセス】${resolvedVictimOrgs[0]}における情報流出事案`;
-        } else {
-          titleJa = `【サイバー攻撃】${resolvedVictimOrgs[0]}におけるセキュリティインシデント`;
-        }
-      } else if (structuredOutput.affected_products && structuredOutput.affected_products.length > 0) {
-        const cveStr = (structuredOutput.cves || []).length > 0 ? ` (${structuredOutput.cves.join(", ")})` : "";
-        titleJa = `【脆弱性】${structuredOutput.affected_products[0]}における脆弱性${cveStr}`;
-      } else if (structuredOutput.attack_type === "Vulnerability" && (structuredOutput.cves || []).length > 0) {
-        titleJa = `【脆弱性】${structuredOutput.cves.join(", ")}に関するセキュリティアドバイザリ`;
-      }
-    }
-
-    if (!cleanTitleEn || /^(@|someone on X)/i.test(cleanTitleEn) || cleanTitleEn.length < 6) {
-      if (resolvedVictimOrgs.length > 0) {
-        if (structuredOutput.attack_type === "Ransomware") {
-          cleanTitleEn = `[Ransomware] ${resolvedVictimOrgs[0]} Hit by Ransomware Attack`;
-        } else if (structuredOutput.attack_type === "Data Breach") {
-          cleanTitleEn = `[Data Breach] Unauthorized Access and Potential Data Breach at ${resolvedVictimOrgs[0]}`;
-        } else {
-          cleanTitleEn = `[Cyber Threat] Security Incident at ${resolvedVictimOrgs[0]}`;
-        }
-      } else if (structuredOutput.affected_products && structuredOutput.affected_products.length > 0) {
-        const cveStr = (structuredOutput.cves || []).length > 0 ? ` (${structuredOutput.cves.join(", ")})` : "";
-        cleanTitleEn = `[Vulnerability] Security Vulnerability in ${structuredOutput.affected_products[0]}${cveStr}`;
-      }
-    }
-
-    const summaryJa = await this.translator.translateToJapanese(
-      structuredOutput.summary || item.summary,
-      entityGlossary
-    );
-    const impactJa = structuredOutput.impact_analysis
-      ? await this.translator.translateToJapanese(structuredOutput.impact_analysis, entityGlossary)
-      : "";
+    const summary = asString(extracted.summary);
+    const impactAnalysis = asString(extracted.impact_analysis);
+    const summaryJa = await this.deps.translate(summary || item.summary, entityGlossary);
+    const impactJa = impactAnalysis ? await this.deps.translate(impactAnalysis, entityGlossary) : "";
 
     return {
       item_id: item.id,
-      severity: structuredOutput.severity || "Info",
-      japan_relevance: structuredOutput.japan_relevance || "None",
-      title: cleanTitleEn || structuredOutput.title || item.title,
-      summary: structuredOutput.summary || "",
-      impact_analysis: structuredOutput.impact_analysis || "",
+      severity,
+      japan_relevance: japanRelevance,
+      title: titleEn || item.title,
+      summary,
+      impact_analysis: impactAnalysis,
       title_ja: titleJa || item.title,
       summary_ja: summaryJa || item.summary || item.title,
       impact_analysis_ja: impactJa || "",
       victim_orgs: resolvedVictimOrgs,
-      threat_actors: structuredOutput.threat_actors || [],
-      threat_actor_reasons: structuredOutput.threat_actor_reasons || {},
-      attack_type: structuredOutput.attack_type || "None",
-      cves: structuredOutput.cves || [],
-      affected_products: structuredOutput.affected_products || [],
+      threat_actors: threatActors,
+      threat_actor_reasons: threatActorReasons,
+      attack_type: attackType,
+      cves,
+      affected_products: affectedProducts,
       recommended_actions_ja: [],
-      analyzed_at: new Date().toISOString()
+      analyzed_at: new Date().toISOString(),
     };
   }
 
-  private async callLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
+  private async callLLM(messages: ChatMessage[]): Promise<string> {
     try {
       const res = await request(this.generalLlmEndpoint, {
         method: "POST",
@@ -372,11 +290,11 @@ ${rawContent}`
         bodyTimeout: 300000,
         body: JSON.stringify({
           model: this.generalLlmModel,
-          messages: messages,
+          messages,
           temperature: 0.1,
           max_tokens: 1500,
-          response_format: { type: "json_object" }
-        })
+          response_format: { type: "json_object" },
+        }),
       });
 
       if (res.statusCode !== 200) {
@@ -390,18 +308,4 @@ ${rawContent}`
       return "{}";
     }
   }
-
-  private cleanAndParseJSON(raw: string): any | null {
-    try {
-      const cleaned = raw.replace(/```json\s*|\s*```/g, "").trim();
-      const obj = JSON.parse(cleaned);
-      if (!obj || typeof obj !== "object" || Object.keys(obj).length === 0) {
-        return null;
-      }
-      return obj;
-    } catch {
-      return null;
-    }
-  }
 }
-

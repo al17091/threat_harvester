@@ -52,14 +52,6 @@ spec:
             periodSeconds: 10
           resources:
             {{- toYaml .Values.dashboard.resources | nindent 12 }}
-          volumeMounts:
-            - name: server-script
-              mountPath: /app/server.js
-              subPath: server.js
-      volumes:
-        - name: server-script
-          configMap:
-            name: {{ include "threat-harvester.fullname" . }}-dashboard-script
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

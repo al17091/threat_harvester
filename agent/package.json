@@ -2,7 +2,7 @@
   "name": "threat-harvester-agent",
   "version": "0.1.0",
   "type": "module",
-  "description": "Autonomous CTI Agent powered by Pi Core and PLaMo 3 Translate",
+  "description": "Autonomous CTI extraction agent with deterministic guardrails and PLaMo 3 Translate",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -11,7 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^1.5.0",
     "fastify": "^5.2.0",
     "undici": "^8.12.4",
     "zod": "^4.6.7"

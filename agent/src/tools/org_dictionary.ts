@@ -54,12 +54,67 @@ export const JAPAN_ORGANIZATION_ALIASES: Record<string, string> = {
   "jal": "日本航空株式会社 (JAL)",
   "jr east": "東日本旅客鉄道株式会社 (JR東日本)",
   "jr west": "西日本旅客鉄道株式会社 (JR西日本)",
-  "jpcert": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
-  "jpcert/cc": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
-  "ipa": "独立行政法人情報処理推進機構 (IPA)",
-  "nisc": "内閣サイバーセキュリティセンター (NISC)",
   "digital agency": "デジタル庁"
 };
+
+/**
+ * Defensive, advisory, and law-enforcement organizations.
+ * These publish advisories or investigate incidents; they must never be treated as victims,
+ * resolved into victim_orgs, or used to elevate japan_relevance via victim resolution.
+ * Keys are normalized lowercase aliases; values are official display names.
+ */
+export const DEFENSIVE_OR_ADVISORY_ORGS: Record<string, string> = {
+  "jpcert": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
+  "jpcert/cc": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
+  "jpcert cc": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
+  "jpcertコーディネーションセンター": "一般社団法人JPCERTコーディネーションセンター (JPCERT/CC)",
+  "ipa": "独立行政法人情報処理推進機構 (IPA)",
+  "情報処理推進機構": "独立行政法人情報処理推進機構 (IPA)",
+  "nisc": "内閣サイバーセキュリティセンター (NISC)",
+  "内閣サイバーセキュリティセンター": "内閣サイバーセキュリティセンター (NISC)",
+  "国家サイバー統括室": "国家サイバー統括室",
+  "jvn": "Japan Vulnerability Notes (JVN)",
+  "cisa": "Cybersecurity and Infrastructure Security Agency (CISA)",
+  "us-cert": "US-CERT",
+  "fbi": "Federal Bureau of Investigation (FBI)",
+  "nsa": "National Security Agency (NSA)",
+  "ncsc": "National Cyber Security Centre (NCSC)",
+  "enisa": "European Union Agency for Cybersecurity (ENISA)",
+  "europol": "Europol",
+  "interpol": "Interpol",
+  "cert-eu": "CERT-EU",
+  "acsc": "Australian Cyber Security Centre (ACSC)",
+  "bsi": "Bundesamt für Sicherheit in der Informationstechnik (BSI)",
+};
+
+function normalizeOrgKey(rawName: string): string {
+  return (rawName || "")
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/^["'\[\]「」『』]+|["'\[\]「」『』]+$/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Returns true when the name denotes a defensive/advisory organization, including
+ * forms such as "JPCERT/CC", "IPA (Information-technology Promotion Agency)" or
+ * "一般社団法人JPCERTコーディネーションセンター".
+ */
+export function isDefensiveOrAdvisoryOrg(rawName: string): boolean {
+  const clean = normalizeOrgKey(rawName);
+  if (!clean) return false;
+  if (DEFENSIVE_OR_ADVISORY_ORGS[clean]) return true;
+  // Strip a trailing parenthetical alias, e.g. "IPA (Information-technology Promotion Agency)".
+  const head = clean.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (head && DEFENSIVE_OR_ADVISORY_ORGS[head]) return true;
+  for (const [key, official] of Object.entries(DEFENSIVE_OR_ADVISORY_ORGS)) {
+    if (clean === official.toLowerCase()) return true;
+    // Japanese keys are distinctive enough for substring matching (e.g. "一般社団法人...").
+    if (/[^\x00-\x7f]/.test(key) && clean.includes(key)) return true;
+  }
+  return /\bjpcert\b/.test(clean);
+}
 
 /**
  * Normalizes query string and resolves known Japanese entity names.

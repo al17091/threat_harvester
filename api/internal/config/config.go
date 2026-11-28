@@ -617,55 +617,18 @@ func (s *SettingsManager) SetConfig(cfg AppConfig) {
 	s.Config = cfg
 }
 
+// ToSafeMap returns the configuration with all credentials redacted.
 func (s *SettingsManager) ToSafeMap() map[string]interface{} {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	data, _ := yaml.Marshal(s.Config)
+	data, _ := yaml.Marshal(s.GetConfig().Redacted())
 	var m map[string]interface{}
 	_ = yaml.Unmarshal(data, &m)
-
-	if ai, ok := m["ai"].(map[string]interface{}); ok {
-		if k, ok := ai["gemini_api_key"].(string); ok && len(k) > 0 {
-			if len(k) > 8 {
-				ai["gemini_api_key"] = k[:4] + "..." + k[len(k)-4:]
-			} else {
-				ai["gemini_api_key"] = "***"
-			}
-		}
-	}
-	if db, ok := m["database"].(map[string]interface{}); ok {
-		if p, ok := db["password"].(string); ok && len(p) > 0 {
-			db["password"] = "******"
-		}
-	}
 	return m
 }
 
 func (s *SettingsManager) ExportYAML(maskSecrets bool) string {
-	s.mu.RLock()
-	cfg := s.Config
-	s.mu.RUnlock()
-
+	cfg := s.GetConfig()
 	if maskSecrets {
-		if cfg.AI.GeminiAPIKey != "" {
-			cfg.AI.GeminiAPIKey = "********"
-		}
-		if cfg.Database.Password != "" {
-			cfg.Database.Password = "********"
-		}
-		if cfg.Sinks.Discord.WebhookURL != "" {
-			cfg.Sinks.Discord.WebhookURL = "https://...[masked]"
-		}
-		if cfg.Sinks.Slack.WebhookURL != "" {
-			cfg.Sinks.Slack.WebhookURL = "https://...[masked]"
-		}
-		if cfg.Sinks.GenericWebhook.WebhookURL != "" {
-			cfg.Sinks.GenericWebhook.WebhookURL = "https://...[masked]"
-		}
-		if cfg.Sinks.Notion.APIKey != "" {
-			cfg.Sinks.Notion.APIKey = "********"
-		}
+		cfg = cfg.Redacted()
 	}
 
 	data, err := yaml.Marshal(cfg)

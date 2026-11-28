@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 
+// Every page is rendered per request so that Next.js can stamp the CSP nonce on its scripts.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Threat Harvester - Japan Cyber Threat Intelligence Feeds Collector",
   description: "Automated Cyber Threat Intelligence monitoring platform specialized for Japan-targeted threats.",
