@@ -308,7 +308,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"compliance": mgr.GetComplianceSummary(),
 		"tor_proxy": map[string]interface{}{
 			"online": torOnline,
-			"url":    cfg.Network.TorProxyURL,
+			"url":    config.RedactURL(cfg.Network.TorProxyURL),
 		},
 		"ai": map[string]interface{}{
 			"configured":       true,
@@ -316,17 +316,17 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"general_llm": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    cfg.AI.Model,
-				"endpoint": cfg.AI.Endpoint,
+				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 			"japanese_specialized": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    "lab/plamo-3-translate",
-				"endpoint": cfg.AI.Endpoint,
+				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 			"local_llm": map[string]interface{}{
 				"online":   llmOnline,
 				"model":    cfg.AI.Model,
-				"endpoint": cfg.AI.Endpoint,
+				"endpoint": config.RedactURL(cfg.AI.Endpoint),
 			},
 		},
 		"sinks": map[string]interface{}{
@@ -993,12 +993,14 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, http.StatusOK, config.GetSettings().ToSafeMap())
 }
 
+// handleGetRawConfig keeps the legacy route, but credentials never leave the service as JSON.
 func (s *Server) handleGetRawConfig(w http.ResponseWriter, r *http.Request) {
-	jsonResponse(w, http.StatusOK, config.GetSettings().GetConfig())
+	jsonResponse(w, http.StatusOK, config.GetSettings().ToSafeMap())
 }
 
 func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
-	mask := r.URL.Query().Get("mask_secrets") == "true"
+	// Credentials are exported only when explicitly requested (backup / GitOps use).
+	mask := r.URL.Query().Get("mask_secrets") != "false"
 	yamlText := config.GetSettings().ExportYAML(mask)
 
 	w.Header().Set("Content-Type", "application/x-yaml")

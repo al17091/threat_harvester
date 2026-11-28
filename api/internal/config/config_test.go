@@ -182,7 +182,7 @@ func TestToSafeMapAndMasking(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ai section in safe map")
 	}
-	if geminiKey, ok := aiMap["gemini_api_key"].(string); !ok || !strings.Contains(geminiKey, "...") {
+	if geminiKey, ok := aiMap["gemini_api_key"].(string); !ok || geminiKey != RedactedSecret {
 		t.Errorf("expected masked gemini_api_key, got %v", geminiKey)
 	}
 
@@ -190,7 +190,7 @@ func TestToSafeMapAndMasking(t *testing.T) {
 	if !ok {
 		t.Fatal("expected database section in safe map")
 	}
-	if dbPass, ok := dbMap["password"].(string); !ok || dbPass != "******" {
+	if dbPass, ok := dbMap["password"].(string); !ok || dbPass != RedactedSecret {
 		t.Errorf("expected masked database password, got %v", dbPass)
 	}
 

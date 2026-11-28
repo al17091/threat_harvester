@@ -167,7 +167,6 @@ interface SystemStatus {
     japan_direct_items?: number;
     backend?: string;
     database_url?: string;
-    db_path?: string;
   };
   compliance?: {
     mode: string;
@@ -4097,7 +4096,7 @@ export default function IncidentDashboard({ lang = "en" }: IncidentDashboardProp
                       Database Engine ({status?.database?.backend === "postgresql" ? "PostgreSQL" : "SQLite"})
                     </div>
                     <div className="text-xs text-slate-400 mt-0.5 font-mono truncate max-w-sm">
-                      {status?.database?.database_url || status?.database?.db_path}
+                      {status?.database?.database_url}
                     </div>
                   </div>
                   <span className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">

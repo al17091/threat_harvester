@@ -16,6 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
+	"github.com/al17091/threat_harvester/api/internal/config"
 	"github.com/al17091/threat_harvester/api/internal/models"
 )
 
@@ -1030,16 +1031,14 @@ func (s *SQLStore) GetStats(ctx context.Context) (map[string]interface{}, error)
 		backendName = "postgresql"
 	}
 
-	maskedURL := s.maskURL(s.dbURL)
-
 	return map[string]interface{}{
 		"total_items":        total,
 		"total_incidents":    totalIncidents,
 		"notified_items":     notified,
 		"japan_direct_items": japanDirect,
 		"backend":            backendName,
-		"database_url":       maskedURL,
-		"db_path":            s.dbURL,
+		// Returned by the public status endpoint, so it must never carry credentials.
+		"database_url":       config.RedactURL(s.dbURL),
 	}, nil
 }
 
@@ -1073,11 +1072,6 @@ func (s *SQLStore) GetLatestHarvestTime(ctx context.Context) (*time.Time, error)
 	}
 
 	return nil, fmt.Errorf("unable to parse harvested_at timestamp: %s", maxHarvested.String)
-}
-
-func (s *SQLStore) maskURL(url string) string {
-	re := regexp.MustCompile(`:([^:@]+)@`)
-	return re.ReplaceAllString(url, ":****@")
 }
 
 func (s *SQLStore) buildHistoryConditions(f HistoryFilter) (string, []interface{}) {

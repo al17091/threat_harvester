@@ -237,9 +237,17 @@ func TestStorageItemsAndHistory(t *testing.T) {
 	if normURL2 == "" {
 		t.Errorf("Expected normalized postgres url")
 	}
-	masked := sqlStore.maskURL("postgres://user:supersecret@localhost:5432/db")
-	if masked == "postgres://user:supersecret@localhost:5432/db" {
-		t.Errorf("Expected masked url")
+	// 6. Stats are public, so they must not carry database credentials
+	sqlStore.dbURL = "postgres://user:supersecret@localhost:5432/db?sslmode=require"
+	stats, err := sqlStore.GetStats(ctx)
+	if err != nil {
+		t.Fatalf("GetStats failed: %v", err)
+	}
+	if got := stats["database_url"]; got != "postgres://localhost:5432/db" {
+		t.Errorf("Expected redacted database url, got %v", got)
+	}
+	if _, ok := stats["db_path"]; ok {
+		t.Errorf("Stats must not report db_path")
 	}
 }
 
